@@ -6,3 +6,8 @@ TODO.md
 __pycache__/
 *.so
 *.pyd
+
+# RL training artifacts
+logs/
+checkpoints/
+models/
