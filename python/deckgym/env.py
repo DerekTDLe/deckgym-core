@@ -20,16 +20,28 @@ class DeckGymEnv(gym.Env):
         - Board state: HP, energy, status for each Pokemon slot (8 slots total)
 
     Action space:
-        Discrete(50) - Canonical action indices:
+        Discrete(120) - Canonical action indices covering all SimpleAction variants:
         - 0: EndTurn
         - 1-2: Attack (index 0, 1)
         - 3-5: Retreat to bench position (1, 2, 3)
         - 6-9: Attach energy to position (0, 1, 2, 3)
-        - 10-19: Play Pokémon from hand
+        - 10-19: Place Pokémon from hand
         - 20-29: Evolve Pokémon from hand
         - 30-39: Play trainer from hand
         - 40-43: Use ability (position 0-3)
-        - 44-49: Reserved
+        - 44: DrawCard
+        - 45: Noop (decline optional action)
+        - 46-49: Activate bench Pokémon
+        - 50-53: AttachTool
+        - 54-57: Heal
+        - 58-61: DiscardFossil
+        - 62-65: AttachFromDiscard
+        - 66-75: CommunicatePokemon
+        - 76-85: ShufflePokemonIntoDeck
+        - 86-95: ShuffleOpponentSupporter
+        - 96-105: DiscardOpponentSupporter
+        - 106-115: DiscardOwnCard
+        - 116-119: Special actions (EeveeBag, MoveEnergy, etc.)
 
     Reward:
         +1.0 for winning, -1.0 for losing, 0.0 otherwise.
@@ -97,7 +109,14 @@ class DeckGymEnv(gym.Env):
             truncated: Always False (no time limit)
             info: Dict with action description
         """
-        reward, done, info_str = self.game.step_action(action)
+        try:
+            reward, done, info_str = self.game.step_action(action)
+        except ValueError:
+            # Invalid action (shouldn't happen with proper masking, but handle gracefully)
+            # Return current state with 0 reward and done=True to trigger reset
+            obs = np.array(self.game.get_obs(), dtype=np.float32)
+            return obs, 0.0, True, False, {"action": "invalid_action_forced_end"}
+        
         obs = np.array(self.game.get_obs(), dtype=np.float32)
         return obs, reward, done, False, {"action": info_str}
 
@@ -108,4 +127,11 @@ class DeckGymEnv(gym.Env):
         Returns:
             Boolean array where True = valid action
         """
-        return np.array(self.game.get_action_mask(), dtype=np.bool_)
+        mask = np.array(self.game.get_action_mask(), dtype=np.bool_)
+        
+        # Fallback: if no actions valid, force EndTurn (action 0) to continue
+        # This handles edge cases where the game is stuck
+        if not mask.any():
+            mask[0] = True  # EndTurn is always index 0
+        
+        return mask
