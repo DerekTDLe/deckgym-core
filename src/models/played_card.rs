@@ -85,7 +85,11 @@ impl PlayedCard {
     pub(crate) fn get_attacks(&self) -> &Vec<Attack> {
         match &self.card {
             Card::Pokemon(pokemon_card) => &pokemon_card.attacks,
-            _ => panic!("Unsupported playable card type"),
+            Card::Trainer(_) => {
+                // Fossils are Trainer cards placed on the field - they have no attacks
+                static EMPTY_ATTACKS: Vec<Attack> = Vec::new();
+                &EMPTY_ATTACKS
+            }
         }
     }
 
