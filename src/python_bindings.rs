@@ -697,6 +697,43 @@ impl PyGame {
         Ok(PyGame { game })
     }
 
+    /// Create a game from deck strings (faster than file I/O).
+    /// 
+    /// Deck strings should be in the same format as deck files:
+    /// ```
+    /// Energy: Electric
+    /// 2 Magnemite B1a 024
+    /// 2 Magneton A1 098
+    /// ...
+    /// ```
+    /// 
+    /// # Arguments
+    /// * `deck_a_str` - Deck string for player A
+    /// * `deck_b_str` - Deck string for player B
+    /// * `seed` - Optional random seed
+    #[staticmethod]
+    #[pyo3(signature = (deck_a_str, deck_b_str, seed=None))]
+    pub fn from_deck_strings(
+        deck_a_str: &str,
+        deck_b_str: &str,
+        seed: Option<u64>,
+    ) -> PyResult<Self> {
+        let deck_a = Deck::from_string(deck_a_str).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Failed to create deck A: {}", e))
+        })?;
+        let deck_b = Deck::from_string(deck_b_str).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Failed to create deck B: {}", e))
+        })?;
+
+        // Use default players (no bots, just the RL agent controls both)
+        let cli_players = fill_code_array(None);
+        let rust_players = create_players(deck_a, deck_b, cli_players);
+        let game_seed = seed.unwrap_or_else(rand::random::<u64>);
+        let game = Game::new(rust_players, game_seed);
+
+        Ok(PyGame { game })
+    }
+
     fn play(&mut self) -> Option<PyGameOutcome> {
         self.game.play().map(|outcome| outcome.into())
     }
