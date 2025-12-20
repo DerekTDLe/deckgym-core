@@ -51,15 +51,19 @@ pub enum PlayerCode {
 pub fn parse_player_code(s: &str) -> Result<PlayerCode, String> {
     let lower = s.to_ascii_lowercase();
 
+    // Handle 'et' and 'er' explicitly first since they start with 'e'
+    if lower == "et" {
+        return Ok(PlayerCode::ET);
+    }
+    if lower == "er" {
+        return Ok(PlayerCode::ER);
+    }
+
     // Check if it starts with 'e' followed by digits (e.g., e2, e4)
     if lower.starts_with('e') && lower.len() > 1 {
         let rest = &lower[1..];
         if let Ok(max_depth) = rest.parse::<usize>() {
             return Ok(PlayerCode::E { max_depth });
-        }
-        // If it starts with 'e' but not followed by valid number, check if it's 'er'
-        if lower == "er" {
-            return Ok(PlayerCode::ER);
         }
         return Err(format!("Invalid player code: {s}. Use 'e<number>' for ExpectiMiniMax with depth, e.g., 'e2', 'e5'"));
     }

@@ -107,12 +107,18 @@ impl State {
             .remaining_hp
     }
 
-    pub(crate) fn remove_card_from_hand(&mut self, current_player: usize, card: &Card) {
-        let index = self.hands[current_player]
-            .iter()
-            .position(|x| x == card)
-            .expect("Player hand should contain card to remove");
-        self.hands[current_player].swap_remove(index);
+    pub(crate) fn remove_card_from_hand(&mut self, current_player: usize, card: &Card) -> bool {
+        if let Some(index) = self.hands[current_player].iter().position(|x| x == card) {
+            self.hands[current_player].swap_remove(index);
+            true
+        } else {
+            // Card not found - may happen if action is stale or state desync
+            debug!(
+                "Warning: Card {:?} not found in player {} hand during removal",
+                card, current_player
+            );
+            false
+        }
     }
 
     pub(crate) fn discard_card_from_hand(&mut self, current_player: usize, card: &Card) {
