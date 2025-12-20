@@ -721,6 +721,85 @@ impl PyGame {
             state.is_game_over()
         )
     }
+
+    // --- RL Methods ---
+
+    /// Get the observation tensor for the current player.
+    /// Returns a flat list of floats representing the game state.
+    fn get_obs(&self) -> Vec<f32> {
+        let state = self.game.get_state_clone();
+        let perspective = state.current_player;
+        crate::rl::get_observation_tensor(&state, perspective)
+    }
+
+    /// Get the action mask for the current state.
+    /// Returns a list of booleans where True = valid action.
+    fn get_action_mask(&self) -> Vec<bool> {
+        let state = self.game.get_state_clone();
+        crate::rl::get_action_mask(&state)
+    }
+
+    /// Get the size of the observation vector.
+    #[staticmethod]
+    fn observation_size() -> usize {
+        crate::rl::OBSERVATION_SIZE
+    }
+
+    /// Get the size of the action space.
+    #[staticmethod]
+    fn action_space_size() -> usize {
+        crate::rl::ACTION_SPACE_SIZE
+    }
+
+    /// Step the game by action index.
+    /// Returns (reward, done, info_str)
+    fn step_action(&mut self, action_idx: usize) -> PyResult<(f32, bool, String)> {
+        let state = self.game.get_state_clone();
+        let indexed_actions = crate::rl::get_indexed_actions(&state);
+        
+        // Find the action with this index
+        let action = indexed_actions
+            .into_iter()
+            .find(|(idx, _)| *idx == action_idx)
+            .map(|(_, action)| action);
+        
+        match action {
+            Some(action) => {
+                self.game.apply_action(&action);
+                let new_state = self.game.get_state_clone();
+                
+                let done = new_state.is_game_over();
+                let reward = if done {
+                    match new_state.winner {
+                        Some(crate::state::GameOutcome::Win(winner)) => {
+                            if winner == state.current_player { 1.0 } else { -1.0 }
+                        }
+                        Some(crate::state::GameOutcome::Tie) => 0.0,
+                        None => 0.0,
+                    }
+                } else {
+                    0.0
+                };
+                
+                Ok((reward, done, format!("{}", action.action)))
+            }
+            None => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                format!("Invalid action index: {}. Valid indices: {:?}", 
+                    action_idx, 
+                    crate::rl::get_indexed_actions(&state).iter().map(|(i, _)| i).collect::<Vec<_>>())
+            ))
+        }
+    }
+
+    /// Check if the game is over.
+    fn is_game_over(&self) -> bool {
+        self.game.get_state_clone().is_game_over()
+    }
+
+    /// Get the current player (0 or 1).
+    fn current_player(&self) -> usize {
+        self.game.get_state_clone().current_player
+    }
 }
 
 /// Simulation results
