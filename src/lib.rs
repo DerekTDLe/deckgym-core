@@ -16,6 +16,7 @@ pub mod models;
 pub mod move_generation;
 pub mod optimize;
 pub mod players;
+pub mod rl;
 pub mod simulate;
 pub mod simulation_event_handler;
 pub mod state;
