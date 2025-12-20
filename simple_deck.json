@@ -1,5 +1,66 @@
 [
   {
+    "deck_id": 1,
+    "name": "Grass Expert Deck #1",
+    "energy_type": "Grass",
+    "cards": [
+      {
+        "name": "Nihilego",
+        "set": "A3a",
+        "number": "042",
+        "count": 2
+      },
+      {
+        "name": "Bulbasaur",
+        "set": "B1a",
+        "number": "001",
+        "count": 2
+      },
+      {
+        "name": "Ivysaur",
+        "set": "B1a",
+        "number": "002",
+        "count": 2
+      },
+      {
+        "name": "Mega Venusaur ex",
+        "set": "B1a",
+        "number": "004",
+        "count": 2
+      },
+      {
+        "name": "Sabrina",
+        "set": "A1",
+        "number": "225",
+        "count": 1
+      },
+      {
+        "name": "Leaf Cape",
+        "set": "A3",
+        "number": "147",
+        "count": 2
+      },
+      {
+        "name": "Lillie",
+        "set": "A3",
+        "number": "155",
+        "count": 1
+      },
+      {
+        "name": "Copycat",
+        "set": "B1",
+        "number": "225",
+        "count": 1
+      },
+      {
+        "name": "Quick-Grow Extract",
+        "set": "B1a",
+        "number": "067",
+        "count": 2
+      }
+    ]
+  },
+  {
     "deck_id": 2,
     "name": "Fire Expert Deck #2",
     "energy_type": "Fire",
