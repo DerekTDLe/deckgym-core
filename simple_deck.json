@@ -1,0 +1,1589 @@
+[
+  {
+    "deck_id": 2,
+    "name": "Fire Expert Deck #2",
+    "energy_type": "Fire",
+    "cards": [
+      {
+        "name": "Torkoal",
+        "set": "A3b",
+        "number": "010",
+        "count": 1
+      },
+      {
+        "name": "Entei ex",
+        "set": "A4a",
+        "number": "010",
+        "count": 2
+      },
+      {
+        "name": "Charmander",
+        "set": "B1a",
+        "number": "011",
+        "count": 2
+      },
+      {
+        "name": "Charmeleon",
+        "set": "B1a",
+        "number": "012",
+        "count": 2
+      },
+      {
+        "name": "Mega Charizard Y ex",
+        "set": "B1a",
+        "number": "014",
+        "count": 2
+      },
+      {
+        "name": "Sabrina",
+        "set": "A1",
+        "number": "225",
+        "count": 1
+      },
+      {
+        "name": "Leaf",
+        "set": "A1a",
+        "number": "068",
+        "count": 2
+      },
+      {
+        "name": "Giant Cape",
+        "set": "A2",
+        "number": "147",
+        "count": 1
+      },
+      {
+        "name": "Flame Patch",
+        "set": "B1",
+        "number": "217",
+        "count": 2
+      },
+      {
+        "name": "Copycat",
+        "set": "B1",
+        "number": "225",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "deck_id": 3,
+    "name": "Water Expert Deck #3",
+    "energy_type": "Water",
+    "cards": [
+      {
+        "name": "Vaporeon",
+        "set": "A1a",
+        "number": "019",
+        "count": 1
+      },
+      {
+        "name": "Eevee",
+        "set": "A1a",
+        "number": "061",
+        "count": 1
+      },
+      {
+        "name": "Manaphy",
+        "set": "A2",
+        "number": "050",
+        "count": 2
+      },
+      {
+        "name": "Squirtle",
+        "set": "B1a",
+        "number": "017",
+        "count": 2
+      },
+      {
+        "name": "Wartortle",
+        "set": "B1a",
+        "number": "018",
+        "count": 2
+      },
+      {
+        "name": "Mega Blastoise ex",
+        "set": "B1a",
+        "number": "020",
+        "count": 2
+      },
+      {
+        "name": "Misty",
+        "set": "A1",
+        "number": "220",
+        "count": 1
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 1
+      },
+      {
+        "name": "Rare Candy",
+        "set": "A3",
+        "number": "144",
+        "count": 1
+      },
+      {
+        "name": "Copycat",
+        "set": "B1",
+        "number": "225",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "deck_id": 5,
+    "name": "Fire Expert Deck #5",
+    "energy_type": "Fire",
+    "cards": [
+      {
+        "name": "Torkoal",
+        "set": "A3b",
+        "number": "010",
+        "count": 1
+      },
+      {
+        "name": "Entei ex",
+        "set": "A4a",
+        "number": "010",
+        "count": 2
+      },
+      {
+        "name": "Torchic",
+        "set": "B1",
+        "number": "033",
+        "count": 2
+      },
+      {
+        "name": "Combusken",
+        "set": "B1",
+        "number": "034",
+        "count": 1
+      },
+      {
+        "name": "Mega Blaziken ex",
+        "set": "B1",
+        "number": "036",
+        "count": 2
+      },
+      {
+        "name": "Sabrina",
+        "set": "A1",
+        "number": "225",
+        "count": 1
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 1
+      },
+      {
+        "name": "Rare Candy",
+        "set": "A3",
+        "number": "144",
+        "count": 2
+      },
+      {
+        "name": "Lillie",
+        "set": "A3",
+        "number": "155",
+        "count": 1
+      },
+      {
+        "name": "Flame Patch",
+        "set": "B1",
+        "number": "217",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 13,
+    "name": "Fire Expert Deck #13",
+    "energy_type": "Fire",
+    "cards": [
+      {
+        "name": "Magby",
+        "set": "A4",
+        "number": "032",
+        "count": 2
+      },
+      {
+        "name": "Charmander",
+        "set": "A4b",
+        "number": "055",
+        "count": 2
+      },
+      {
+        "name": "Charizard ex",
+        "set": "A4b",
+        "number": "059",
+        "count": 2
+      },
+      {
+        "name": "Moltres ex",
+        "set": "A4b",
+        "number": "067",
+        "count": 2
+      },
+      {
+        "name": "Elemental Switch",
+        "set": "A4b",
+        "number": "310",
+        "count": 2
+      },
+      {
+        "name": "Rare Candy",
+        "set": "A4b",
+        "number": "314",
+        "count": 2
+      },
+      {
+        "name": "Giant Cape",
+        "set": "A4b",
+        "number": "320",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A4b",
+        "number": "326",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "deck_id": 15,
+    "name": "Lightning Expert Deck #15",
+    "energy_type": "Lightning",
+    "cards": [
+      {
+        "name": "Pikachu",
+        "set": "A2a",
+        "number": "025",
+        "count": 2
+      },
+      {
+        "name": "Pichu",
+        "set": "A4",
+        "number": "066",
+        "count": 2
+      },
+      {
+        "name": "Alolan Raichu ex",
+        "set": "A4b",
+        "number": "130",
+        "count": 2
+      },
+      {
+        "name": "Pikachu ex",
+        "set": "A4b",
+        "number": "131",
+        "count": 2
+      },
+      {
+        "name": "Zeraora",
+        "set": "A4b",
+        "number": "149",
+        "count": 2
+      },
+      {
+        "name": "Elemental Switch",
+        "set": "A4b",
+        "number": "310",
+        "count": 1
+      },
+      {
+        "name": "Giant Cape",
+        "set": "A4b",
+        "number": "320",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A4b",
+        "number": "326",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "deck_id": 17,
+    "name": "Fighting Expert Deck #17",
+    "energy_type": "Fighting",
+    "cards": [
+      {
+        "name": "Tyrogue",
+        "set": "A4",
+        "number": "101",
+        "count": 2
+      },
+      {
+        "name": "Phanpy",
+        "set": "A4b",
+        "number": "200",
+        "count": 2
+      },
+      {
+        "name": "Donphan ex",
+        "set": "A4b",
+        "number": "202",
+        "count": 2
+      },
+      {
+        "name": "Riolu",
+        "set": "A4b",
+        "number": "210",
+        "count": 2
+      },
+      {
+        "name": "Lucario ex",
+        "set": "A4b",
+        "number": "214",
+        "count": 2
+      },
+      {
+        "name": "Rocky Helmet",
+        "set": "A4b",
+        "number": "322",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A4b",
+        "number": "326",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 22,
+    "name": "Fire Expert Deck #22",
+    "energy_type": "Fire",
+    "cards": [
+      {
+        "name": "Flareon ex",
+        "set": "A3b",
+        "number": "009",
+        "count": 2
+      },
+      {
+        "name": "Magby",
+        "set": "A4",
+        "number": "032",
+        "count": 2
+      },
+      {
+        "name": "Eevee",
+        "set": "A4",
+        "number": "134",
+        "count": 2
+      },
+      {
+        "name": "Entei ex",
+        "set": "A4a",
+        "number": "010",
+        "count": 2
+      },
+      {
+        "name": "Sabrina",
+        "set": "A1",
+        "number": "225",
+        "count": 1
+      },
+      {
+        "name": "Rocky Helmet",
+        "set": "A2",
+        "number": "148",
+        "count": 1
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 1
+      },
+      {
+        "name": "Red",
+        "set": "A2b",
+        "number": "071",
+        "count": 1
+      },
+      {
+        "name": "Eevee Bag",
+        "set": "A3b",
+        "number": "066",
+        "count": 2
+      },
+      {
+        "name": "Elemental Switch",
+        "set": "A4",
+        "number": "151",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "deck_id": 23,
+    "name": "Water Expert Deck #23",
+    "energy_type": "Water",
+    "cards": [
+      {
+        "name": "Suicune ex",
+        "set": "A4a",
+        "number": "020",
+        "count": 2
+      },
+      {
+        "name": "Feebas",
+        "set": "A4a",
+        "number": "021",
+        "count": 2
+      },
+      {
+        "name": "Milotic",
+        "set": "A4a",
+        "number": "022",
+        "count": 2
+      },
+      {
+        "name": "Mantyke",
+        "set": "A4a",
+        "number": "023",
+        "count": 2
+      },
+      {
+        "name": "Sabrina",
+        "set": "A1",
+        "number": "225",
+        "count": 1
+      },
+      {
+        "name": "Giant Cape",
+        "set": "A2",
+        "number": "147",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 1
+      },
+      {
+        "name": "Mars",
+        "set": "A2",
+        "number": "155",
+        "count": 1
+      },
+      {
+        "name": "Irida",
+        "set": "A2a",
+        "number": "072",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 24,
+    "name": "Lightning Expert Deck #24",
+    "energy_type": "Lightning",
+    "cards": [
+      {
+        "name": "Magnemite",
+        "set": "A1",
+        "number": "097",
+        "count": 2
+      },
+      {
+        "name": "Magneton",
+        "set": "A1",
+        "number": "098",
+        "count": 2
+      },
+      {
+        "name": "Pikachu ex",
+        "set": "A2b",
+        "number": "022",
+        "count": 1
+      },
+      {
+        "name": "Zeraora",
+        "set": "A3a",
+        "number": "021",
+        "count": 1
+      },
+      {
+        "name": "Pichu",
+        "set": "A4",
+        "number": "066",
+        "count": 1
+      },
+      {
+        "name": "Raikou ex",
+        "set": "A4a",
+        "number": "025",
+        "count": 2
+      },
+      {
+        "name": "Sabrina",
+        "set": "A1",
+        "number": "225",
+        "count": 1
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 1
+      },
+      {
+        "name": "Electrical Cord",
+        "set": "A3a",
+        "number": "065",
+        "count": 2
+      },
+      {
+        "name": "Elemental Switch",
+        "set": "A4",
+        "number": "151",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 31,
+    "name": "Psychic Expert Deck #31",
+    "energy_type": "Psychic",
+    "cards": [
+      {
+        "name": "Espeon",
+        "set": "A3b",
+        "number": "028",
+        "count": 1
+      },
+      {
+        "name": "Sylveon ex",
+        "set": "A3b",
+        "number": "034",
+        "count": 2
+      },
+      {
+        "name": "Eevee ex",
+        "set": "A3b",
+        "number": "056",
+        "count": 2
+      },
+      {
+        "name": "Espeon ex",
+        "set": "A4",
+        "number": "083",
+        "count": 2
+      },
+      {
+        "name": "Eevee",
+        "set": "A4",
+        "number": "134",
+        "count": 2
+      },
+      {
+        "name": "Sabrina",
+        "set": "A1",
+        "number": "225",
+        "count": 1
+      },
+      {
+        "name": "Giant Cape",
+        "set": "A2",
+        "number": "147",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 1
+      },
+      {
+        "name": "Eevee Bag",
+        "set": "A3b",
+        "number": "066",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 32,
+    "name": "Fighting Expert Deck #32",
+    "energy_type": "Fighting",
+    "cards": [
+      {
+        "name": "Lucario",
+        "set": "A2",
+        "number": "092",
+        "count": 2
+      },
+      {
+        "name": "Riolu",
+        "set": "A2b",
+        "number": "042",
+        "count": 2
+      },
+      {
+        "name": "Phanpy",
+        "set": "A4",
+        "number": "099",
+        "count": 2
+      },
+      {
+        "name": "Donphan ex",
+        "set": "A4",
+        "number": "100",
+        "count": 2
+      },
+      {
+        "name": "Tyrogue",
+        "set": "A4",
+        "number": "101",
+        "count": 1
+      },
+      {
+        "name": "Sabrina",
+        "set": "A1",
+        "number": "225",
+        "count": 1
+      },
+      {
+        "name": "Rocky Helmet",
+        "set": "A2",
+        "number": "148",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 1
+      },
+      {
+        "name": "Red",
+        "set": "A2b",
+        "number": "071",
+        "count": 1
+      },
+      {
+        "name": "Lyra",
+        "set": "A4",
+        "number": "157",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "deck_id": 36,
+    "name": "Fire Expert Deck #36",
+    "energy_type": "Fire",
+    "cards": [
+      {
+        "name": "Flareon",
+        "set": "A3b",
+        "number": "008",
+        "count": 2
+      },
+      {
+        "name": "Flareon ex",
+        "set": "A3b",
+        "number": "009",
+        "count": 2
+      },
+      {
+        "name": "Torkoal",
+        "set": "A3b",
+        "number": "010",
+        "count": 1
+      },
+      {
+        "name": "Eevee",
+        "set": "A3b",
+        "number": "055",
+        "count": 2
+      },
+      {
+        "name": "Eevee ex",
+        "set": "A3b",
+        "number": "056",
+        "count": 2
+      },
+      {
+        "name": "Leaf",
+        "set": "A1a",
+        "number": "068",
+        "count": 1
+      },
+      {
+        "name": "Rocky Helmet",
+        "set": "A2",
+        "number": "148",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 1
+      },
+      {
+        "name": "Red",
+        "set": "A2b",
+        "number": "071",
+        "count": 1
+      },
+      {
+        "name": "Eevee Bag",
+        "set": "A3b",
+        "number": "066",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 42,
+    "name": "Darkness Expert Deck #42",
+    "energy_type": "Darkness",
+    "cards": [
+      {
+        "name": "Nihilego",
+        "set": "A3a",
+        "number": "042",
+        "count": 2
+      },
+      {
+        "name": "Guzzlord ex",
+        "set": "A3a",
+        "number": "043",
+        "count": 2
+      },
+      {
+        "name": "Poipole",
+        "set": "A3a",
+        "number": "044",
+        "count": 2
+      },
+      {
+        "name": "Naganadel",
+        "set": "A3a",
+        "number": "045",
+        "count": 2
+      },
+      {
+        "name": "Celesteela",
+        "set": "A3a",
+        "number": "062",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 1
+      },
+      {
+        "name": "Iono",
+        "set": "A2b",
+        "number": "069",
+        "count": 1
+      },
+      {
+        "name": "Poison Barb",
+        "set": "A3",
+        "number": "146",
+        "count": 2
+      },
+      {
+        "name": "Lusamine",
+        "set": "A3a",
+        "number": "069",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 45,
+    "name": "Fire Expert Deck #45",
+    "energy_type": "Fire",
+    "cards": [
+      {
+        "name": "Moltres ex",
+        "set": "A1",
+        "number": "047",
+        "count": 2
+      },
+      {
+        "name": "Paldean Tauros",
+        "set": "A2b",
+        "number": "013",
+        "count": 1
+      },
+      {
+        "name": "Litten",
+        "set": "A3",
+        "number": "030",
+        "count": 2
+      },
+      {
+        "name": "Torracat",
+        "set": "A3",
+        "number": "032",
+        "count": 1
+      },
+      {
+        "name": "Incineroar ex",
+        "set": "A3",
+        "number": "033",
+        "count": 2
+      },
+      {
+        "name": "Leaf",
+        "set": "A1a",
+        "number": "068",
+        "count": 2
+      },
+      {
+        "name": "Rocky Helmet",
+        "set": "A2",
+        "number": "148",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 1
+      },
+      {
+        "name": "Red",
+        "set": "A2b",
+        "number": "071",
+        "count": 1
+      },
+      {
+        "name": "Rare Candy",
+        "set": "A3",
+        "number": "144",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 57,
+    "name": "Fighting Expert Deck #57",
+    "energy_type": "Fighting",
+    "cards": [
+      {
+        "name": "Hitmonlee",
+        "set": "A1",
+        "number": "154",
+        "count": 2
+      },
+      {
+        "name": "Kangaskhan",
+        "set": "A1",
+        "number": "203",
+        "count": 2
+      },
+      {
+        "name": "Riolu",
+        "set": "A2b",
+        "number": "042",
+        "count": 2
+      },
+      {
+        "name": "Lucario ex",
+        "set": "A2b",
+        "number": "043",
+        "count": 2
+      },
+      {
+        "name": "Giant Cape",
+        "set": "A2",
+        "number": "147",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 2
+      },
+      {
+        "name": "Pokemon Center Lady",
+        "set": "A2b",
+        "number": "070",
+        "count": 1
+      },
+      {
+        "name": "Red",
+        "set": "A2b",
+        "number": "071",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "deck_id": 59,
+    "name": "Metal Expert Deck #59",
+    "energy_type": "Metal",
+    "cards": [
+      {
+        "name": "Skarmory",
+        "set": "A2",
+        "number": "111",
+        "count": 2
+      },
+      {
+        "name": "Shaymin",
+        "set": "A2a",
+        "number": "069",
+        "count": 2
+      },
+      {
+        "name": "Tinkatink",
+        "set": "A2b",
+        "number": "052",
+        "count": 2
+      },
+      {
+        "name": "Tinkatuff",
+        "set": "A2b",
+        "number": "053",
+        "count": 2
+      },
+      {
+        "name": "Tinkaton ex",
+        "set": "A2b",
+        "number": "054",
+        "count": 2
+      },
+      {
+        "name": "Sabrina",
+        "set": "A1",
+        "number": "225",
+        "count": 1
+      },
+      {
+        "name": "Giant Cape",
+        "set": "A2",
+        "number": "147",
+        "count": 2
+      },
+      {
+        "name": "Rocky Helmet",
+        "set": "A2",
+        "number": "148",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "deck_id": 61,
+    "name": "Grass Expert Deck #61",
+    "energy_type": "Grass",
+    "cards": [
+      {
+        "name": "Eevee",
+        "set": "A1",
+        "number": "206",
+        "count": 2
+      },
+      {
+        "name": "Yanma",
+        "set": "A2",
+        "number": "006",
+        "count": 2
+      },
+      {
+        "name": "Yanmega ex",
+        "set": "A2",
+        "number": "007",
+        "count": 2
+      },
+      {
+        "name": "Leafeon ex",
+        "set": "A2a",
+        "number": "010",
+        "count": 2
+      },
+      {
+        "name": "Erika",
+        "set": "A1",
+        "number": "219",
+        "count": 2
+      },
+      {
+        "name": "Sabrina",
+        "set": "A1",
+        "number": "225",
+        "count": 1
+      },
+      {
+        "name": "Giant Cape",
+        "set": "A2",
+        "number": "147",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "deck_id": 65,
+    "name": "Fighting Expert Deck #65",
+    "energy_type": "Fighting",
+    "cards": [
+      {
+        "name": "Hitmonlee",
+        "set": "A1",
+        "number": "154",
+        "count": 2
+      },
+      {
+        "name": "Marshadow",
+        "set": "A1a",
+        "number": "047",
+        "count": 2
+      },
+      {
+        "name": "Gible",
+        "set": "A2a",
+        "number": "045",
+        "count": 2
+      },
+      {
+        "name": "Gabite",
+        "set": "A2a",
+        "number": "046",
+        "count": 2
+      },
+      {
+        "name": "Garchomp ex",
+        "set": "A2a",
+        "number": "047",
+        "count": 2
+      },
+      {
+        "name": "Giant Cape",
+        "set": "A2",
+        "number": "147",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 66,
+    "name": "Darkness Expert Deck #66",
+    "energy_type": "Darkness",
+    "cards": [
+      {
+        "name": "Golbat",
+        "set": "A1",
+        "number": "173",
+        "count": 2
+      },
+      {
+        "name": "Sneasel",
+        "set": "A2",
+        "number": "098",
+        "count": 2
+      },
+      {
+        "name": "Weavile ex",
+        "set": "A2",
+        "number": "099",
+        "count": 2
+      },
+      {
+        "name": "Zubat",
+        "set": "A2a",
+        "number": "048",
+        "count": 2
+      },
+      {
+        "name": "Crobat",
+        "set": "A2a",
+        "number": "050",
+        "count": 2
+      },
+      {
+        "name": "Arceus ex",
+        "set": "A2a",
+        "number": "071",
+        "count": 2
+      },
+      {
+        "name": "Leaf",
+        "set": "A1a",
+        "number": "068",
+        "count": 2
+      },
+      {
+        "name": "Rocky Helmet",
+        "set": "A2",
+        "number": "148",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 68,
+    "name": "Grass Expert Deck #68",
+    "energy_type": "Grass",
+    "cards": [
+      {
+        "name": "Exeggcute",
+        "set": "A1",
+        "number": "021",
+        "count": 2
+      },
+      {
+        "name": "Exeggutor ex",
+        "set": "A1",
+        "number": "023",
+        "count": 2
+      },
+      {
+        "name": "Kangaskhan",
+        "set": "A1",
+        "number": "203",
+        "count": 2
+      },
+      {
+        "name": "Yanma",
+        "set": "A2",
+        "number": "006",
+        "count": 2
+      },
+      {
+        "name": "Yanmega ex",
+        "set": "A2",
+        "number": "007",
+        "count": 2
+      },
+      {
+        "name": "Erika",
+        "set": "A1",
+        "number": "219",
+        "count": 2
+      },
+      {
+        "name": "Giant Cape",
+        "set": "A2",
+        "number": "147",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 69,
+    "name": "Fire Expert Deck #69",
+    "energy_type": "Fire",
+    "cards": [
+      {
+        "name": "Ponyta",
+        "set": "A1",
+        "number": "042",
+        "count": 2
+      },
+      {
+        "name": "Rapidash",
+        "set": "A1",
+        "number": "043",
+        "count": 2
+      },
+      {
+        "name": "Heatmor",
+        "set": "A1",
+        "number": "048",
+        "count": 2
+      },
+      {
+        "name": "Chimchar",
+        "set": "A2",
+        "number": "027",
+        "count": 2
+      },
+      {
+        "name": "Monferno",
+        "set": "A2",
+        "number": "028",
+        "count": 2
+      },
+      {
+        "name": "Infernape ex",
+        "set": "A2",
+        "number": "029",
+        "count": 2
+      },
+      {
+        "name": "Rocky Helmet",
+        "set": "A2",
+        "number": "148",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 70,
+    "name": "Water Expert Deck #70",
+    "energy_type": "Water",
+    "cards": [
+      {
+        "name": "Articuno ex",
+        "set": "A1",
+        "number": "084",
+        "count": 2
+      },
+      {
+        "name": "Vaporeon",
+        "set": "A1a",
+        "number": "019",
+        "count": 2
+      },
+      {
+        "name": "Palkia ex",
+        "set": "A2",
+        "number": "049",
+        "count": 2
+      },
+      {
+        "name": "Manaphy",
+        "set": "A2",
+        "number": "050",
+        "count": 2
+      },
+      {
+        "name": "Eevee",
+        "set": "A2",
+        "number": "126",
+        "count": 2
+      },
+      {
+        "name": "Leaf",
+        "set": "A1a",
+        "number": "068",
+        "count": 2
+      },
+      {
+        "name": "Giant Cape",
+        "set": "A2",
+        "number": "147",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 72,
+    "name": "Psychic Expert Deck #72",
+    "energy_type": "Psychic",
+    "cards": [
+      {
+        "name": "Mewtwo ex",
+        "set": "A1",
+        "number": "129",
+        "count": 2
+      },
+      {
+        "name": "Gardevoir",
+        "set": "A1",
+        "number": "132",
+        "count": 2
+      },
+      {
+        "name": "Misdreavus",
+        "set": "A2",
+        "number": "066",
+        "count": 2
+      },
+      {
+        "name": "Mismagius ex",
+        "set": "A2",
+        "number": "067",
+        "count": 2
+      },
+      {
+        "name": "Ralts",
+        "set": "A2",
+        "number": "068",
+        "count": 2
+      },
+      {
+        "name": "Kirlia",
+        "set": "A2",
+        "number": "069",
+        "count": 2
+      },
+      {
+        "name": "Leaf",
+        "set": "A1a",
+        "number": "068",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 73,
+    "name": "Fighting Expert Deck #73",
+    "energy_type": "Fighting",
+    "cards": [
+      {
+        "name": "Hitmonchan",
+        "set": "A1",
+        "number": "155",
+        "count": 2
+      },
+      {
+        "name": "Ralts",
+        "set": "A2",
+        "number": "068",
+        "count": 2
+      },
+      {
+        "name": "Kirlia",
+        "set": "A2",
+        "number": "069",
+        "count": 2
+      },
+      {
+        "name": "Riolu",
+        "set": "A2",
+        "number": "091",
+        "count": 2
+      },
+      {
+        "name": "Lucario",
+        "set": "A2",
+        "number": "092",
+        "count": 2
+      },
+      {
+        "name": "Gallade ex",
+        "set": "A2",
+        "number": "095",
+        "count": 2
+      },
+      {
+        "name": "Giant Cape",
+        "set": "A2",
+        "number": "147",
+        "count": 2
+      },
+      {
+        "name": "Cyrus",
+        "set": "A2",
+        "number": "150",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 76,
+    "name": "Grass Expert Deck #76",
+    "energy_type": "Grass",
+    "cards": [
+      {
+        "name": "Bulbasaur",
+        "set": "A1",
+        "number": "001",
+        "count": 2
+      },
+      {
+        "name": "Ivysaur",
+        "set": "A1",
+        "number": "002",
+        "count": 2
+      },
+      {
+        "name": "Venusaur ex",
+        "set": "A1",
+        "number": "004",
+        "count": 2
+      },
+      {
+        "name": "Snivy",
+        "set": "A1a",
+        "number": "004",
+        "count": 2
+      },
+      {
+        "name": "Servine",
+        "set": "A1a",
+        "number": "005",
+        "count": 2
+      },
+      {
+        "name": "Serperior",
+        "set": "A1a",
+        "number": "006",
+        "count": 2
+      },
+      {
+        "name": "Dhelmise",
+        "set": "A1a",
+        "number": "009",
+        "count": 2
+      },
+      {
+        "name": "Erika",
+        "set": "A1",
+        "number": "219",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 77,
+    "name": "Grass Expert Deck #77",
+    "energy_type": "Grass",
+    "cards": [
+      {
+        "name": "Exeggcute",
+        "set": "A1",
+        "number": "021",
+        "count": 2
+      },
+      {
+        "name": "Exeggutor ex",
+        "set": "A1",
+        "number": "023",
+        "count": 2
+      },
+      {
+        "name": "Celebi ex",
+        "set": "A1a",
+        "number": "003",
+        "count": 2
+      },
+      {
+        "name": "Snivy",
+        "set": "A1a",
+        "number": "004",
+        "count": 2
+      },
+      {
+        "name": "Servine",
+        "set": "A1a",
+        "number": "005",
+        "count": 2
+      },
+      {
+        "name": "Serperior",
+        "set": "A1a",
+        "number": "006",
+        "count": 2
+      },
+      {
+        "name": "Erika",
+        "set": "A1",
+        "number": "219",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "deck_id": 79,
+    "name": "Water Expert Deck #79",
+    "energy_type": "Water",
+    "cards": [
+      {
+        "name": "Articuno ex",
+        "set": "A1",
+        "number": "084",
+        "count": 2
+      },
+      {
+        "name": "Magikarp",
+        "set": "A1a",
+        "number": "017",
+        "count": 2
+      },
+      {
+        "name": "Gyarados ex",
+        "set": "A1a",
+        "number": "018",
+        "count": 2
+      },
+      {
+        "name": "Vaporeon",
+        "set": "A1a",
+        "number": "019",
+        "count": 2
+      },
+      {
+        "name": "Eevee",
+        "set": "A1a",
+        "number": "061",
+        "count": 2
+      },
+      {
+        "name": "Misty",
+        "set": "A1",
+        "number": "220",
+        "count": 2
+      },
+      {
+        "name": "Sabrina",
+        "set": "A1",
+        "number": "225",
+        "count": 1
+      },
+      {
+        "name": "Leaf",
+        "set": "A1a",
+        "number": "068",
+        "count": 2
+      }
+    ]
+  }
+]
