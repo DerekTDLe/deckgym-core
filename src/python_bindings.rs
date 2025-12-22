@@ -698,7 +698,7 @@ impl PyGame {
     }
 
     /// Create a game from deck strings (faster than file I/O).
-    /// 
+    ///
     /// Deck strings should be in the same format as deck files:
     /// ```
     /// Energy: Electric
@@ -706,7 +706,7 @@ impl PyGame {
     /// 2 Magneton A1 098
     /// ...
     /// ```
-    /// 
+    ///
     /// # Arguments
     /// * `deck_a_str` - Deck string for player A
     /// * `deck_b_str` - Deck string for player B
@@ -719,10 +719,16 @@ impl PyGame {
         seed: Option<u64>,
     ) -> PyResult<Self> {
         let deck_a = Deck::from_string(deck_a_str).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Failed to create deck A: {}", e))
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Failed to create deck A: {}",
+                e
+            ))
         })?;
         let deck_b = Deck::from_string(deck_b_str).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Failed to create deck B: {}", e))
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Failed to create deck B: {}",
+                e
+            ))
         })?;
 
         // Use default players (no bots, just the RL agent controls both)
@@ -793,23 +799,27 @@ impl PyGame {
     fn step_action(&mut self, action_idx: usize) -> PyResult<(f32, bool, String)> {
         let state = self.game.get_state_clone();
         let indexed_actions = crate::rl::get_indexed_actions(&state);
-        
+
         // Find the action with this index
         let action = indexed_actions
             .into_iter()
             .find(|(idx, _)| *idx == action_idx)
             .map(|(_, action)| action);
-        
+
         match action {
             Some(action) => {
                 self.game.apply_action(&action);
                 let new_state = self.game.get_state_clone();
-                
+
                 let done = new_state.is_game_over();
                 let reward = if done {
                     match new_state.winner {
                         Some(crate::state::GameOutcome::Win(winner)) => {
-                            if winner == state.current_player { 1.0 } else { -1.0 }
+                            if winner == state.current_player {
+                                1.0
+                            } else {
+                                -1.0
+                            }
                         }
                         Some(crate::state::GameOutcome::Tie) => 0.0,
                         None => 0.0,
@@ -817,14 +827,17 @@ impl PyGame {
                 } else {
                     0.0
                 };
-                
+
                 Ok((reward, done, format!("{}", action.action)))
             }
-            None => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                format!("Invalid action index: {}. Valid indices: {:?}", 
-                    action_idx, 
-                    crate::rl::get_indexed_actions(&state).iter().map(|(i, _)| i).collect::<Vec<_>>())
-            ))
+            None => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Invalid action index: {}. Valid indices: {:?}",
+                action_idx,
+                crate::rl::get_indexed_actions(&state)
+                    .iter()
+                    .map(|(i, _)| i)
+                    .collect::<Vec<_>>()
+            ))),
         }
     }
 
