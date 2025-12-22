@@ -142,9 +142,7 @@ fn encode_board_state(state: &State, player: usize, obs: &mut Vec<f32>) {
             // Energy attached (count per type, normalized)
             let energy_counts = count_energy(&pokemon.attached_energy);
             for energy in all_energy_types() {
-                obs.push(
-                    (*energy_counts.get(&energy).unwrap_or(&0) as f32 / 5.0).clamp(0.0, 1.0),
-                );
+                obs.push((*energy_counts.get(&energy).unwrap_or(&0) as f32 / 5.0).clamp(0.0, 1.0));
             }
 
             // Energy delta for strongest attack
