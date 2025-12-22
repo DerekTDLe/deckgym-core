@@ -28,9 +28,11 @@ pub const SLOTS_PER_PLAYER: usize = 4;
 pub const FEATURES_PER_SLOT: usize = 1                                     // Stage (0=Basic, 0.5=Stage1, 1.0=Stage2)
     + 2                                   // HP current ratio, HP max normalized
     + NUM_ENERGY_TYPES                    // Card's energy type (one-hot)
+    + NUM_ENERGY_TYPES                    // Weakness type (one-hot)
+    + 1                                   // Knockout points (1/3=normal, 2/3=ex, 1.0=mega)
     + NUM_ENERGY_TYPES                    // Energy attached (count per type)
     + 1                                   // Energy delta (missing energy for strongest attack)
-    + 4                                   // Attack 1: damage, cost, has_effect, effect categories...
+    + 4                                   // Attack 1: damage, cost, has_effect, has_attack
     + NUM_ATTACK_EFFECT_CATEGORIES        // Attack 1 effect categories
     + 4                                   // Attack 2: damage, cost, has_effect, has_attack
     + NUM_ATTACK_EFFECT_CATEGORIES        // Attack 2 effect categories
@@ -138,6 +140,20 @@ fn encode_board_state(state: &State, player: usize, obs: &mut Vec<f32>) {
                     0.0
                 });
             }
+
+            // Weakness type (one-hot)
+            let weakness = if let Card::Pokemon(p) = &pokemon.card {
+                p.weakness
+            } else {
+                None
+            };
+            for energy in all_energy_types() {
+                obs.push(if weakness == Some(energy) { 1.0 } else { 0.0 });
+            }
+
+            // Knockout points (normalized: 1/3, 2/3, or 1.0)
+            let ko_points = pokemon.card.get_knockout_points();
+            obs.push(ko_points as f32 / 3.0);
 
             // Energy attached (count per type, normalized)
             let energy_counts = count_energy(&pokemon.attached_energy);
