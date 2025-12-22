@@ -26,77 +26,107 @@ from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from deckgym.env import DeckGymEnv
 from deckgym.deck_loader import CurriculumDeckLoader
 
-# PART 1: Self-Play Environment Wrapper
+# PART 1: Self-Play Environment Wrapper with Frozen Opponent
 
 class SelfPlayEnv(gym.Env):
     """
-    Wrapper that let a player play against itself
+    Wrapper that lets player 0 (training agent) play against player 1 (frozen opponent).
     
-    At each reset(), we:
-    1. Sample two decks (one for each player)
-    2. Create a new game
-    3. The agent plays for both players (self-play)
-    
-    The goal: the agent learns the good strategies by playing against
-    a copy of itself that also improves.
+    The frozen opponent uses a separate model that is updated periodically.
+    This prevents self-play collapse where both players converge to degenerate strategies.
     """
     
-    def __init__(self, deck_loader):
+    def __init__(self, deck_loader, opponent_model=None):
         """
         Args:
-            deck_loader: CurriculumDeckLoader to sample the
+            deck_loader: CurriculumDeckLoader to sample decks
+            opponent_model: Optional frozen model for opponent (player 1)
         """
         self.deck_loader = deck_loader
+        self.opponent_model = opponent_model
         
         # Create a dummy game to get observation/action space sizes
-        self._env = DeckGymEnv(*deck_loader.sample_pair()) # Besoin d'une seed?
+        self._env = DeckGymEnv(*deck_loader.sample_pair())
         
         # Copy observation_space and action_space from the inner env
         self.observation_space = self._env.observation_space
         self.action_space = self._env.action_space
+    
+    def set_opponent_model(self, model):
+        """Update the frozen opponent model."""
+        self.opponent_model = model
     
     def reset(self, seed=None, options=None):
         """
         Reset for a new game with random decks.
         
         Returns:
-            observation: Initial state of the game (numpy array of 163 floats)
-            info: Empty dict (required by Gymnasium)
+            observation: Initial state of the game
+            info: Empty dict
         """
-        # Sample two decks from the curriculum loader
         deck_a, deck_b = self.deck_loader.sample_pair()
-        # Create a new DeckGymEnv with these decks
         self._env = DeckGymEnv(deck_a, deck_b, seed=seed)      
-        # Return the initial observation
-        return self._env.reset(seed=seed)
+        obs, info = self._env.reset(seed=seed)
+        
+        # If it's opponent's turn at start, play their moves
+        obs, info, _, _ = self._play_opponent_turns(obs, info)
+        
+        return obs, info
+    
+    def _play_opponent_turns(self, obs, info):
+        """
+        Play all opponent (player 1) turns until it's player 0's turn or game over.
+        Returns final obs, info, and any reward/done from opponent's actions.
+        """
+        final_reward = 0.0
+        done = False
+        
+        while self._env.game.current_player() == 1 and not self._env.game.is_game_over():
+            if self.opponent_model is not None:
+                # Use frozen model to select action
+                action_mask = self._env.action_masks()
+                action, _ = self.opponent_model.predict(obs, action_masks=action_mask, deterministic=False)
+            else:
+                # Fallback: random valid action
+                action_mask = self._env.action_masks()
+                valid_actions = np.where(action_mask)[0]
+                action = np.random.choice(valid_actions)
+            
+            obs, reward, done, truncated, info = self._env.step(action)
+            # Invert reward since it's from opponent's perspective
+            final_reward = -reward
+            if done or truncated:
+                break
+        
+        return obs, info, final_reward, done
     
     def step(self, action):
         """
-        Execute a action in the game.
+        Execute player 0's action, then play opponent's turn(s).
         
-        Args:
-            action: Index of the action (0-49)
-            
         Returns:
-            obs: New state of the game
-            reward: +1 victory, -1 defeat, 0 otherwise
-            terminated: True if the game is finished
-            truncated: False (no time limit)
-            info: Dict with additional information
+            obs: New state (from player 0's perspective)
+            reward: +1 win, -1 loss, 0 otherwise
+            terminated: True if game over
+            truncated: False
+            info: Dict with action info
         """
-        # Forward the action to the inner environment
-        return self._env.step(action)
+        # Execute training agent's action (player 0)
+        obs, reward, done, truncated, info = self._env.step(action)
+        
+        if not done and not truncated:
+            # Play opponent's (player 1) turn(s)
+            obs, info, opp_reward, opp_done = self._play_opponent_turns(obs, info)
+            
+            # If game ended during opponent's turn, use opponent's reward (inverted)
+            if opp_done:
+                done = True
+                reward = opp_reward
+        
+        return obs, reward, done, truncated, info
     
     def action_masks(self):
-        """
-        Return the action mask from inner env.
-        
-        Important for MaskablePPO: we can only choose actions
-        where the mask is True.
-        
-        Returns:
-            numpy array of bools, shape (50,)
-        """
+        """Return action mask for player 0."""
         return self._env.action_masks()
 
 
@@ -142,6 +172,50 @@ class CurriculumCallback(BaseCallback):
             difficulty = max(0.0, min(1.0, progress))
         
         self.deck_loader.set_difficulty(difficulty)
+        
+        return True
+
+
+class FrozenOpponentCallback(BaseCallback):
+    """
+    Callback that updates the frozen opponent model periodically.
+    
+    This prevents self-play collapse by ensuring the opponent doesn't
+    change too quickly, providing a more stable training target.
+    """
+    
+    def __init__(self, env, update_freq: int = 50_000, verbose: int = 0):
+        """
+        Args:
+            env: SelfPlayEnv instance (will be unwrapped from ActionMasker)
+            update_freq: Steps between frozen model updates
+        """
+        super().__init__(verbose)
+        self.env = env
+        self.update_freq = update_freq
+        self.last_update = 0
+    
+    def _on_step(self) -> bool:
+        """Update frozen opponent if enough steps have passed."""
+        if self.num_timesteps - self.last_update >= self.update_freq:
+            # Save current model weights and load into a new model
+            import tempfile
+            import os
+            
+            with tempfile.TemporaryDirectory() as tmpdir:
+                path = os.path.join(tmpdir, "frozen_model")
+                self.model.save(path)
+                frozen_model = MaskablePPO.load(path)
+            
+            # Get the underlying SelfPlayEnv from ActionMasker wrapper
+            if hasattr(self.env, 'env'):
+                self.env.env.set_opponent_model(frozen_model)
+            else:
+                self.env.set_opponent_model(frozen_model)
+            
+            self.last_update = self.num_timesteps
+            if self.verbose > 0:
+                print(f"Updated frozen opponent at step {self.num_timesteps}")
         
         return True
 
@@ -238,16 +312,32 @@ def train(
         save_path="./checkpoints/",
         name_prefix="rl_bot"
     )
+    frozen_opponent_callback = FrozenOpponentCallback(
+        env,
+        update_freq=50_000,
+        verbose=1
+    )
+    
+    # Initialize frozen opponent with initial model
+    import tempfile
+    import os as os_module
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os_module.path.join(tmpdir, "initial_frozen")
+        model.save(path)
+        initial_frozen = MaskablePPO.load(path)
+    env.env.set_opponent_model(initial_frozen)
     
     # Train the model!
     print("\nStarting training...")
     print(f"   Total timesteps: {total_timesteps:,}")
     print(f"   Device: {device}")
     print(f"   Checkpoints every {checkpoint_freq:,} steps")
+    print(f"   Frozen opponent updates every 50,000 steps")
     
     model.learn(
         total_timesteps=total_timesteps,
-        callback=[curriculum_callback, checkpoint_callback],
+        callback=[curriculum_callback, checkpoint_callback, frozen_opponent_callback],
         progress_bar=True
     )
     
