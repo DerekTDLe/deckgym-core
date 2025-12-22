@@ -10,28 +10,43 @@ use crate::actions::Mechanic;
 /// An attack can belong to multiple categories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AttackEffectCategory {
-    /// Heals self (SelfHeal, MegaDrain)
-    Heals,
-    /// Inflicts status conditions (Poison, Sleep, Paralyze, Confuse, Burn)
-    Status,
-    /// Involves coin flips (CoinFlipExtraDamage, CoinFlipNoEffect, etc.)
-    CoinFlip,
+    // === CORE EFFECTS ===
+    /// Heals self or allies
+    Heal,
+    /// Inflicts status conditions on opponent
+    StatusInflict,
+    /// Involves randomness (coin flips)
+    Variance,
+    
+    // === RESOURCES ===
     /// Manipulates energy (discard, charge, move)
     EnergyManip,
-    /// Conditional extra damage (if ex, if hurt, if extra energy, etc.)
+    /// Searches or draws cards
+    CardAdvantage,
+    
+    // === DAMAGE MODIFIERS ===
+    /// Conditional extra damage
     ConditionalDamage,
     /// Damages bench Pokemon
-    BenchDamage,
-    /// Applies card effects (prevent attack, prevent retreat, etc.)
-    CardEffect,
-    /// Searches deck for cards
-    Search,
-    /// Deals damage to self (recoil)
+    SpreadDamage,
+    /// Recoil or self-damage
     SelfDamage,
+    
+    // === TACTICAL ===
+    /// Blocks, prevents, or reduces future actions
+    Protection,
+    /// Disrupts opponent's board or hand
+    Disruption,
+    /// Movement effects (switch, retreat)
+    Movement,
+    
+    // === SETUP ===
+    /// Board development (bench, evolution)
+    BoardDevelopment,
 }
 
 /// Number of attack effect categories
-pub const NUM_ATTACK_EFFECT_CATEGORIES: usize = 9;
+pub const NUM_ATTACK_EFFECT_CATEGORIES: usize = 12;
 
 /// Returns the effect categories for a given Mechanic.
 pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffectCategory] {
@@ -39,32 +54,32 @@ pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffe
 
     match mechanic {
         // === HEALS ===
-        Mechanic::SelfHeal { .. } => &[Heals],
+        Mechanic::SelfHeal { .. } => &[Heal],
 
         // === STATUS ===
-        Mechanic::InflictStatusConditions { .. } => &[Status],
-        Mechanic::ChanceStatusAttack { .. } => &[Status, CoinFlip],
-        Mechanic::ExtraDamageForEachHeadsWithStatus { .. } => &[CoinFlip, Status],
+        Mechanic::InflictStatusConditions { .. } => &[StatusInflict],
+        Mechanic::ChanceStatusAttack { .. } => &[StatusInflict, Variance],
+        Mechanic::ExtraDamageForEachHeadsWithStatus { .. } => &[ConditionalDamage, StatusInflict, Variance],
 
         // === COIN FLIP ===
-        Mechanic::CoinFlipExtraDamage { .. } => &[CoinFlip],
-        Mechanic::CoinFlipExtraDamageOrSelfDamage { .. } => &[CoinFlip, SelfDamage],
-        Mechanic::ExtraDamageForEachHeads { .. } => &[CoinFlip],
-        Mechanic::CoinFlipNoEffect => &[CoinFlip],
-        Mechanic::ExtraDamageIfBothHeads { .. } => &[CoinFlip],
-        Mechanic::CoinFlipToBlockAttackNextTurn => &[CoinFlip, CardEffect],
+        Mechanic::CoinFlipExtraDamage { .. } => &[ConditionalDamage, Variance],
+        Mechanic::CoinFlipExtraDamageOrSelfDamage { .. } => &[ConditionalDamage, SelfDamage, Variance],
+        Mechanic::ExtraDamageForEachHeads { .. } => &[ConditionalDamage, Variance],
+        Mechanic::CoinFlipNoEffect => &[Variance],
+        Mechanic::ExtraDamageIfBothHeads { .. } => &[ConditionalDamage, Variance],
+        Mechanic::CoinFlipToBlockAttackNextTurn => &[Variance, Protection],
 
         // === ENERGY MANIPULATION ===
         Mechanic::SelfDiscardEnergy { .. } => &[EnergyManip],
         Mechanic::SelfDiscardAllEnergy => &[EnergyManip],
-        Mechanic::SelfDiscardRandomEnergy => &[EnergyManip],
-        Mechanic::DiscardRandomGlobalEnergy => &[EnergyManip],
+        Mechanic::SelfDiscardRandomEnergy => &[EnergyManip, Variance],
+        Mechanic::DiscardRandomGlobalEnergy => &[EnergyManip, Variance],
         Mechanic::DiscardEnergyFromOpponentActive => &[EnergyManip],
         Mechanic::SelfChargeActive { .. } => &[EnergyManip],
         Mechanic::ChargeBench { .. } => &[EnergyManip],
         Mechanic::ManaphyOceanicGift => &[EnergyManip],
-        Mechanic::MoltresExInfernoDance => &[EnergyManip, CoinFlip],
-        Mechanic::VaporeonHyperWhirlpool => &[EnergyManip, CoinFlip],
+        Mechanic::MoltresExInfernoDance => &[EnergyManip, Variance],
+        Mechanic::VaporeonHyperWhirlpool => &[EnergyManip],
 
         // === CONDITIONAL DAMAGE ===
         Mechanic::ExtraDamageIfEx { .. } => &[ConditionalDamage],
@@ -84,35 +99,35 @@ pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffe
         Mechanic::ExtraDamageEqualToSelfDamage => &[ConditionalDamage],
 
         // === BENCH DAMAGE ===
-        Mechanic::DamageAllOpponentPokemon { .. } => &[BenchDamage],
-        Mechanic::AlsoBenchDamage { .. } => &[BenchDamage],
-        Mechanic::AlsoChoiceBenchDamage { .. } => &[BenchDamage],
-        Mechanic::DirectDamage { .. } => &[BenchDamage],
-        Mechanic::ConditionalBenchDamage { .. } => &[BenchDamage, ConditionalDamage],
-        Mechanic::PalkiaExDimensionalStorm => &[BenchDamage, EnergyManip],
+        Mechanic::DamageAllOpponentPokemon { .. } => &[SpreadDamage],
+        Mechanic::AlsoBenchDamage { .. } => &[SpreadDamage],
+        Mechanic::AlsoChoiceBenchDamage { .. } => &[SpreadDamage],
+        Mechanic::DirectDamage { .. } => &[SpreadDamage],
+        Mechanic::ConditionalBenchDamage { .. } => &[SpreadDamage, ConditionalDamage],
+        Mechanic::PalkiaExDimensionalStorm => &[SpreadDamage, EnergyManip],
 
         // === CARD EFFECTS ===
-        Mechanic::DamageAndCardEffect { .. } => &[CardEffect],
-        Mechanic::DamageAndMultipleCardEffects { .. } => &[CardEffect],
-        Mechanic::DamageAndTurnEffect { .. } => &[CardEffect],
-        Mechanic::BlockBasicAttack => &[CardEffect],
-        Mechanic::ShuffleOpponentActiveIntoDeck => &[CardEffect],
+        Mechanic::DamageAndCardEffect { .. } => &[Protection],
+        Mechanic::DamageAndMultipleCardEffects { .. } => &[Protection],
+        Mechanic::DamageAndTurnEffect { .. } => &[Protection],
+        Mechanic::BlockBasicAttack => &[Protection],
+        Mechanic::ShuffleOpponentActiveIntoDeck => &[Disruption],
 
         // === SEARCH ===
-        Mechanic::SearchToHandByEnergy { .. } => &[Search],
-        Mechanic::SearchToBenchByName { .. } => &[Search],
-        Mechanic::MagikarpWaterfallEvolution => &[Search],
+        Mechanic::SearchToHandByEnergy { .. } => &[CardAdvantage],
+        Mechanic::SearchToBenchByName { .. } => &[CardAdvantage],
+        Mechanic::MagikarpWaterfallEvolution => &[BoardDevelopment],
 
         // === SELF DAMAGE ===
         Mechanic::SelfDamage { .. } => &[SelfDamage],
         Mechanic::RecoilIfKo { .. } => &[SelfDamage],
 
         // === SPECIAL / UTILITY ===
-        Mechanic::SwitchSelfWithBench => &[CardEffect],
-        Mechanic::CelebiExPowerfulBloom => &[CoinFlip],
-        Mechanic::MegaBlazikenExMegaBurningAttack => &[EnergyManip, Status],
+        Mechanic::SwitchSelfWithBench => &[Movement],
+        Mechanic::CelebiExPowerfulBloom => &[Variance],
+        Mechanic::MegaBlazikenExMegaBurningAttack => &[EnergyManip, StatusInflict],
         Mechanic::HoOhExPhoenixTurbo => &[EnergyManip],
-        Mechanic::HealBenchedBasic { .. } => &[Heals],
+        Mechanic::HealBenchedBasic { .. } => &[Heal],
     }
 }
 
@@ -151,7 +166,7 @@ mod tests {
     fn test_self_heal_is_heals() {
         let mechanic = Mechanic::SelfHeal { amount: 20 };
         let cats = get_attack_effect_categories(&mechanic);
-        assert!(cats.contains(&AttackEffectCategory::Heals));
+        assert!(cats.contains(&AttackEffectCategory::Heal));
     }
 
     #[test]
@@ -161,7 +176,7 @@ mod tests {
             self_damage: 20,
         };
         let cats = get_attack_effect_categories(&mechanic);
-        assert!(cats.contains(&AttackEffectCategory::CoinFlip));
+        assert!(cats.contains(&AttackEffectCategory::Variance));
         assert!(cats.contains(&AttackEffectCategory::SelfDamage));
     }
 
