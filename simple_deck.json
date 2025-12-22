@@ -286,32 +286,32 @@
       },
       {
         "name": "Moltres ex",
-        "set": "A4b",
-        "number": "067",
+        "set": "A1",
+        "number": "047",
         "count": 2
       },
       {
         "name": "Elemental Switch",
-        "set": "A4b",
-        "number": "310",
+        "set": "A4",
+        "number": "151",
         "count": 2
       },
       {
         "name": "Rare Candy",
-        "set": "A4b",
-        "number": "314",
+        "set": "A3",
+        "number": "144",
         "count": 2
       },
       {
         "name": "Giant Cape",
-        "set": "A4b",
-        "number": "320",
+        "set": "A2",
+        "number": "147",
         "count": 2
       },
       {
         "name": "Cyrus",
-        "set": "A4b",
-        "number": "326",
+        "set": "A2",
+        "number": "150",
         "count": 1
       }
     ]
@@ -341,32 +341,32 @@
       },
       {
         "name": "Pikachu ex",
-        "set": "A4b",
-        "number": "131",
+        "set": "A2b",
+        "number": "022",
         "count": 2
       },
       {
         "name": "Zeraora",
-        "set": "A4b",
-        "number": "149",
+        "set": "A3a",
+        "number": "021",
         "count": 2
       },
       {
         "name": "Elemental Switch",
-        "set": "A4b",
-        "number": "310",
+        "set": "A4",
+        "number": "151",
         "count": 1
       },
       {
         "name": "Giant Cape",
-        "set": "A4b",
-        "number": "320",
+        "set": "A2",
+        "number": "147",
         "count": 2
       },
       {
         "name": "Cyrus",
-        "set": "A4b",
-        "number": "326",
+        "set": "A2",
+        "number": "150",
         "count": 1
       }
     ]
@@ -384,38 +384,38 @@
       },
       {
         "name": "Phanpy",
-        "set": "A4b",
-        "number": "200",
+        "set": "A4",
+        "number": "099",
         "count": 2
       },
       {
         "name": "Donphan ex",
-        "set": "A4b",
-        "number": "202",
+        "set": "A4",
+        "number": "100",
         "count": 2
       },
       {
         "name": "Riolu",
-        "set": "A4b",
+        "set": "A4",
         "number": "210",
         "count": 2
       },
       {
         "name": "Lucario ex",
-        "set": "A4b",
-        "number": "214",
+        "set": "A2b",
+        "number": "043",
         "count": 2
       },
       {
         "name": "Rocky Helmet",
-        "set": "A4b",
-        "number": "322",
+        "set": "A2",
+        "number": "148",
         "count": 2
       },
       {
         "name": "Cyrus",
-        "set": "A4b",
-        "number": "326",
+        "set": "A2",
+        "number": "150",
         "count": 2
       }
     ]

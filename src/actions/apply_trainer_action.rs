@@ -187,6 +187,7 @@ fn pokemon_center_lady_effect(_: &mut StdRng, state: &mut State, action: &Action
     }
 }
 
+// Heals the chosen stage 2 pokemon for 60 damage
 fn lillie_effect(_: &mut StdRng, state: &mut State, action: &Action) {
     let possible_moves = state
         .enumerate_in_play_pokemon(action.actor)
@@ -308,9 +309,11 @@ fn misty_outcomes() -> (Probabilities, Mutations) {
 }
 
 // Remember to implement these in the main controller / hooks.
+// Reduce by one the retreat cost of the active pokemon.
 fn x_speed_effect(_: &mut StdRng, state: &mut State, _: &Action) {
     state.add_turn_effect(TurnEffect::ReducedRetreatCost { amount: 1 }, 0);
 }
+// Reduce by two the retreat cost of the active pokemon.
 fn leaf_effect(_: &mut StdRng, state: &mut State, _: &Action) {
     state.add_turn_effect(TurnEffect::ReducedRetreatCost { amount: 2 }, 0);
 }
@@ -663,6 +666,7 @@ fn pokemon_communication_effect(_: &mut StdRng, state: &mut State, action: &Acti
     }
 }
 
+// Move an Fire/Water/Lightning energy from a bench Pokemon to the active Pokemon.
 fn elemental_switch_effect(_: &mut StdRng, state: &mut State, action: &Action) {
     let player = action.actor;
     if state.maybe_get_active(player).is_none() {
@@ -733,7 +737,7 @@ fn lusamine_effect(_: &mut StdRng, state: &mut State, action: &Action) {
             .push((player, possible_attachments));
     }
 }
-
+// Switch the active pokemon that has damage on it with a benched pokemon
 fn lyra_effect(_: &mut StdRng, state: &mut State, action: &Action) {
     let possible_activations = state
         .enumerate_bench_pokemon(action.actor)
