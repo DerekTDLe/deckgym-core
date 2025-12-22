@@ -86,6 +86,10 @@ pub enum Mechanic {
         target_benched_type: Option<EnergyType>,
     },
     VaporeonHyperWhirlpool,
+    HoOhExPhoenixTurbo,
+    HealBenchedBasic {
+        amount: u32,
+    },
     ConditionalBenchDamage {
         required_extra_energy: Vec<EnergyType>,
         bench_damage: u32,
