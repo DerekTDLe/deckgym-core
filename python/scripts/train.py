@@ -215,11 +215,12 @@ def train(
         "MlpPolicy",
         env,
         learning_rate=3e-4,
-        n_steps=2048,
-        batch_size=256,
+        n_steps=4096,          # Experience per update
+        batch_size=512,        # Larger batch for stability
+        n_epochs=10,           # More optimization per batch
         gamma=0.99,
         gae_lambda=0.95,
-        ent_coef=0.01,       # Encourage exploration
+        ent_coef=0.01,         # Encourage exploration
         clip_range=0.2,
         policy_kwargs=policy_kwargs,
         verbose=1,
