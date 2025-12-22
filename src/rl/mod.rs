@@ -2,11 +2,16 @@
 //
 // This module exposes game state as tensors for neural network consumption.
 
+mod ability_categories;
 mod action_mask;
 mod attack_categories;
 mod observation;
 mod supporter_categories;
 
+pub use ability_categories::{
+    encode_ability_categories, encode_ability_from_card_id, get_ability_effect_categories,
+    AbilityEffectCategory, NUM_ABILITY_EFFECT_CATEGORIES,
+};
 pub use action_mask::get_action_mask;
 pub use action_mask::get_indexed_actions;
 pub use action_mask::ACTION_SPACE_SIZE;

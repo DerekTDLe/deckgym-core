@@ -201,12 +201,12 @@ def train(
     env = ActionMasker(env, mask_fn)
     
     # Create the MaskablePPO model
-    # Architecture sized for 499-dim observation space
+    # Architecture sized for ~500+ dim observation space
     print("\nCreating model...")
     policy_kwargs = dict(
         net_arch=dict(
-            pi=[256, 256, 128],  # Policy network (3 layers)
-            vf=[256, 256, 128],  # Value network (separate, 3 layers)
+            pi=[512, 512, 256],  # Policy network (3 layers)
+            vf=[512, 512, 256],  # Value network (separate, 3 layers)
         ),
         activation_fn=torch.nn.ReLU,
     )
