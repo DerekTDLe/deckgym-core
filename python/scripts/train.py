@@ -201,14 +201,27 @@ def train(
     env = ActionMasker(env, mask_fn)
     
     # Create the MaskablePPO model
+    # Architecture sized for 499-dim observation space
     print("\nCreating model...")
+    policy_kwargs = dict(
+        net_arch=dict(
+            pi=[256, 256, 128],  # Policy network (3 layers)
+            vf=[256, 256, 128],  # Value network (separate, 3 layers)
+        ),
+        activation_fn=torch.nn.ReLU,
+    )
+    
     model = MaskablePPO(
         "MlpPolicy",
         env,
-        learning_rate=1e-4,
+        learning_rate=3e-4,
         n_steps=2048,
-        batch_size=128,
+        batch_size=256,
         gamma=0.99,
+        gae_lambda=0.95,
+        ent_coef=0.01,       # Encourage exploration
+        clip_range=0.2,
+        policy_kwargs=policy_kwargs,
         verbose=1,
         device=device,
         tensorboard_log="./logs/"
