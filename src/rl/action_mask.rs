@@ -9,7 +9,7 @@ use crate::state::State;
 
 // --- Action Space Layout ---
 //
-// Total size: 120 actions
+// Total size: 130 actions
 //
 // Range       | Action Type                      | Count
 // ------------|----------------------------------|-------
@@ -36,9 +36,11 @@ use crate::state::State;
 // 116         | ApplyEeveeBagDamageBoost         | 1
 // 117         | HealAllEeveeEvolutions           | 1
 // 118         | Non-turn energy attach (rare)    | 1
-// 119         | Reserved                         | 1
+// 119         | MoveEnergy                       | 1
+// 120         | MoveAllDamage                    | 1
+// 121-129     | Reserved                         | 9
 
-pub const ACTION_SPACE_SIZE: usize = 120;
+pub const ACTION_SPACE_SIZE: usize = 130;
 
 /// Converts a SimpleAction to a canonical action index.
 /// Returns None if the action doesn't map to a fixed index (shouldn't happen).
@@ -221,14 +223,13 @@ fn action_to_index(
 
         // Complex actions that need special handling
         SimpleAction::MoveEnergy { .. } => {
-            // MoveEnergy is rare - map to a single slot
-            // The actual energy/position choice is handled by the simulator
-            Some(118) // Shares with non-turn energy
+            // MoveEnergy is rare but distinct from non-turn energy attach
+            Some(119)
         }
 
         SimpleAction::MoveAllDamage { .. } => {
-            // Also rare, use reserved slot
-            Some(119)
+            // MoveAllDamage has its own slot
+            Some(120)
         }
 
         // ApplyDamage is internal, not a player choice

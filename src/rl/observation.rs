@@ -12,6 +12,7 @@ use crate::hooks::{get_retreat_cost, get_stage};
 use crate::models::{Card, EnergyType};
 use crate::state::State;
 
+use super::ability_categories::{encode_ability_from_card_id, NUM_ABILITY_EFFECT_CATEGORIES};
 use super::attack_categories::{encode_attack_effect_text, NUM_ATTACK_EFFECT_CATEGORIES};
 use super::supporter_categories::{encode_supporter_categories, NUM_SUPPORTER_EFFECT_CATEGORIES};
 
@@ -34,7 +35,7 @@ pub const FEATURES_PER_SLOT: usize = 1                                     // St
     + 4                                   // Attack 2: damage, cost, has_effect, has_attack
     + NUM_ATTACK_EFFECT_CATEGORIES        // Attack 2 effect categories
     + 4                                   // Status: Poison, Sleep, Paralyze, Confusion
-    + 1                                   // Has ability
+    + NUM_ABILITY_EFFECT_CATEGORIES       // Ability effect categories
     + 1; // Retreat cost
 
 /// Hand features per player
@@ -138,10 +139,12 @@ fn encode_board_state(state: &State, player: usize, obs: &mut Vec<f32>) {
                 });
             }
 
-            // Energy attached (count per type)
+            // Energy attached (count per type, normalized)
             let energy_counts = count_energy(&pokemon.attached_energy);
             for energy in all_energy_types() {
-                obs.push(*energy_counts.get(&energy).unwrap_or(&0) as f32);
+                obs.push(
+                    (*energy_counts.get(&energy).unwrap_or(&0) as f32 / 5.0).clamp(0.0, 1.0),
+                );
             }
 
             // Energy delta for strongest attack
@@ -193,12 +196,9 @@ fn encode_board_state(state: &State, player: usize, obs: &mut Vec<f32>) {
             obs.push(if pokemon.paralyzed { 1.0 } else { 0.0 });
             obs.push(if pokemon.confused { 1.0 } else { 0.0 });
 
-            // Has ability
-            obs.push(if pokemon.card.get_ability().is_some() {
-                1.0
-            } else {
-                0.0
-            });
+            // Ability effect categories
+            let ability_cats = encode_ability_from_card_id(&pokemon.card.get_id());
+            obs.extend_from_slice(&ability_cats);
 
             // Retreat cost
             obs.push((get_retreat_cost(state, pokemon).len() as f32 / 4.0).clamp(0.0, 1.0));
