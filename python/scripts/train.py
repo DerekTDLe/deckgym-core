@@ -36,6 +36,9 @@ class SelfPlayEnv(gym.Env):
     This prevents self-play collapse where both players converge to degenerate strategies.
     """
     
+    MAX_TURNS = 99  # Official Pokemon TCG Pocket rule
+    MAX_ACTIONS_PER_TURN = 50  # Safety limit for infinite loop detection
+    
     def __init__(self, deck_loader, opponent_model=None):
         """
         Args:
@@ -80,13 +83,12 @@ class SelfPlayEnv(gym.Env):
         """
         final_reward = 0.0
         done = False
-        max_steps = 1000  # Safety limit to prevent infinite loops
-        steps = 0
+        actions = 0  # Count actions in this turn sequence
         
         while self._env.game.current_player() == 1 and not self._env.game.is_game_over():
-            steps += 1
-            if steps > max_steps:
-                print(f"WARNING: Opponent stuck in loop after {max_steps} steps, forcing game end")
+            actions += 1
+            if actions > self.MAX_ACTIONS_PER_TURN:
+                print(f"WARNING: Opponent stuck in single turn after {actions} actions, forcing game end")
                 return obs, info, 0.0, True  # Force game end with neutral reward
             if self.opponent_model is not None:
                 # Use frozen model to select action
@@ -114,9 +116,17 @@ class SelfPlayEnv(gym.Env):
             obs: New state (from player 0's perspective)
             reward: +1 win, -1 loss, 0 otherwise
             terminated: True if game over
-            truncated: False
+            truncated: True if max turns exceeded
             info: Dict with action info
         """
+        # Check max turns limit (official rule)
+        turn_count = getattr(self._env.game, 'turn_count', lambda: 0)
+        if callable(turn_count):
+            turn_count = turn_count()
+        if turn_count > self.MAX_TURNS:
+            obs = np.array(self._env.game.get_obs(), dtype=np.float32)
+            return obs, 0.0, False, True, {"info": "max_turns_99_exceeded"}
+        
         # Execute training agent's action (player 0)
         obs, reward, done, truncated, info = self._env.step(action)
         
