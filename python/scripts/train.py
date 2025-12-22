@@ -80,8 +80,14 @@ class SelfPlayEnv(gym.Env):
         """
         final_reward = 0.0
         done = False
+        max_steps = 1000  # Safety limit to prevent infinite loops
+        steps = 0
         
         while self._env.game.current_player() == 1 and not self._env.game.is_game_over():
+            steps += 1
+            if steps > max_steps:
+                print(f"WARNING: Opponent stuck in loop after {max_steps} steps, forcing game end")
+                return obs, info, 0.0, True  # Force game end with neutral reward
             if self.opponent_model is not None:
                 # Use frozen model to select action
                 action_mask = self._env.action_masks()
