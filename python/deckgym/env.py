@@ -111,11 +111,14 @@ class DeckGymEnv(gym.Env):
         """
         try:
             reward, done, info_str = self.game.step_action(action)
-        except ValueError:
-            # Invalid action (shouldn't happen with proper masking, but handle gracefully)
-            # Return current state with 0 reward and done=True to trigger reset
-            obs = np.array(self.game.get_obs(), dtype=np.float32)
-            return obs, 0.0, True, False, {"action": "invalid_action_forced_end"}
+        except Exception as e:
+            # Handle Rust panics and invalid actions gracefully
+            # End episode with neutral reward to avoid crashing training
+            try:
+                obs = np.array(self.game.get_obs(), dtype=np.float32)
+            except Exception:
+                obs = np.zeros(self.observation_space.shape, dtype=np.float32)
+            return obs, 0.0, True, False, {"error": str(e)}
         
         obs = np.array(self.game.get_obs(), dtype=np.float32)
         return obs, reward, done, False, {"action": info_str}
