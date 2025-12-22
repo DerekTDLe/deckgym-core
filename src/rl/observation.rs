@@ -1,7 +1,7 @@
 // Observation Tensor Generation
 //
 // Converts game State into a flat f32 vector for neural network input.
-// 
+//
 // This version includes feature-based card representation for generalization:
 // - Pokemon cards encoded by their stats (stage, HP, energy type, attack damage, effect categories)
 // - Trainer cards in hand encoded by their effect categories
@@ -24,8 +24,7 @@ pub const NUM_ENERGY_TYPES: usize = 10;
 pub const SLOTS_PER_PLAYER: usize = 4;
 
 /// Features per board slot (enhanced with effect categories)
-pub const FEATURES_PER_SLOT: usize = 
-    1                                     // Stage (0=Basic, 0.5=Stage1, 1.0=Stage2)
+pub const FEATURES_PER_SLOT: usize = 1                                     // Stage (0=Basic, 0.5=Stage1, 1.0=Stage2)
     + 2                                   // HP current ratio, HP max normalized
     + NUM_ENERGY_TYPES                    // Card's energy type (one-hot)
     + NUM_ENERGY_TYPES                    // Energy attached (count per type)
@@ -36,21 +35,19 @@ pub const FEATURES_PER_SLOT: usize =
     + NUM_ATTACK_EFFECT_CATEGORIES        // Attack 2 effect categories
     + 4                                   // Status: Poison, Sleep, Paralyze, Confusion
     + 1                                   // Has ability
-    + 1;                                  // Retreat cost
+    + 1; // Retreat cost
 
 /// Hand features per player
-pub const HAND_FEATURES_PER_PLAYER: usize = 
-    3                                     // Pokemon counts: Basic, Stage1, Stage2
+pub const HAND_FEATURES_PER_PLAYER: usize = 3                                     // Pokemon counts: Basic, Stage1, Stage2
     + NUM_SUPPORTER_EFFECT_CATEGORIES     // Aggregated trainer effect categories
     + 1                                   // Can evolve active
-    + 1;                                  // Total playable cards count
+    + 1; // Total playable cards count
 
 /// Global features
-pub const GLOBAL_FEATURES: usize = 
-    1                                     // Turn count (normalized)
+pub const GLOBAL_FEATURES: usize = 1                                     // Turn count (normalized)
     + 2                                   // Points (self, opponent)
     + 4                                   // Deck sizes, Discard sizes
-    + NUM_ENERGY_TYPES;                   // Deck energy composition
+    + NUM_ENERGY_TYPES; // Deck energy composition
 
 /// Board features (all slots for both players)
 pub const BOARD_FEATURES: usize = 2 * SLOTS_PER_PLAYER * FEATURES_PER_SLOT;
@@ -79,7 +76,13 @@ pub fn get_observation_tensor(state: &State, perspective: usize) -> Vec<f32> {
     encode_hand_features(state, perspective, &mut obs);
     encode_hand_features(state, opponent, &mut obs);
 
-    debug_assert_eq!(obs.len(), OBSERVATION_SIZE, "Observation size mismatch! Expected {}, got {}", OBSERVATION_SIZE, obs.len());
+    debug_assert_eq!(
+        obs.len(),
+        OBSERVATION_SIZE,
+        "Observation size mismatch! Expected {}, got {}",
+        OBSERVATION_SIZE,
+        obs.len()
+    );
     obs
 }
 
@@ -106,7 +109,11 @@ fn encode_global_features(state: &State, perspective: usize, obs: &mut Vec<f32>)
     // Deck energy composition (multi-hot)
     let deck_energies = &state.decks[perspective].energy_types;
     for energy in all_energy_types() {
-        obs.push(if deck_energies.contains(&energy) { 1.0 } else { 0.0 });
+        obs.push(if deck_energies.contains(&energy) {
+            1.0
+        } else {
+            0.0
+        });
     }
 }
 
@@ -124,7 +131,11 @@ fn encode_board_state(state: &State, player: usize, obs: &mut Vec<f32>) {
             // Card's energy type (one-hot)
             let card_energy = pokemon.get_energy_type();
             for energy in all_energy_types() {
-                obs.push(if card_energy == Some(energy) { 1.0 } else { 0.0 });
+                obs.push(if card_energy == Some(energy) {
+                    1.0
+                } else {
+                    0.0
+                });
             }
 
             // Energy attached (count per type)
@@ -135,7 +146,11 @@ fn encode_board_state(state: &State, player: usize, obs: &mut Vec<f32>) {
 
             // Energy delta for strongest attack
             let attacks = pokemon.get_attacks();
-            let strongest_attack = if attacks.len() > 1 { attacks.get(1) } else { attacks.first() };
+            let strongest_attack = if attacks.len() > 1 {
+                attacks.get(1)
+            } else {
+                attacks.first()
+            };
             let missing_energy = if let Some(attack) = strongest_attack {
                 calculate_missing_energy(&pokemon.attached_energy, &attack.energy_required)
             } else {
@@ -149,7 +164,7 @@ fn encode_board_state(state: &State, player: usize, obs: &mut Vec<f32>) {
                 obs.push((attack.energy_required.len() as f32 / 5.0).clamp(0.0, 1.0));
                 obs.push(if attack.effect.is_some() { 1.0 } else { 0.0 });
                 obs.push(1.0); // has_attack
-                
+
                 // Effect categories
                 let effect_cats = encode_attack_effect_text(attack.effect.as_deref());
                 obs.extend_from_slice(&effect_cats);
@@ -164,7 +179,7 @@ fn encode_board_state(state: &State, player: usize, obs: &mut Vec<f32>) {
                 obs.push((attack.energy_required.len() as f32 / 5.0).clamp(0.0, 1.0));
                 obs.push(if attack.effect.is_some() { 1.0 } else { 0.0 });
                 obs.push(1.0); // has_attack
-                
+
                 let effect_cats = encode_attack_effect_text(attack.effect.as_deref());
                 obs.extend_from_slice(&effect_cats);
             } else {
@@ -179,7 +194,11 @@ fn encode_board_state(state: &State, player: usize, obs: &mut Vec<f32>) {
             obs.push(if pokemon.confused { 1.0 } else { 0.0 });
 
             // Has ability
-            obs.push(if pokemon.card.get_ability().is_some() { 1.0 } else { 0.0 });
+            obs.push(if pokemon.card.get_ability().is_some() {
+                1.0
+            } else {
+                0.0
+            });
 
             // Retreat cost
             obs.push((get_retreat_cost(state, pokemon).len() as f32 / 4.0).clamp(0.0, 1.0));
@@ -194,24 +213,22 @@ fn encode_board_state(state: &State, player: usize, obs: &mut Vec<f32>) {
 
 fn encode_hand_features(state: &State, player: usize, obs: &mut Vec<f32>) {
     let hand = &state.hands[player];
-    
+
     // Count Pokemon by stage
     let mut basic_count = 0;
     let mut stage1_count = 0;
     let mut stage2_count = 0;
-    
+
     // Aggregate trainer effect categories
     let mut trainer_cats = [0.0_f32; NUM_SUPPORTER_EFFECT_CATEGORIES];
-    
+
     for card in hand {
         match card {
-            Card::Pokemon(pokemon) => {
-                match pokemon.stage {
-                    0 => basic_count += 1,
-                    1 => stage1_count += 1,
-                    _ => stage2_count += 1,
-                }
-            }
+            Card::Pokemon(pokemon) => match pokemon.stage {
+                0 => basic_count += 1,
+                1 => stage1_count += 1,
+                _ => stage2_count += 1,
+            },
             Card::Trainer(trainer) => {
                 // Aggregate trainer effect categories
                 if let Some(card_id) = CardId::from_card_id(&trainer.id) {
@@ -223,24 +240,26 @@ fn encode_hand_features(state: &State, player: usize, obs: &mut Vec<f32>) {
             }
         }
     }
-    
+
     // Pokemon counts (normalized)
     obs.push((basic_count as f32 / 5.0).clamp(0.0, 1.0));
     obs.push((stage1_count as f32 / 3.0).clamp(0.0, 1.0));
     obs.push((stage2_count as f32 / 2.0).clamp(0.0, 1.0));
-    
+
     // Trainer effect categories (normalized by count)
     for cat in trainer_cats {
         obs.push((cat / 3.0).clamp(0.0, 1.0));
     }
-    
+
     // Can evolve active
     let can_evolve = can_evolve_active(state, player);
     obs.push(if can_evolve { 1.0 } else { 0.0 });
-    
+
     // Total playable cards
-    let playable_count = basic_count + stage1_count + stage2_count + 
-        trainer_cats.iter().filter(|&&c| c > 0.0).count();
+    let playable_count = basic_count
+        + stage1_count
+        + stage2_count
+        + trainer_cats.iter().filter(|&&c| c > 0.0).count();
     obs.push((playable_count as f32 / 10.0).clamp(0.0, 1.0));
 }
 
@@ -319,7 +338,7 @@ mod tests {
         let obs = get_observation_tensor(&state, 0);
         assert_eq!(obs.len(), OBSERVATION_SIZE);
     }
-    
+
     #[test]
     fn test_observation_values_in_range() {
         let state = State::default();
