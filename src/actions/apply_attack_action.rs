@@ -582,6 +582,10 @@ fn forecast_effect_attack_by_mechanic(
         Mechanic::CoinFlipToBlockAttackNextTurn => {
             coin_flip_to_block_attack_next_turn(attack.fixed_damage)
         }
+        Mechanic::HoOhExPhoenixTurbo => hooh_phoenix_turbo(state, attack.fixed_damage),
+        Mechanic::HealBenchedBasic { amount } => {
+            heal_benched_basic(state, attack.fixed_damage, *amount)
+        }
     }
 }
 
@@ -922,6 +926,111 @@ fn generate_energy_distributions(fire_bench_idx: &[usize], heads: usize) -> Vec<
     }
 
     all_choices
+}
+
+// Helper function to generate all possible distributions of 'heads' energy
+// across the available Pokémon
+fn generate_distributions(
+    fire_bench_idx: &[usize],
+    remaining: usize,
+    start_idx: usize,
+    current: &mut Vec<usize>,
+    result: &mut Vec<Vec<usize>>,
+) {
+    if remaining == 0 {
+        result.push(current.clone());
+        return;
+    }
+
+    if start_idx >= fire_bench_idx.len() {
+        return;
+    }
+
+    // Try different amounts for the current Pokémon
+    for amount in 0..=remaining {
+        current[start_idx] = amount;
+        generate_distributions(
+            fire_bench_idx,
+            remaining - amount,
+            start_idx + 1,
+            current,
+            result,
+        );
+    }
+    current[start_idx] = 0;
+}
+
+/// Ho-Oh ex's Phoenix Turbo: Attach [R], [W], and [L] Energy from Energy Zone to Benched Basic Pokémon
+fn hooh_phoenix_turbo(_state: &State, fixed_damage: u32) -> (Probabilities, Mutations) {
+    active_damage_effect_doutcome(fixed_damage, move |_, state, action| {
+        // Collect all benched basic Pokémon
+        let basic_bench_idx: Vec<usize> = state
+            .enumerate_bench_pokemon(action.actor)
+            .filter(|(_, pokemon)| get_stage(pokemon) == 0)
+            .map(|(idx, _)| idx)
+            .collect();
+
+        if basic_bench_idx.is_empty() {
+            return;
+        }
+
+        // Generate all possible ways to distribute R, W, L to basic bench pokemon
+        let all_choices = generate_multi_type_energy_distributions(&basic_bench_idx);
+        if !all_choices.is_empty() {
+            state
+                .move_generation_stack
+                .push((action.actor, all_choices));
+        }
+    })
+}
+
+/// Generate all combinations for distributing [R], [W], [L] energies to benched basic Pokémon
+fn generate_multi_type_energy_distributions(bench_idx: &[usize]) -> Vec<SimpleAction> {
+    let mut all_choices = Vec::new();
+
+    // For each combination of targets (one per energy type)
+    for &fire_target in bench_idx {
+        for &water_target in bench_idx {
+            for &lightning_target in bench_idx {
+                // Build attachments directly from the three targets
+                let attachments = vec![
+                    (1, EnergyType::Fire, fire_target),
+                    (1, EnergyType::Water, water_target),
+                    (1, EnergyType::Lightning, lightning_target),
+                ];
+
+                all_choices.push(SimpleAction::Attach {
+                    attachments,
+                    is_turn_energy: false,
+                });
+            }
+        }
+    }
+
+    all_choices
+}
+
+/// Ho-Oh's Blessed Burn: Heal damage from each Benched Basic Pokémon
+fn heal_benched_basic(
+    _state: &State,
+    fixed_damage: u32,
+    heal_amount: u32,
+) -> (Probabilities, Mutations) {
+    active_damage_effect_doutcome(fixed_damage, move |_, state, action| {
+        // First collect the indices of benched basic pokemon
+        let basic_bench_idx: Vec<usize> = state
+            .enumerate_bench_pokemon(action.actor)
+            .filter(|(_, pokemon)| get_stage(pokemon) == 0)
+            .map(|(idx, _)| idx)
+            .collect();
+
+        // Then heal each one
+        for idx in basic_bench_idx {
+            if let Some(p) = state.in_play_pokemon[action.actor][idx].as_mut() {
+                p.heal(heal_amount);
+            }
+        }
+    })
 }
 
 fn damage_for_each_heads_attack(

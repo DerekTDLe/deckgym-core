@@ -590,7 +590,10 @@ pub static EFFECT_MECHANIC_MAP: LazyLock<HashMap<&'static str, Mechanic>> = Lazy
         "Heal 20 damage from this Pokémon.",
         Mechanic::SelfHeal { amount: 20 },
     );
-    // map.insert("Heal 30 damage from each of your Benched Basic Pokémon.", todo_implementation);
+    map.insert(
+        "Heal 30 damage from each of your Benched Basic Pokémon.",
+        Mechanic::HealBenchedBasic { amount: 30 },
+    );
     map.insert(
         "Heal 30 damage from this Pokémon.",
         Mechanic::SelfHeal { amount: 30 },
@@ -912,7 +915,7 @@ pub static EFFECT_MECHANIC_MAP: LazyLock<HashMap<&'static str, Mechanic>> = Lazy
             energies: vec![EnergyType::Fire],
         },
     );
-    // map.insert("Take a [R], [W], and [L] Energy from your Energy Zone and attach them to your Benched Basic Pokémon in any way you like.", todo_implementation);
+    map.insert("Take a [R], [W], and [L] Energy from your Energy Zone and attach them to your Benched Basic Pokémon in any way you like.", Mechanic::HoOhExPhoenixTurbo);
     // map.insert("Take a [W] Energy from your Energy Zone and attach it to 1 of your Benched Basic Pokémon.", todo_implementation);
     map.insert(
         "Take a [W] Energy from your Energy Zone and attach it to this Pokémon.",

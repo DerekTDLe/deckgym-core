@@ -3,7 +3,6 @@
 // This module categorizes Pokemon attack effects by their mechanics
 // to enable generalization in the RL observation tensor.
 
-
 /// TODO : refine the categories, it is a simple implementation
 use crate::actions::Mechanic;
 
@@ -37,16 +36,16 @@ pub const NUM_ATTACK_EFFECT_CATEGORIES: usize = 9;
 /// Returns the effect categories for a given Mechanic.
 pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffectCategory] {
     use AttackEffectCategory::*;
-    
+
     match mechanic {
         // === HEALS ===
         Mechanic::SelfHeal { .. } => &[Heals],
-        
+
         // === STATUS ===
         Mechanic::InflictStatusConditions { .. } => &[Status],
         Mechanic::ChanceStatusAttack { .. } => &[Status, CoinFlip],
         Mechanic::ExtraDamageForEachHeadsWithStatus { .. } => &[CoinFlip, Status],
-        
+
         // === COIN FLIP ===
         Mechanic::CoinFlipExtraDamage { .. } => &[CoinFlip],
         Mechanic::CoinFlipExtraDamageOrSelfDamage { .. } => &[CoinFlip, SelfDamage],
@@ -54,7 +53,7 @@ pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffe
         Mechanic::CoinFlipNoEffect => &[CoinFlip],
         Mechanic::ExtraDamageIfBothHeads { .. } => &[CoinFlip],
         Mechanic::CoinFlipToBlockAttackNextTurn => &[CoinFlip, CardEffect],
-        
+
         // === ENERGY MANIPULATION ===
         Mechanic::SelfDiscardEnergy { .. } => &[EnergyManip],
         Mechanic::SelfDiscardAllEnergy => &[EnergyManip],
@@ -66,7 +65,7 @@ pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffe
         Mechanic::ManaphyOceanicGift => &[EnergyManip],
         Mechanic::MoltresExInfernoDance => &[EnergyManip, CoinFlip],
         Mechanic::VaporeonHyperWhirlpool => &[EnergyManip, CoinFlip],
-        
+
         // === CONDITIONAL DAMAGE ===
         Mechanic::ExtraDamageIfEx { .. } => &[ConditionalDamage],
         Mechanic::ExtraDamageIfExtraEnergy { .. } => &[ConditionalDamage],
@@ -83,7 +82,7 @@ pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffe
         Mechanic::DamageReducedBySelfDamage => &[ConditionalDamage, SelfDamage],
         Mechanic::DamageEqualToSelfDamage => &[ConditionalDamage],
         Mechanic::ExtraDamageEqualToSelfDamage => &[ConditionalDamage],
-        
+
         // === BENCH DAMAGE ===
         Mechanic::DamageAllOpponentPokemon { .. } => &[BenchDamage],
         Mechanic::AlsoBenchDamage { .. } => &[BenchDamage],
@@ -91,27 +90,29 @@ pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffe
         Mechanic::DirectDamage { .. } => &[BenchDamage],
         Mechanic::ConditionalBenchDamage { .. } => &[BenchDamage, ConditionalDamage],
         Mechanic::PalkiaExDimensionalStorm => &[BenchDamage, EnergyManip],
-        
+
         // === CARD EFFECTS ===
         Mechanic::DamageAndCardEffect { .. } => &[CardEffect],
         Mechanic::DamageAndMultipleCardEffects { .. } => &[CardEffect],
         Mechanic::DamageAndTurnEffect { .. } => &[CardEffect],
         Mechanic::BlockBasicAttack => &[CardEffect],
         Mechanic::ShuffleOpponentActiveIntoDeck => &[CardEffect],
-        
+
         // === SEARCH ===
         Mechanic::SearchToHandByEnergy { .. } => &[Search],
         Mechanic::SearchToBenchByName { .. } => &[Search],
         Mechanic::MagikarpWaterfallEvolution => &[Search],
-        
+
         // === SELF DAMAGE ===
         Mechanic::SelfDamage { .. } => &[SelfDamage],
         Mechanic::RecoilIfKo { .. } => &[SelfDamage],
-        
+
         // === SPECIAL / UTILITY ===
         Mechanic::SwitchSelfWithBench => &[CardEffect],
         Mechanic::CelebiExPowerfulBloom => &[CoinFlip],
         Mechanic::MegaBlazikenExMegaBurningAttack => &[EnergyManip, Status],
+        Mechanic::HoOhExPhoenixTurbo => &[EnergyManip],
+        Mechanic::HealBenchedBasic { .. } => &[Heals],
     }
 }
 
@@ -119,11 +120,11 @@ pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffe
 pub fn encode_attack_categories(mechanic: &Mechanic) -> [f32; NUM_ATTACK_EFFECT_CATEGORIES] {
     let categories = get_attack_effect_categories(mechanic);
     let mut encoding = [0.0; NUM_ATTACK_EFFECT_CATEGORIES];
-    
+
     for cat in categories {
         encoding[*cat as usize] = 1.0;
     }
-    
+
     encoding
 }
 
@@ -131,13 +132,13 @@ pub fn encode_attack_categories(mechanic: &Mechanic) -> [f32; NUM_ATTACK_EFFECT_
 /// Returns zeros if the effect is not found or has no special mechanic.
 pub fn encode_attack_effect_text(effect_text: Option<&str>) -> [f32; NUM_ATTACK_EFFECT_CATEGORIES] {
     use crate::actions::EFFECT_MECHANIC_MAP;
-    
+
     if let Some(text) = effect_text {
         if let Some(mechanic) = EFFECT_MECHANIC_MAP.get(text) {
             return encode_attack_categories(mechanic);
         }
     }
-    
+
     [0.0; NUM_ATTACK_EFFECT_CATEGORIES]
 }
 
@@ -152,22 +153,22 @@ mod tests {
         let cats = get_attack_effect_categories(&mechanic);
         assert!(cats.contains(&AttackEffectCategory::Heals));
     }
-    
+
     #[test]
     fn test_coin_flip_multi_category() {
-        let mechanic = Mechanic::CoinFlipExtraDamageOrSelfDamage { 
-            extra_damage: 40, 
-            self_damage: 20 
+        let mechanic = Mechanic::CoinFlipExtraDamageOrSelfDamage {
+            extra_damage: 40,
+            self_damage: 20,
         };
         let cats = get_attack_effect_categories(&mechanic);
         assert!(cats.contains(&AttackEffectCategory::CoinFlip));
         assert!(cats.contains(&AttackEffectCategory::SelfDamage));
     }
-    
+
     #[test]
     fn test_encoding_size() {
-        let mechanic = Mechanic::SelfDiscardEnergy { 
-            energies: vec![EnergyType::Fire] 
+        let mechanic = Mechanic::SelfDiscardEnergy {
+            energies: vec![EnergyType::Fire],
         };
         let encoding = encode_attack_categories(&mechanic);
         assert_eq!(encoding.len(), NUM_ATTACK_EFFECT_CATEGORIES);
