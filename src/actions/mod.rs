@@ -14,5 +14,6 @@ pub(crate) use apply_action::apply_evolve;
 pub(crate) use apply_action::forecast_action;
 pub use apply_trainer_action::may_effect;
 pub use effect_mechanic_map::EFFECT_MECHANIC_MAP;
+pub use attacks::Mechanic;
 pub use types::Action;
 pub use types::SimpleAction;
