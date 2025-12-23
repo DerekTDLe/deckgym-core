@@ -139,7 +139,9 @@ fn can_use_celesteela_ultra_thrusters(state: &State, card: &PlayedCard) -> bool 
     if card.ability_used {
         return false;
     }
-    let active = state.get_active(state.current_player);
+    let Some(active) = state.maybe_get_active(state.current_player) else {
+        return false;
+    };
     if !is_ultra_beast(&active.get_name()) {
         return false;
     }
@@ -207,7 +209,9 @@ fn can_use_umbreon_dark_chase(state: &State, card: &PlayedCard) -> bool {
 
 fn can_use_vaporeon_wash_out(state: &State) -> bool {
     // Check if active Pokémon is Water type
-    let active = state.get_active(state.current_player);
+    let Some(active) = state.maybe_get_active(state.current_player) else {
+        return false;
+    };
     if active.get_energy_type() != Some(EnergyType::Water) {
         return false;
     }

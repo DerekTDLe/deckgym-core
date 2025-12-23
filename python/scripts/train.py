@@ -190,7 +190,15 @@ class SelfPlayEnv(gym.Env):
     
     def action_masks(self) -> np.ndarray:
         """Return valid action mask for the agent."""
-        return self._env.action_masks()
+        try:
+            return self._env.action_masks()
+        except Exception as e:
+            # Panic recovery - reset and return EndTurn-only
+            print(f"WARNING: Panic in SelfPlayEnv.action_masks: {e}")
+            self._env.reset()
+            mask = np.zeros(self._env.action_space.n, dtype=np.bool_)
+            mask[0] = True
+            return mask
     
     # -------------------------------------------------------------------------
     # Private Methods

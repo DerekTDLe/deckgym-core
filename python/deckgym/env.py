@@ -127,7 +127,16 @@ class DeckGymEnv(gym.Env):
         Returns:
             Boolean array where True = valid action
         """
-        mask = np.array(self.game.get_action_mask(), dtype=np.bool_)
+        try:
+            mask = np.array(self.game.get_action_mask(), dtype=np.bool_)
+        except Exception as e:
+            # Rust panic - game in corrupted state
+            # Reset and return EndTurn-only mask to recover
+            print(f"WARNING: Panic in action_masks, resetting game: {e}")
+            self.reset()
+            mask = np.zeros(self.action_space.n, dtype=np.bool_)
+            mask[0] = True  # Only EndTurn valid
+            return mask
         
         # Fallback: if no actions valid, force EndTurn (action 0) to continue
         # This handles edge cases where the game is stuck
