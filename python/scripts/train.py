@@ -201,32 +201,31 @@ class SelfPlayEnv(gym.Env):
         done = False
         turn_actions = 0
         
-        while self._env.game.current_player() == 1 and not self._env.game.is_game_over():
-            turn_actions += 1
-            self._episode_actions += 1
-            
-            # Safety limits
-            if turn_actions > self.config.max_actions_per_turn:
-                self._log_freeze_warning("opponent_turn_limit", turn_actions)
-                return obs, info, 0.0, True
-            
-            if self._episode_actions > self.config.max_total_actions:
-                self._log_freeze_warning("episode_action_limit", self._episode_actions)
-                return obs, info, 0.0, True
-            
-            # Select opponent action
-            action = self._select_opponent_action(obs)
-            
-            # Execute action
-            try:
+        try:
+            while self._env.game.current_player() == 1 and not self._env.game.is_game_over():
+                turn_actions += 1
+                self._episode_actions += 1
+                
+                # Safety limits
+                if turn_actions > self.config.max_actions_per_turn:
+                    self._log_freeze_warning("opponent_turn_limit", turn_actions)
+                    return obs, info, 0.0, True
+                
+                if self._episode_actions > self.config.max_total_actions:
+                    self._log_freeze_warning("episode_action_limit", self._episode_actions)
+                    return obs, info, 0.0, True
+                
+                # Select opponent action
+                action = self._select_opponent_action(obs)
+                
+                # Execute action
                 obs, reward, done, truncated, info = self._env.step(action)
-            except Exception as e:
-                print(f"WARNING: Game error during opponent turn: {e}")
-                return obs, info, 0.0, True
-            
-            final_reward = -reward  # Invert reward (opponent's loss = agent's gain)
-            if done or truncated:
-                break
+                final_reward = -reward  # Invert reward (opponent's loss = agent's gain)
+                if done or truncated:
+                    break
+        except Exception as e:
+            print(f"WARNING: Game error during opponent turn: {e}")
+            return obs, info, 0.0, True
         
         return obs, info, final_reward, done
     
@@ -553,21 +552,21 @@ if __name__ == "__main__":
     parser.add_argument("--save", default="models/rl_bot", help="Model save path")
     
     # Training
-    parser.add_argument("--steps", type=int, default=1_000_000, help="Total training steps")
-    parser.add_argument("--checkpoint-freq", type=int, default=50_000, help="Checkpoint frequency")
+    parser.add_argument("--steps", type=int, default=10_000_000, help="Total training steps")
+    parser.add_argument("--checkpoint-freq", type=int, default=100_000, help="Checkpoint frequency")
     
     # PPO hyperparameters
-    parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--batch-size", type=int, default=512, help="Batch size")
     parser.add_argument("--n-epochs", type=int, default=10, help="PPO epochs per update")
     parser.add_argument("--ent-coef", type=float, default=0.01, help="Entropy coefficient")
     
     # Self-play
     parser.add_argument("--opponent-update-freq", type=int, default=50_000, help="Frozen opponent update frequency")
-    parser.add_argument("--warmup-steps", type=int, default=100_000, help="Curriculum warmup steps")
+    parser.add_argument("--warmup-ratio", type=float, default=0.10, help="Curriculum warmup ratio (0-1)")
     
     # Parallelization
-    parser.add_argument("--n-envs", type=int, default=1, help="Number of parallel environments (DummyVecEnv)")
+    parser.add_argument("--n-envs", type=int, default=8, help="Number of parallel environments (DummyVecEnv)")
     
     # Device
     parser.add_argument("--device", default="auto", choices=["cpu", "cuda", "auto"])
@@ -586,7 +585,7 @@ if __name__ == "__main__":
         n_epochs=args.n_epochs,
         ent_coef=args.ent_coef,
         frozen_opponent_update_freq=args.opponent_update_freq,
-        curriculum_warmup_steps=args.warmup_steps,
+        curriculum_warmup_ratio=args.warmup_ratio,
         n_envs=args.n_envs,
         device=args.device,
     )
