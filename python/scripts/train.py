@@ -43,26 +43,31 @@ class TrainingConfig:
     tensorboard_dir: str = "./logs/"
     
     # Training duration
-    total_timesteps: int = 1_000_000
-    checkpoint_freq: int = 50_000
+    total_timesteps: int = 10_000_000
+    checkpoint_freq: int = 100_000
     
     # PPO hyperparameters
-    learning_rate: float = 3e-4
-    n_steps: int = 4096              # Experience collected per update
-    batch_size: int = 512            # Minibatch size for optimization
-    n_epochs: int = 10               # Optimization epochs per update
-    gamma: float = 0.99              # Discount factor
-    gae_lambda: float = 0.95         # GAE lambda
-    ent_coef: float = 0.01           # Entropy bonus (exploration)
-    clip_range: float = 0.2          # PPO clipping range
+    learning_rate: float = 1e-4           # Reduced from 3e-4 (approx_kl was too high)
+    n_steps: int = 4096                   # Experience collected per update
+    batch_size: int = 512                 # Minibatch size for optimization
+    n_epochs: int = 10                    # Optimization epochs per update
+    gamma: float = 0.99                   # Discount factor
+    gae_lambda: float = 0.95              # GAE lambda
+    ent_coef: float = 0.01                # Entropy bonus (exploration)
+    clip_range: float = 0.2               # PPO clipping range
     
     # Network architecture
-    policy_layers: tuple = (512, 512, 256)
-    value_layers: tuple = (512, 512, 256)
+    policy_layers: tuple = (512, 512, 256, 128)   # Deeper policy network
+    value_layers: tuple = (512, 256, 128)         # Simpler value network
+    use_silu: bool = True                         # Use SiLU activation (better than ReLU)
     
     # Self-play
-    frozen_opponent_update_freq: int = 50_000
-    curriculum_warmup_steps: int = 100_000
+    frozen_opponent_update_freq: int = 50_000     # Base frequency (adaptive adjusts this)
+    adaptive_frozen_opponent: bool = True         # Enable adaptive opponent updates
+    target_win_rate: float = 0.55                 # Target win rate for adaptive updates
+    
+    # Curriculum learning
+    curriculum_warmup_ratio: float = 0.10         # Phase 1 = 10% of total steps (simple decks)
     
     # Game limits
     max_turns: int = 99              # Official Pokemon TCG Pocket limit
@@ -70,10 +75,15 @@ class TrainingConfig:
     max_total_actions: int = 500     # Prevents runaway episodes
     
     # Parallel environments (DummyVecEnv - no IPC overhead)
-    n_envs: int = 1                   # Number of environments (1=single, >1=DummyVecEnv)
+    n_envs: int = 8                  # 8 parallel environments for diversity
     
     # Device
     device: str = "auto"
+    
+    @property
+    def curriculum_warmup_steps(self) -> int:
+        """Compute warmup steps from ratio."""
+        return int(self.total_timesteps * self.curriculum_warmup_ratio)
 
 
 # Default configuration
@@ -294,26 +304,68 @@ class FrozenOpponentCallback(BaseCallback):
     """
     Periodically updates the frozen opponent with current agent weights.
     
-    This creates a slowly-moving target that prevents self-play collapse
-    while still providing meaningful training signal.
+    If adaptive=True, adjusts update frequency based on win rate:
+    - Win rate too high → update more often (harder opponent)
+    - Win rate too low → update less often (easier opponent)
     
     Supports both single env and DummyVecEnv.
     """
     
-    def __init__(self, env, n_envs: int = 1, update_freq: int = 50_000, verbose: int = 0):
+    def __init__(
+        self,
+        env,
+        n_envs: int = 1,
+        update_freq: int = 50_000,
+        adaptive: bool = True,
+        target_win_rate: float = 0.55,
+        min_freq: int = 25_000,
+        max_freq: int = 100_000,
+        verbose: int = 0,
+    ):
         super().__init__(verbose)
         self.env = env
         self.n_envs = n_envs
-        self.update_freq = update_freq
+        self.base_freq = update_freq
+        self.current_freq = update_freq
+        self.adaptive = adaptive
+        self.target_win_rate = target_win_rate
+        self.min_freq = min_freq
+        self.max_freq = max_freq
         self.last_update = 0
+        self.win_buffer = []  # Track recent episode outcomes
     
     def _on_step(self) -> bool:
-        if self.num_timesteps - self.last_update >= self.update_freq:
+        # Track wins/losses from episode info
+        if self.adaptive:
+            infos = self.locals.get('infos', [])
+            for info in infos:
+                if 'episode' in info:
+                    # Episode ended: reward > 0 means win
+                    ep_reward = info['episode'].get('r', 0)
+                    self.win_buffer.append(1 if ep_reward > 0 else 0)
+                    if len(self.win_buffer) > 100:
+                        self.win_buffer.pop(0)
+            
+            # Adjust frequency based on win rate
+            if len(self.win_buffer) >= 20:
+                win_rate = sum(self.win_buffer) / len(self.win_buffer)
+                if win_rate > self.target_win_rate + 0.10:
+                    # Too easy → update more often
+                    self.current_freq = self.min_freq
+                elif win_rate < self.target_win_rate - 0.10:
+                    # Too hard → update less often
+                    self.current_freq = self.max_freq
+                else:
+                    # In target range → use base frequency
+                    self.current_freq = self.base_freq
+        
+        if self.num_timesteps - self.last_update >= self.current_freq:
             self._update_frozen_opponent()
             self.last_update = self.num_timesteps
             
             if self.verbose > 0:
-                print(f"[Step {self.num_timesteps:,}] Updated frozen opponent")
+                wr = sum(self.win_buffer) / len(self.win_buffer) if self.win_buffer else 0.5
+                print(f"[Step {self.num_timesteps:,}] Updated frozen opponent (WR: {wr:.1%}, freq: {self.current_freq:,})")
         
         return True
     
@@ -402,12 +454,13 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     
     # Setup model
     print("[3/4] Initializing model...")
+    activation_fn = torch.nn.SiLU if config.use_silu else torch.nn.ReLU
     policy_kwargs = dict(
         net_arch=dict(
             pi=list(config.policy_layers),
             vf=list(config.value_layers),
         ),
-        activation_fn=torch.nn.ReLU,
+        activation_fn=activation_fn,
     )
     
     model = MaskablePPO(
@@ -443,6 +496,8 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
             env,
             n_envs=config.n_envs,
             update_freq=config.frozen_opponent_update_freq,
+            adaptive=config.adaptive_frozen_opponent,
+            target_win_rate=config.target_win_rate,
             verbose=1,
         ),
     ]
