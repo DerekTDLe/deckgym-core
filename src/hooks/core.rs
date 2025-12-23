@@ -279,9 +279,9 @@ pub(crate) fn can_play_item(state: &State) -> bool {
 }
 
 fn get_heavy_helmet_reduction(state: &State, (target_player, target_idx): (usize, usize)) -> u32 {
-    let defending_pokemon = &state.in_play_pokemon[target_player][target_idx]
-        .as_ref()
-        .expect("Defending Pokemon should be there when checking Heavy Helmet");
+    let Some(defending_pokemon) = &state.in_play_pokemon[target_player][target_idx].as_ref() else {
+        return 0;
+    };
     if let Some(tool_id) = defending_pokemon.attached_tool {
         if tool_id == ToolId::B1219HeavyHelmet {
             if let Card::Pokemon(pokemon_card) = &defending_pokemon.card {
@@ -307,9 +307,9 @@ fn get_intimidating_fang_reduction(
         return 0;
     }
 
-    let defenders_active = &state.in_play_pokemon[target_player][0]
-        .as_ref()
-        .expect("Defending Pokemon should be there when checking Intimidating Fang");
+    let Some(defenders_active) = &state.in_play_pokemon[target_player][0].as_ref() else {
+        return 0;
+    };
     if let Some(ability_id) = AbilityId::from_pokemon_id(&defenders_active.card.get_id()[..]) {
         if ability_id == AbilityId::A3a015LuxrayIntimidatingFang {
             debug!("Intimidating Fang: Reducing opponent's attack damage by 20");

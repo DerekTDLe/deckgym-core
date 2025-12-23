@@ -21,28 +21,24 @@ class DeckGymEnv(gym.Env):
         - Hand features (34): Pokemon counts, trainer categories, can-evolve flags
 
     Action space:
-        Discrete(130) - Canonical action indices covering all SimpleAction variants:
+        Discrete(175) - Canonical action indices covering all SimpleAction variants:
         - 0: EndTurn
         - 1-2: Attack (index 0, 1)
         - 3-5: Retreat to bench position (1, 2, 3)
-        - 6-9: Attach energy to position (0, 1, 2, 3)
-        - 10-19: Place Pokémon from hand
-        - 20-29: Evolve Pokémon from hand
-        - 30-39: Play trainer from hand
-        - 40-43: Use ability (position 0-3)
-        - 44: DrawCard
-        - 45: Noop (decline optional action)
-        - 46-49: Activate bench Pokémon
-        - 50-53: AttachTool
-        - 54-57: Heal
-        - 58-61: DiscardFossil
-        - 62-65: AttachFromDiscard
-        - 66-75: CommunicatePokemon
-        - 76-85: ShufflePokemonIntoDeck
-        - 86-95: ShuffleOpponentSupporter
-        - 96-105: DiscardOpponentSupporter
-        - 106-115: DiscardOwnCard
-        - 116-129: Special actions (EeveeBag, MoveEnergy, etc.)
+        - 6-9: UseAbility (position 0-3)
+        - 10-13: Attach Energy (Turn) (Slot 0-3)
+        - 14-16: Activate bench Pokémon (1-3)
+        - 17-20: DiscardFossil (Slot 0-3)
+        - 21-24: Heal (Slot 0-3)
+        - 25-28: AttachFromDiscard (Slot 0-3)
+        - 30-129: Hand Actions (Play/Place/Evolve)
+                 Logic: 30 + (HandIdx * 5) + InteractionType
+                 InteractionType: 0=NoTarget, 1=Active, 2=Bench1, 3=Bench2, 4=Bench3
+        - 130-133: ApplyDamage Targets 0-3
+        - 140-159: SelectHandCard Resolution (Hand 0-19)
+        - 160: DrawCard
+        - 161: Noop
+        - 162-175: Special/Misc (EeveeBag, MoveEnergy, etc.)
 
     Reward:
         +1.0 for winning, -1.0 for losing, 0.0 otherwise.
