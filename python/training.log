@@ -1,0 +1,131 @@
+nohup: les entrées sont ignorées
+2025-12-24 08:48:37.859820: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+/home/prime/Documents/GitHub/deckgym-core/.venv/lib/python3.12/site-packages/keras/src/export/tf2onnx_lib.py:8: FutureWarning: In the future `np.object` will be defined as the corresponding NumPy scalar.
+  if not hasattr(np, "object"):
+============================================================
+Pokemon TCG Pocket RL Training
+============================================================
+
+Configuration:
+  Total timesteps:    30,000,000
+  Learning rate:      0.0001
+  Batch size:         512
+  Entropy coef:       0.01
+  Policy network:     (512, 512, 256, 128)
+  N environments:     8
+  Device:             auto
+
+[1/4] Loading decks...
+Loading simple decks...
+Loaded 28 decks from 28 archetypes
+  Tiers: 0 weak, 28 mid, 0 strong
+Loading meta decks...
+Loaded 5188 decks from 389 archetypes
+  Tiers: 353 weak, 1917 mid, 2918 strong
+[2/4] Creating 8 environment(s)...
+[3/4] Initializing model...
+Using cuda device
+      Loading frozen opponent on CPU...
+[4/4] Starting training...
+      Checkpoints: every 100,000 steps
+      Opponent updates: every 75,000 steps
+Logging to ./logs/MaskablePPO_4
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 108      |
+|    ep_rew_mean     | 0.02     |
+| time/              |          |
+|    fps             | 910      |
+|    iterations      | 1        |
+|    time_elapsed    | 71       |
+|    total_timesteps | 65536    |
+---------------------------------
+[Step 75,000] Updated frozen opponent (WR: 58.0%, freq: 75,000)
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 93.2        |
+|    ep_rew_mean          | -0.04       |
+| time/                   |             |
+|    fps                  | 880         |
+|    iterations           | 2           |
+|    time_elapsed         | 148         |
+|    total_timesteps      | 131072      |
+| train/                  |             |
+|    approx_kl            | 0.005008542 |
+|    clip_fraction        | 0.0427      |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -0.902      |
+|    explained_variance   | -0.0153     |
+|    learning_rate        | 0.0001      |
+|    loss                 | -0.0039     |
+|    n_updates            | 8           |
+|    policy_gradient_loss | -0.00469    |
+|    value_loss           | 0.035       |
+-----------------------------------------
+[Step 150,000] Updated frozen opponent (WR: 60.0%, freq: 75,000)
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 81.5        |
+|    ep_rew_mean          | 0.06        |
+| time/                   |             |
+|    fps                  | 883         |
+|    iterations           | 3           |
+|    time_elapsed         | 222         |
+|    total_timesteps      | 196608      |
+| train/                  |             |
+|    approx_kl            | 0.005968975 |
+|    clip_fraction        | 0.0723      |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -0.868      |
+|    explained_variance   | 0.383       |
+|    learning_rate        | 0.0001      |
+|    loss                 | -0.0035     |
+|    n_updates            | 16          |
+|    policy_gradient_loss | -0.00951    |
+|    value_loss           | 0.0306      |
+-----------------------------------------
+[Step 216,608] Updated frozen opponent (WR: 66.0%, freq: 25,000)
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 76.1        |
+|    ep_rew_mean          | 0.28        |
+| time/                   |             |
+|    fps                  | 886         |
+|    iterations           | 4           |
+|    time_elapsed         | 295         |
+|    total_timesteps      | 262144      |
+| train/                  |             |
+|    approx_kl            | 0.006670133 |
+|    clip_fraction        | 0.0836      |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -0.869      |
+|    explained_variance   | 0.466       |
+|    learning_rate        | 0.0001      |
+|    loss                 | -0.0142     |
+|    n_updates            | 24          |
+|    policy_gradient_loss | -0.0111     |
+|    value_loss           | 0.0339      |
+-----------------------------------------
+[Step 262,328] Updated frozen opponent (WR: 66.0%, freq: 25,000)
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 62.8        |
+|    ep_rew_mean          | 0.12        |
+| time/                   |             |
+|    fps                  | 887         |
+|    iterations           | 5           |
+|    time_elapsed         | 369         |
+|    total_timesteps      | 327680      |
+| train/                  |             |
+|    approx_kl            | 0.006734987 |
+|    clip_fraction        | 0.0846      |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -0.848      |
+|    explained_variance   | 0.527       |
+|    learning_rate        | 0.0001      |
+|    loss                 | -0.0106     |
+|    n_updates            | 32          |
+|    policy_gradient_loss | -0.0122     |
+|    value_loss           | 0.0347      |
+-----------------------------------------
