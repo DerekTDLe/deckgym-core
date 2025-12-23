@@ -242,7 +242,9 @@ class SelfPlayEnv(gym.Env):
         return obs, 0.0, False, True, {"truncated_reason": reason}
     
     def _end_episode_error(self, error: str):
-        """End episode due to game error."""
+        """End episode due to game error - reset internal game completely."""
+        # Reset the internal game to get a fresh state
+        self._env.reset()
         obs = np.array(self._env.game.get_obs(), dtype=np.float32)
         return obs, 0.0, True, False, {"error": error}
     

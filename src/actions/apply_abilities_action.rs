@@ -269,6 +269,9 @@ fn victreebel_ability(_: &mut StdRng, state: &mut State, action: &Action) {
             in_play_idx,
         })
         .collect::<Vec<_>>();
+    if possible_moves.is_empty() {
+        return; // No benched basic Pokemon to switch with
+    }
     state
         .move_generation_stack
         .push((acting_player, possible_moves));
@@ -292,6 +295,23 @@ fn celesteela_ultra_thrusters(_: &mut StdRng, state: &mut State, action: &Action
     state.move_generation_stack.push((acting_player, choices));
 }
 
+fn greninja_ex_shifting_stream(_: &mut StdRng, state: &mut State, action: &Action) {
+    // Once during your turn, you may switch your Active [W] Pokémon with 1 of your Benched Pokémon.
+    debug!("Greninja ex's Shifting Stream: Switching active Water Pokemon with a benched Pokemon");
+    let acting_player = action.actor;
+    let choices = state
+        .enumerate_bench_pokemon(acting_player)
+        .map(|(in_play_idx, _)| SimpleAction::Activate {
+            player: acting_player,
+            in_play_idx,
+        })
+        .collect::<Vec<_>>();
+    if choices.is_empty() {
+        return; // No benched Pokemon to switch with
+    }
+    state.move_generation_stack.push((acting_player, choices));
+}
+
 fn leafon_ex_ability(_: &mut StdRng, state: &mut State, action: &Action) {
     // Take a Grass Energy from Energy Zone and attach it to 1 of your Grass Pokémon.
     debug!("Leafeon ex's ability: Attaching 1 Grass Energy to a Grass Pokemon");
@@ -303,6 +323,36 @@ fn leafon_ex_ability(_: &mut StdRng, state: &mut State, action: &Action) {
             is_turn_energy: false,
         })
         .collect::<Vec<_>>();
+    if possible_moves.is_empty() {
+        return; // No Grass Pokemon to attach energy to
+    }
+    state
+        .move_generation_stack
+        .push((action.actor, possible_moves));
+}
+
+fn greninja_shuriken(_: &mut StdRng, state: &mut State, action: &Action) {
+    // Once during your turn, you may do 20 damage to 1 of your opponent's Pokémon.
+    debug!("Greninja's ability: Dealing 20 damage to 1 opponent's Pokemon");
+    let SimpleAction::UseAbility {
+        in_play_idx: attacking_idx,
+    } = action.action
+    else {
+        panic!("Greninja's ability should be triggered by UseAbility action");
+    };
+
+    let opponent = (action.actor + 1) % 2;
+    let possible_moves = state
+        .enumerate_in_play_pokemon(opponent)
+        .map(|(in_play_idx, _)| SimpleAction::ApplyDamage {
+            attacking_ref: (action.actor, attacking_idx),
+            targets: vec![(20, opponent, in_play_idx)],
+            is_from_active_attack: false,
+        })
+        .collect::<Vec<_>>();
+    if possible_moves.is_empty() {
+        return; // No opponent Pokemon to damage (shouldn't happen normally)
+    }
     state
         .move_generation_stack
         .push((action.actor, possible_moves));
@@ -392,6 +442,9 @@ fn espeon_ex_ability(_: &mut StdRng, state: &mut State, action: &Action) {
             cure_status: false,
         })
         .collect::<Vec<_>>();
+    if possible_moves.is_empty() {
+        return; // No damaged Pokemon to heal
+    }
     state
         .move_generation_stack
         .push((action.actor, possible_moves));
@@ -452,6 +505,9 @@ fn umbreon_dark_chase(_: &mut StdRng, state: &mut State, action: &Action) {
             in_play_idx,
         })
         .collect::<Vec<_>>();
+    if possible_moves.is_empty() {
+        return; // No damaged benched Pokemon to switch in
+    }
     state
         .move_generation_stack
         .push((acting_player, possible_moves));

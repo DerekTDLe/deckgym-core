@@ -402,13 +402,7 @@ impl State {
                 pokemon.attached_energy.swap_remove(pos);
                 discarded.push(*energy);
             } else {
-                // Log warning instead of panic - some attack effects may try to discard
-                // energies that were already removed by other effects or game state changes
-                // TODO : Investigate this problem further
-                debug!(
-                    "Warning: Active Pokemon does not have {:?} energy to discard (continuing anyway)",
-                    energy
-                );
+                panic!("Active Pokemon does not have energy to discard");
             }
         }
         if !discarded.is_empty() {

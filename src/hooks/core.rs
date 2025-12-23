@@ -294,10 +294,9 @@ fn get_intimidating_fang_reduction(
         return 0;
     }
 
-    let defenders_active = match state.in_play_pokemon[target_player][0].as_ref() {
-        Some(p) => p,
-        None => return 0, // Pokemon not found, no reduction
-    };
+    let defenders_active = &state.in_play_pokemon[target_player][0]
+        .as_ref()
+        .expect("Defending Pokemon should be there when checking Intimidating Fang");
     if let Some(ability_id) = AbilityId::from_pokemon_id(&defenders_active.card.get_id()[..]) {
         if ability_id == AbilityId::A3a015LuxrayIntimidatingFang {
             debug!("Intimidating Fang: Reducing opponent's attack damage by 20");
@@ -492,21 +491,12 @@ pub(crate) fn modify_damage(
         return base_damage;
     }
 
-    // TODO: Investigate why "pyo3_runtime.PanicException: Attacking Pokemon should be there when modifying damage" happens
-    let attacking_pokemon = match state.in_play_pokemon[attacking_player][attacking_idx].as_ref() {
-        Some(p) => p,
-        None => {
-            debug!("Warning: Attacking Pokemon not found at ({}, {}), returning 0 damage", attacking_player, attacking_idx);
-            return 0;
-        }
-    };
-    let receiving_pokemon = match state.in_play_pokemon[target_player][target_idx].as_ref() {
-        Some(p) => p,
-        None => {
-            debug!("Warning: Receiving Pokemon not found at ({}, {}), returning 0 damage", target_player, target_idx);
-            return 0;
-        }
-    };
+    let attacking_pokemon = state.in_play_pokemon[attacking_player][attacking_idx]
+        .as_ref()
+        .expect("Attacking Pokemon should be there when modifying damage");
+    let receiving_pokemon = state.in_play_pokemon[target_player][target_idx]
+        .as_ref()
+        .expect("Receiving Pokemon should be there when modifying damage");
 
     // Check for Safeguard ability (prevents all damage from opponent's Pokémon ex)
     if let Some(ability_id) = AbilityId::from_pokemon_id(&receiving_pokemon.card.get_id()[..]) {
