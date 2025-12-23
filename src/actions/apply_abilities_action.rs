@@ -184,6 +184,9 @@ fn victreebel_ability(_: &mut StdRng, state: &mut State, action: &Action) {
             in_play_idx,
         })
         .collect::<Vec<_>>();
+    if possible_moves.is_empty() {
+        return; // No benched basic Pokemon to switch with
+    }
     state
         .move_generation_stack
         .push((acting_player, possible_moves));
@@ -218,6 +221,9 @@ fn greninja_ex_shifting_stream(_: &mut StdRng, state: &mut State, action: &Actio
             in_play_idx,
         })
         .collect::<Vec<_>>();
+    if choices.is_empty() {
+        return; // No benched Pokemon to switch with
+    }
     state.move_generation_stack.push((acting_player, choices));
 }
 
@@ -232,6 +238,9 @@ fn leafon_ex_ability(_: &mut StdRng, state: &mut State, action: &Action) {
             is_turn_energy: false,
         })
         .collect::<Vec<_>>();
+    if possible_moves.is_empty() {
+        return; // No Grass Pokemon to attach energy to
+    }
     state
         .move_generation_stack
         .push((action.actor, possible_moves));
@@ -256,6 +265,9 @@ fn greninja_shuriken(_: &mut StdRng, state: &mut State, action: &Action) {
             is_from_active_attack: false,
         })
         .collect::<Vec<_>>();
+    if possible_moves.is_empty() {
+        return; // No opponent Pokemon to damage (shouldn't happen normally)
+    }
     state
         .move_generation_stack
         .push((action.actor, possible_moves));
@@ -339,6 +351,9 @@ fn espeon_ex_ability(_: &mut StdRng, state: &mut State, action: &Action) {
             cure_status: false,
         })
         .collect::<Vec<_>>();
+    if possible_moves.is_empty() {
+        return; // No damaged Pokemon to heal
+    }
     state
         .move_generation_stack
         .push((action.actor, possible_moves));
@@ -409,6 +424,9 @@ fn umbreon_dark_chase(_: &mut StdRng, state: &mut State, action: &Action) {
             in_play_idx,
         })
         .collect::<Vec<_>>();
+    if possible_moves.is_empty() {
+        return; // No damaged benched Pokemon to switch in
+    }
     state
         .move_generation_stack
         .push((acting_player, possible_moves));

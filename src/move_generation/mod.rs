@@ -37,6 +37,7 @@ pub fn generate_possible_actions(state: &State) -> (usize, Vec<Action>) {
 
     // If there are moves in the generation stack, short-circuit to that
     if let Some((actor, possible_actions)) = state.move_generation_stack.last() {
+        assert!(!possible_actions.is_empty(), "Empty actions in move_generation_stack");
         let actions = possible_actions
             .iter()
             .map(|action| Action {
@@ -95,7 +96,7 @@ pub fn generate_possible_actions(state: &State) -> (usize, Vec<Action>) {
     let ability_actions = generate_ability_actions(state);
     actions.extend(ability_actions);
 
-    let possible_actions = actions
+    let possible_actions: Vec<Action> = actions
         .iter()
         .map(|action| Action {
             actor: current_player,
@@ -103,6 +104,7 @@ pub fn generate_possible_actions(state: &State) -> (usize, Vec<Action>) {
             is_stack: false,
         })
         .collect();
+
     (current_player, possible_actions)
 }
 
