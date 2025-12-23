@@ -347,10 +347,30 @@ pub(crate) fn handle_damage_only(
         .map(|((player, idx), damage)| (damage, player, idx))
         .collect();
 
+    // Check if attacker still exists (may have been KO'd before this action executed)
+    let (attacker_player, attacker_idx) = attacking_ref;
+    if state.in_play_pokemon[attacker_player][attacker_idx].is_none() {
+        debug!(
+            "Attacker at ({}, {}) no longer exists, skipping damage calculation",
+            attacker_player, attacker_idx
+        );
+        return;
+    }
+
     // Modify to apply any multipliers (e.g. Oricorio, Giovanni, etc...)
+    // Filter out targets that no longer exist
     let modified_targets = targets
         .iter()
-        .map(|target_ref| {
+        .filter_map(|target_ref| {
+            let (_, target_player, target_idx) = *target_ref;
+            // Check if target still exists
+            if state.in_play_pokemon[target_player][target_idx].is_none() {
+                debug!(
+                    "Target at ({}, {}) no longer exists, skipping",
+                    target_player, target_idx
+                );
+                return None;
+            }
             let modified_damage = modify_damage(
                 state,
                 attacking_ref,
@@ -358,7 +378,7 @@ pub(crate) fn handle_damage_only(
                 is_from_active_attack,
                 attack_name,
             );
-            (modified_damage, target_ref.1, target_ref.2)
+            Some((modified_damage, target_ref.1, target_ref.2))
         })
         .collect::<Vec<(u32, usize, usize)>>();
 
@@ -374,11 +394,17 @@ pub(crate) fn handle_damage_only(
             continue;
         }
 
-        // Apply damage
-        {
-            let target_pokemon = state.in_play_pokemon[target_player][target_pokemon_idx]
-                .as_mut()
-                .expect("Pokemon should be there if taking damage");
+        // Apply damage - check if target still exists (could have been removed by earlier effects)
+        let remaining_hp = {
+            let Some(target_pokemon) =
+                state.in_play_pokemon[target_player][target_pokemon_idx].as_mut()
+            else {
+                debug!(
+                    "Target at ({}, {}) no longer exists when applying damage, skipping",
+                    target_player, target_pokemon_idx
+                );
+                continue;
+            };
             target_pokemon.apply_damage(damage); // Applies without surpassing 0 HP
             debug!(
                 "Dealt {} damage to opponent's {} Pokemon. Remaining HP: {}",
@@ -386,6 +412,11 @@ pub(crate) fn handle_damage_only(
                 target_pokemon_idx,
                 target_pokemon.get_remaining_hp()
             );
+            target_pokemon.remaining_hp
+        };
+
+        if remaining_hp == 0 {
+            knockouts.push((target_player, target_pokemon_idx));
         }
 
         // Consider Counter-Attack (only if from Active Attack to Active)
@@ -393,23 +424,26 @@ pub(crate) fn handle_damage_only(
             continue;
         }
 
-        let target_pokemon = state.in_play_pokemon[target_player][target_pokemon_idx]
-            .as_ref()
-            .expect("Pokemon should be there if taking damage");
-        let counter_damage = {
-            if target_pokemon_idx == 0 {
-                get_counterattack_damage(target_pokemon)
-            } else {
-                0
-            }
+        // Get counter damage and poison info - need to re-check if pokemon exists
+        let Some(target_pokemon) =
+            state.in_play_pokemon[target_player][target_pokemon_idx].as_ref()
+        else {
+            continue;
+        };
+        let counter_damage = if target_pokemon_idx == 0 {
+            get_counterattack_damage(target_pokemon)
+        } else {
+            0
         };
         let should_poison = should_poison_attacker(target_pokemon);
 
         // Apply counterattack damage and poison
         if counter_damage > 0 || should_poison {
-            let attacking_pokemon = state.in_play_pokemon[attacking_player][0]
-                .as_mut()
-                .expect("Active Pokemon should be there");
+            let Some(attacking_pokemon) = state.in_play_pokemon[attacking_player][0].as_mut()
+            else {
+                debug!("Attacker no longer exists for counterattack, skipping");
+                continue;
+            };
 
             if counter_damage > 0 {
                 attacking_pokemon.apply_damage(counter_damage);
@@ -437,22 +471,29 @@ pub(crate) fn handle_knockouts(
 
     // Handle knockouts: Discard cards and award points (to potentially short-circuit promotions)
     for (ko_receiver, ko_pokemon_idx) in knockouts.clone() {
+        // Check if pokemon still exists and get knockout points before any mutable borrows
+        let points_won = {
+            let Some(ko_pokemon) = state.in_play_pokemon[ko_receiver][ko_pokemon_idx].as_ref()
+            else {
+                debug!(
+                    "Pokemon at ({}, {}) already discarded, skipping knockout handling",
+                    ko_receiver, ko_pokemon_idx
+                );
+                continue;
+            };
+            ko_pokemon.card.get_knockout_points()
+        };
+
         // Call knockout hook (e.g., for Electrical Cord)
         on_knockout(state, ko_receiver, ko_pokemon_idx, is_from_active_attack);
 
         // Award points
-        {
-            let ko_pokemon = state.in_play_pokemon[ko_receiver][ko_pokemon_idx]
-                .as_ref()
-                .expect("Pokemon should be there if knocked out");
-            let ko_initiator = (ko_receiver + 1) % 2;
-            let points_won = ko_pokemon.card.get_knockout_points();
-            state.points[ko_initiator] += points_won;
-            debug!(
-                "Pokemon {:?} fainted. Player {} won {} points for a total of {}",
-                ko_pokemon, ko_initiator, points_won, state.points[ko_initiator]
-            );
-        }
+        let ko_initiator = (ko_receiver + 1) % 2;
+        state.points[ko_initiator] += points_won;
+        debug!(
+            "Pokemon at ({}, {}) fainted. Player {} won {} points for a total of {}",
+            ko_receiver, ko_pokemon_idx, ko_initiator, points_won, state.points[ko_initiator]
+        );
 
         state.discard_from_play(ko_receiver, ko_pokemon_idx);
     }

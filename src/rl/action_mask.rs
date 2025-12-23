@@ -4,70 +4,46 @@
 // Maps ALL SimpleAction variants to fixed indices for RL compatibility.
 
 use crate::actions::{Action, SimpleAction};
+use crate::models::Card;
 use crate::move_generation::generate_possible_actions;
 use crate::state::State;
+use crate::tool_ids::ToolId;
 
-// --- Action Space Layout ---
-//
-// Total size: 130 actions
-//
-// Range       | Action Type                      | Count
-// ------------|----------------------------------|-------
-// 0           | EndTurn                          | 1
-// 1-2         | Attack(0), Attack(1)             | 2
-// 3-5         | Retreat to bench 1, 2, 3         | 3
-// 6-9         | Attach energy to pos 0-3         | 4
-// 10-19       | Place card from hand (slot 0-9)  | 10
-// 20-29       | Evolve card from hand (slot 0-9) | 10
-// 30-39       | Play trainer from hand (slot 0-9)| 10
-// 40-43       | UseAbility (position 0-3)        | 4
-// 44          | DrawCard                         | 1
-// 45          | Noop (say "no" to prompt)        | 1
-// 46-49       | Activate own bench pos 1-3 (+1)  | 4
-// 50-53       | AttachTool to position 0-3       | 4
-// 54-57       | Heal position 0-3                | 4
-// 58-61       | DiscardFossil position 0-3       | 4
-// 62-65       | AttachFromDiscard pos 0-3        | 4
-// 66-75       | CommunicatePokemon hand 0-9      | 10
-// 76-85       | ShufflePokemonIntoDeck hand 0-9  | 10
-// 86-95       | ShuffleOpponentSupporter 0-9     | 10
-// 96-105      | DiscardOpponentSupporter 0-9     | 10
-// 106-115     | DiscardOwnCard hand 0-9          | 10
-// 116         | ApplyEeveeBagDamageBoost         | 1
-// 117         | HealAllEeveeEvolutions           | 1
-// 118         | Non-turn energy attach (rare)    | 1
-// 119         | MoveEnergy                       | 1
-// 120         | MoveAllDamage                    | 1
-// 121-129     | Reserved                         | 9
+// Action Space 2
 
-pub const ACTION_SPACE_SIZE: usize = 130;
+pub const ACTION_SPACE_SIZE: usize = 175;
 
 /// Converts a SimpleAction to a canonical action index.
-/// Returns None if the action doesn't map to a fixed index (shouldn't happen).
 fn action_to_index(
     action: &SimpleAction,
     hand_index_map: &std::collections::HashMap<String, usize>,
+    tool_index_map: &std::collections::HashMap<ToolId, usize>,
 ) -> Option<usize> {
-    match action {
-        // Core actions
+    let index = match action {
+        // --- 1. Board Actions (0-29) ---
         SimpleAction::EndTurn => Some(0),
-        SimpleAction::Attack(attack_idx) => Some(1 + attack_idx.min(&1)), // 1-2
+        SimpleAction::Attack(attack_idx) => Some(1 + attack_idx.min(&1)),
         SimpleAction::Retreat(bench_idx) => {
             if *bench_idx >= 1 && *bench_idx <= 3 {
-                Some(3 + bench_idx - 1) // 3-5
+                Some(3 + bench_idx - 1)
             } else {
                 None
             }
         }
-
-        // Turn energy attachment (once per turn)
+        SimpleAction::UseAbility { in_play_idx } => {
+            if *in_play_idx <= 3 {
+                Some(6 + in_play_idx)
+            } else {
+                None
+            }
+        }
         SimpleAction::Attach {
             attachments,
             is_turn_energy: true,
         } => {
             if let Some((_, _, in_play_idx)) = attachments.first() {
                 if *in_play_idx <= 3 {
-                    Some(6 + in_play_idx) // 6-9
+                    Some(10 + in_play_idx)
                 } else {
                     None
                 }
@@ -75,116 +51,148 @@ fn action_to_index(
                 None
             }
         }
-
-        // Non-turn energy attach (from effects like Lusamine)
-        SimpleAction::Attach {
-            is_turn_energy: false,
-            ..
-        } => Some(118),
-
-        // Hand card actions - Place Pokémon
-        SimpleAction::Place(card, _) => hand_index_map.get(&card.get_id()).and_then(|&idx| {
-            if idx < 10 {
-                Some(10 + idx)
+        SimpleAction::Activate { in_play_idx, .. } => {
+            if *in_play_idx >= 1 && *in_play_idx <= 3 {
+                Some(14 + in_play_idx - 1)
+            } else if *in_play_idx == 0 {
+                None
             } else {
                 None
             }
-        }),
-
-        // Hand card actions - Evolve
-        SimpleAction::Evolve(card, _) => hand_index_map.get(&card.get_id()).and_then(|&idx| {
-            if idx < 10 {
-                Some(20 + idx)
+        }
+        SimpleAction::DiscardFossil { in_play_idx } => {
+            if *in_play_idx <= 3 {
+                Some(17 + in_play_idx)
             } else {
                 None
             }
-        }),
+        }
+        SimpleAction::Heal { in_play_idx, .. } => {
+            if *in_play_idx <= 3 {
+                Some(21 + in_play_idx)
+            } else {
+                None
+            }
+        }
+        SimpleAction::AttachFromDiscard { in_play_idx, .. } => {
+            if *in_play_idx <= 3 {
+                Some(25 + in_play_idx)
+            } else {
+                None
+            }
+        }
 
-        // Hand card actions - Play trainer
+        // --- 2. Hand Actions (30-129) ---
+        // Base: 30 + (HandIdx * 5)
+
+        // Play Trainer (No Target)
         SimpleAction::Play { trainer_card } => {
             hand_index_map.get(&trainer_card.id).and_then(|&idx| {
-                if idx < 10 {
-                    Some(30 + idx)
+                if idx < 20 {
+                    Some(30 + (idx * 5) + 0)
                 } else {
                     None
                 }
             })
         }
 
-        // Ability usage
-        SimpleAction::UseAbility { in_play_idx } => {
-            if *in_play_idx <= 3 {
-                Some(40 + in_play_idx) // 40-43
+        // Place Pokemon (Bench)
+        SimpleAction::Place(card, in_play_idx) => {
+            if let Some(&idx) = hand_index_map.get(&card.get_id()) {
+                if idx < 20 && *in_play_idx <= 3 {
+                    // Place is targeted to a slot.
+                    // 1 + slot.
+                    Some(30 + (idx * 5) + 1 + in_play_idx)
+                } else {
+                    None
+                }
+            } else {
+                // Resolution Place (e.g. from Deck Search)
+                if *in_play_idx <= 3 {
+                    Some(135 + in_play_idx)
+                } else {
+                    None
+                }
+            }
+        }
+
+        // Evolve Pokemon
+        SimpleAction::Evolve(card, in_play_idx) => {
+            if let Some(&idx) = hand_index_map.get(&card.get_id()) {
+                if idx < 20 && *in_play_idx <= 3 {
+                    // 0 = Play/Evolve
+                    Some(30 + (idx * 5) + 0)
+                } else {
+                    None
+                }
+            } else {
+                // Resolution Evolve (e.g. from Deck Search)
+                if *in_play_idx <= 3 {
+                    Some(135 + in_play_idx)
+                } else {
+                    None
+                }
+            }
+        }
+
+        // Attach Tool (Targeted)
+        SimpleAction::AttachTool {
+            in_play_idx,
+            tool_id,
+        } => {
+            // Try to find the tool in hand (Direct Play)
+            if let Some(&idx) = tool_index_map.get(tool_id) {
+                if idx < 20 && *in_play_idx <= 3 {
+                    // Hand Action: Play from Hand to Slot
+                    Some(30 + (idx * 5) + 1 + in_play_idx)
+                } else {
+                    None
+                }
+            } else {
+                // If not in hand, it's a Resolution Action (Target Selection)
+                // Map to Resolution Indices 135-138
+                if *in_play_idx <= 3 {
+                    Some(135 + in_play_idx)
+                } else {
+                    None
+                }
+            }
+        }
+
+        // --- 3. Resolution Actions (130-174) ---
+
+        // ApplyDamage Targets (Target Selection)
+        SimpleAction::ApplyDamage { targets, .. } => {
+            if let Some((_, _, in_play_idx)) = targets.first() {
+                if *in_play_idx <= 3 {
+                    Some(130 + in_play_idx)
+                } else {
+                    None
+                }
             } else {
                 None
             }
         }
 
-        // Draw card (beginning of turn)
-        SimpleAction::DrawCard { .. } => Some(44),
-
-        // Noop (decline an optional action)
-        SimpleAction::Noop => Some(45),
-
-        // Activate - bring bench Pokémon to active
-        SimpleAction::Activate { in_play_idx, .. } => {
-            if *in_play_idx >= 1 && *in_play_idx <= 3 {
-                Some(46 + in_play_idx - 1) // 46-48
-            } else if *in_play_idx == 0 {
-                Some(49) // Special case: already active (shouldn't happen often)
-            } else {
-                None
-            }
+        // Hand Resolution Actions (Select Hand Card)
+        SimpleAction::DiscardOwnCard { card } => {
+            hand_index_map.get(&card.get_id()).and_then(|&idx| {
+                if idx < 20 {
+                    Some(140 + idx)
+                } else {
+                    None
+                }
+            })
         }
-
-        // Attach tool
-        SimpleAction::AttachTool { in_play_idx, .. } => {
-            if *in_play_idx <= 3 {
-                Some(50 + in_play_idx) // 50-53
-            } else {
-                None
-            }
-        }
-
-        // Heal
-        SimpleAction::Heal { in_play_idx, .. } => {
-            if *in_play_idx <= 3 {
-                Some(54 + in_play_idx) // 54-57
-            } else {
-                None
-            }
-        }
-
-        // Discard fossil
-        SimpleAction::DiscardFossil { in_play_idx } => {
-            if *in_play_idx <= 3 {
-                Some(58 + in_play_idx) // 58-61
-            } else {
-                None
-            }
-        }
-
-        // Attach from discard (Lusamine effect)
-        SimpleAction::AttachFromDiscard { in_play_idx, .. } => {
-            if *in_play_idx <= 3 {
-                Some(62 + in_play_idx) // 62-65
-            } else {
-                None
-            }
-        }
-
-        // Communicate Pokémon (swap hand card with deck)
-        SimpleAction::CommunicatePokemon { hand_pokemon } => hand_index_map
-            .get(&hand_pokemon.get_id())
-            .and_then(|&idx| if idx < 10 { Some(66 + idx) } else { None }),
-
-        // Shuffle Pokémon into deck (May effect)
+        SimpleAction::CommunicatePokemon { hand_pokemon: card } => hand_index_map
+            .get(&card.get_id())
+            .and_then(|&idx| if idx < 20 { Some(140 + idx) } else { None }),
         SimpleAction::ShufflePokemonIntoDeck { hand_pokemon } => {
-            // Use first card's index for simplicity
-            if let Some(first_card) = hand_pokemon.first() {
-                hand_index_map.get(&first_card.get_id()).and_then(|&idx| {
-                    if idx < 10 {
-                        Some(76 + idx)
+            // For ShufflePokemonIntoDeck, it's a Vec<Card>. Use first.
+            if let Some(c) = hand_pokemon.first() {
+                hand_index_map.get(&c.get_id()).and_then(|&idx| {
+                    if idx < 20 {
+                        Some(140 + idx)
                     } else {
                         None
                     }
@@ -194,70 +202,54 @@ fn action_to_index(
             }
         }
 
-        // Shuffle opponent's supporter (Silver effect)
-        // Note: We don't have opponent hand map, use card position heuristic
-        SimpleAction::ShuffleOpponentSupporter { .. } => {
-            // For opponent cards, we use a simplified mapping
-            // Since we can't track opponent hand indices easily,
-            // we'll map based on the action itself being valid
-            Some(86) // Use first slot - actual choice is made by the simulator
-        }
+        // Misc
+        SimpleAction::DrawCard { .. } => Some(160),
+        SimpleAction::Noop => Some(161),
+        SimpleAction::ApplyEeveeBagDamageBoost => Some(162),
+        SimpleAction::HealAllEeveeEvolutions => Some(163),
+        SimpleAction::MoveEnergy { .. } => Some(164),
+        SimpleAction::MoveAllDamage { .. } => Some(165),
+        SimpleAction::ShuffleOpponentSupporter { .. } => Some(166),
+        SimpleAction::DiscardOpponentSupporter { .. } => Some(167),
+        SimpleAction::Attach {
+            is_turn_energy: false,
+            ..
+        } => Some(168), // Non-turn attach
+    };
 
-        // Discard opponent's supporter (Mega Absol effect)
-        SimpleAction::DiscardOpponentSupporter { .. } => Some(96),
-
-        // Discard own card (Sableye's Dirty Throw)
-        SimpleAction::DiscardOwnCard { card } => {
-            hand_index_map.get(&card.get_id()).and_then(|&idx| {
-                if idx < 10 {
-                    Some(106 + idx)
-                } else {
-                    None
-                }
-            })
-        }
-
-        // Eevee Bag options
-        SimpleAction::ApplyEeveeBagDamageBoost => Some(116),
-        SimpleAction::HealAllEeveeEvolutions => Some(117),
-
-        // Complex actions that need special handling
-        SimpleAction::MoveEnergy { .. } => {
-            // MoveEnergy is rare but distinct from non-turn energy attach
-            Some(119)
-        }
-
-        SimpleAction::MoveAllDamage { .. } => {
-            // MoveAllDamage has its own slot
-            Some(120)
-        }
-
-        // ApplyDamage is internal, not a player choice
-        SimpleAction::ApplyDamage { .. } => None,
+    if index.is_none() {
+        // eprint to see it in python stdout/stderr
+        eprintln!("Warning: Unmapped Action: {:?}", action);
     }
+
+    index
 }
 
 /// Generates a boolean action mask for the current state.
-///
-/// # Arguments
-/// * `state` - The current game state
-///
-/// # Returns
-/// A Vec<bool> of size ACTION_SPACE_SIZE where true = valid action
 pub fn get_action_mask(state: &State) -> Vec<bool> {
     let mut mask = vec![false; ACTION_SPACE_SIZE];
 
     let (actor, valid_actions) = generate_possible_actions(state);
 
-    // Build hand index map for this state
+    // Build hand index map and tool index map for this state
     let mut hand_index_map = std::collections::HashMap::new();
+    let mut tool_index_map = std::collections::HashMap::new();
+
     for (idx, card) in state.hands[actor].iter().enumerate() {
         hand_index_map.insert(card.get_id(), idx);
+
+        if let Card::Trainer(t) = card {
+            if let Some(tool_id) = ToolId::from_trainer_card(t) {
+                // If we haven't seen this tool yet, map it.
+                // If there are duplicates, the first one (lowest index) is used, which is fine.
+                tool_index_map.entry(*tool_id).or_insert(idx);
+            }
+        }
     }
 
     // Mark valid actions in the mask
     for action in &valid_actions {
-        if let Some(index) = action_to_index(&action.action, &hand_index_map) {
+        if let Some(index) = action_to_index(&action.action, &hand_index_map, &tool_index_map) {
             if index < ACTION_SPACE_SIZE {
                 mask[index] = true;
             }
@@ -268,20 +260,28 @@ pub fn get_action_mask(state: &State) -> Vec<bool> {
 }
 
 /// Get the list of valid actions with their indices.
-/// Useful for debugging and for stepping by index.
 pub fn get_indexed_actions(state: &State) -> Vec<(usize, Action)> {
     let (actor, valid_actions) = generate_possible_actions(state);
 
-    // Build hand index map
+    // Build hand index map and tool map
     let mut hand_index_map = std::collections::HashMap::new();
+    let mut tool_index_map = std::collections::HashMap::new();
+
     for (idx, card) in state.hands[actor].iter().enumerate() {
         hand_index_map.insert(card.get_id(), idx);
+
+        if let Card::Trainer(t) = card {
+            if let Some(tool_id) = ToolId::from_trainer_card(t) {
+                tool_index_map.entry(*tool_id).or_insert(idx);
+            }
+        }
     }
 
     valid_actions
         .into_iter()
         .filter_map(|action| {
-            action_to_index(&action.action, &hand_index_map).map(|idx| (idx, action))
+            action_to_index(&action.action, &hand_index_map, &tool_index_map)
+                .map(|idx| (idx, action))
         })
         .collect()
 }

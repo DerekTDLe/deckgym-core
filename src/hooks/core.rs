@@ -294,9 +294,9 @@ fn get_intimidating_fang_reduction(
         return 0;
     }
 
-    let defenders_active = &state.in_play_pokemon[target_player][0]
-        .as_ref()
-        .expect("Defending Pokemon should be there when checking Intimidating Fang");
+    let Some(defenders_active) = &state.in_play_pokemon[target_player][0].as_ref() else {
+        return 0;
+    };
     if let Some(ability_id) = AbilityId::from_pokemon_id(&defenders_active.card.get_id()[..]) {
         if ability_id == AbilityId::A3a015LuxrayIntimidatingFang {
             debug!("Intimidating Fang: Reducing opponent's attack damage by 20");

@@ -57,6 +57,9 @@ class BenchmarkResult:
     wins: int = 0
     losses: int = 0
     draws: int = 0
+    draw_timeout: int = 0      # 500 steps reached without game end
+    draw_exception: int = 0    # Rust panic or other error
+    draw_legitimate: int = 0   # Game ended with winner=None
     total_steps: int = 0
 
     @property
@@ -80,6 +83,9 @@ def load_model(model_path: str):
 
 def get_rl_action(model, obs: np.ndarray, action_mask: np.ndarray) -> int:
     """Get deterministic action from RL model."""
+    if model is None:
+        valid = np.where(action_mask)[0]
+        return int(np.random.choice(valid)) if len(valid) > 0 else 0
     action, _ = model.predict(obs, deterministic=True, action_masks=action_mask)
     return int(action)
 
@@ -95,7 +101,7 @@ def play_game(
     rl_is_player_a: bool,
     opponent_type: str,
     seed: Optional[int] = None,
-) -> tuple[int, int]:
+) -> tuple[int, int, str]:
     """
     Play a single game between RL agent and bot opponent.
 
@@ -108,28 +114,30 @@ def play_game(
         seed: Random seed for reproducibility
 
     Returns:
-        (result, steps): result is +1 win, -1 loss, 0 draw
+        (result, steps, draw_reason): result is +1 win, -1 loss, 0 draw
+        draw_reason is "timeout", "exception", "legitimate", or "" if not a draw
     """
     import deckgym
 
     # Write decks to temp files (required by game constructor)
     deck_a_path, deck_b_path = _write_temp_decks(deck_a, deck_b)
+    draw_reason = ""
 
     try:
         players = ["r", opponent_type] if rl_is_player_a else [opponent_type, "r"]
         game = deckgym.Game(deck_a_path, deck_b_path, players=players, seed=seed)
         rl_player_idx = 0 if rl_is_player_a else 1
 
-        result, steps = _play_game_loop(game, model, rl_player_idx)
+        result, steps, draw_reason = _play_game_loop(game, model, rl_player_idx)
 
-    except BaseException:
-        result, steps = 0, 0  # Count errors as draws
+    except BaseException as e:
+        result, steps, draw_reason = 0, 0, "exception"
 
     finally:
         os.unlink(deck_a_path)
         os.unlink(deck_b_path)
 
-    return result, steps
+    return result, steps, draw_reason
 
 
 def _write_temp_decks(deck_a: str, deck_b: str) -> tuple[str, str]:
@@ -145,8 +153,13 @@ def _write_temp_decks(deck_a: str, deck_b: str) -> tuple[str, str]:
     return path_a, path_b
 
 
-def _play_game_loop(game, model, rl_player_idx: int) -> tuple[int, int]:
-    """Execute the main game loop."""
+def _play_game_loop(game, model, rl_player_idx: int) -> tuple[int, int, str]:
+    """Execute the main game loop.
+    
+    Returns:
+        (result, steps, draw_reason): result is +1 win, -1 loss, 0 draw
+        draw_reason is "timeout", "exception", "legitimate", or "" if not a draw
+    """
     max_steps = 500
     steps = 0
 
@@ -160,11 +173,18 @@ def _play_game_loop(game, model, rl_player_idx: int) -> tuple[int, int]:
                 game.play_tick()
 
             steps += 1
-    except BaseException:
+    except BaseException as e:
         # Rust panic or other error - count as draw
-        return 0, steps
+        print(f"DEBUG: Exception in game: {type(e).__name__}: {e}")
+        return 0, steps, "exception"
 
-    return _determine_result(game, rl_player_idx), steps
+    # Check if we hit the step limit
+    if steps >= max_steps and not game.is_game_over():
+        return 0, steps, "timeout"
+
+    result = _determine_result(game, rl_player_idx)
+    draw_reason = "legitimate" if result == 0 else ""
+    return result, steps, draw_reason
 
 
 def _execute_rl_turn(game, model):
@@ -238,15 +258,16 @@ def run_benchmark(
                         seed = random.randint(0, 2**32 - 1)
 
                         try:
-                            result, steps = play_game(
+                            result, steps, draw_reason = play_game(
                                 rl_deck, opp_deck, model,
                                 rl_is_player_a=rl_is_first,
                                 opponent_type=opp_type,
                                 seed=seed,
                             )
-                            _record_result(results[opp_type], result, steps)
+                            _record_result(results[opp_type], result, steps, draw_reason)
                         except Exception:
                             results[opp_type].draws += 1
+                            results[opp_type].draw_exception += 1
 
                         game_count += 1
                         if game_count % 100 == 0:
@@ -256,7 +277,7 @@ def run_benchmark(
     return results
 
 
-def _record_result(result: BenchmarkResult, outcome: int, steps: int):
+def _record_result(result: BenchmarkResult, outcome: int, steps: int, draw_reason: str = ""):
     """Record a single game result."""
     if outcome == 1:
         result.wins += 1
@@ -264,6 +285,13 @@ def _record_result(result: BenchmarkResult, outcome: int, steps: int):
         result.losses += 1
     else:
         result.draws += 1
+        # Track draw type
+        if draw_reason == "timeout":
+            result.draw_timeout += 1
+        elif draw_reason == "exception":
+            result.draw_exception += 1
+        elif draw_reason == "legitimate":
+            result.draw_legitimate += 1
     result.total_steps += steps
 
 
@@ -326,16 +354,20 @@ def print_results_table(name: str, results: dict[str, BenchmarkResult]):
     table.add_column("Wins", justify="right", style="green")
     table.add_column("Losses", justify="right", style="red")
     table.add_column("Draws", justify="right", style="yellow")
+    table.add_column("Draw Breakdown", justify="right", style="dim")
     table.add_column("Win Rate", justify="right", style="bold")
 
     for opp in OPPONENT_TYPES:
         r = results[opp]
         wr_style = "green" if r.win_rate >= 0.5 else "red"
+        # Draw breakdown: T=timeout, E=exception, L=legitimate
+        draw_breakdown = f"T:{r.draw_timeout} E:{r.draw_exception} L:{r.draw_legitimate}"
         table.add_row(
             OPPONENT_NAMES.get(opp, opp),
             str(r.wins),
             str(r.losses),
             str(r.draws),
+            draw_breakdown,
             f"[{wr_style}]{r.win_rate:.1%}[/{wr_style}]",
         )
 
@@ -368,8 +400,12 @@ def main():
     console.print(f"Games per bot: {args.games}")
 
     # Load resources
-    console.print("\n[1/2] Loading model...")
-    model = load_model(args.model)
+    model = None
+    if args.model.lower() == "random":
+        console.print("\n[1/2] Using Random Agent (No Model)...")
+    else:
+        console.print("\n[1/2] Loading model...")
+        model = load_model(args.model)
 
     console.print("[2/2] Loading decks...")
     simple_loader = MetaDeckLoader(args.simple_decks)

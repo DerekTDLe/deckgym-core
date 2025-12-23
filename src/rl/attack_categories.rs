@@ -17,13 +17,13 @@ pub enum AttackEffectCategory {
     StatusInflict,
     /// Involves randomness (coin flips)
     Variance,
-    
+
     // === RESOURCES ===
     /// Manipulates energy (discard, charge, move)
     EnergyManip,
     /// Searches or draws cards
     CardAdvantage,
-    
+
     // === DAMAGE MODIFIERS ===
     /// Conditional extra damage
     ConditionalDamage,
@@ -31,7 +31,7 @@ pub enum AttackEffectCategory {
     SpreadDamage,
     /// Recoil or self-damage
     SelfDamage,
-    
+
     // === TACTICAL ===
     /// Blocks, prevents, or reduces future actions
     Protection,
@@ -39,7 +39,7 @@ pub enum AttackEffectCategory {
     Disruption,
     /// Movement effects (switch, retreat)
     Movement,
-    
+
     // === SETUP ===
     /// Board development (bench, evolution)
     BoardDevelopment,
@@ -59,11 +59,15 @@ pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffe
         // === STATUS ===
         Mechanic::InflictStatusConditions { .. } => &[StatusInflict],
         Mechanic::ChanceStatusAttack { .. } => &[StatusInflict, Variance],
-        Mechanic::ExtraDamageForEachHeadsWithStatus { .. } => &[ConditionalDamage, StatusInflict, Variance],
+        Mechanic::ExtraDamageForEachHeadsWithStatus { .. } => {
+            &[ConditionalDamage, StatusInflict, Variance]
+        }
 
         // === COIN FLIP ===
         Mechanic::CoinFlipExtraDamage { .. } => &[ConditionalDamage, Variance],
-        Mechanic::CoinFlipExtraDamageOrSelfDamage { .. } => &[ConditionalDamage, SelfDamage, Variance],
+        Mechanic::CoinFlipExtraDamageOrSelfDamage { .. } => {
+            &[ConditionalDamage, SelfDamage, Variance]
+        }
         Mechanic::ExtraDamageForEachHeads { .. } => &[ConditionalDamage, Variance],
         Mechanic::CoinFlipNoEffect => &[Variance],
         Mechanic::ExtraDamageIfBothHeads { .. } => &[ConditionalDamage, Variance],
