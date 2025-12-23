@@ -2,6 +2,67 @@
 //
 // Generates a boolean mask indicating which actions are valid for the current state.
 // Maps ALL SimpleAction variants to fixed indices for RL compatibility.
+//
+// =============================================================================
+// ACTION SPACE LAYOUT v2.0 (175 indices total)
+// =============================================================================
+//
+// SECTION 1: Board Actions (0-29)
+// --------------------------------
+// These are actions targeting board positions (in-play Pokemon slots 0-3).
+//
+//   0       : EndTurn
+//   1-2     : Attack (attack index 0, 1)
+//   3-5     : Retreat to bench position (1, 2, 3)
+//   6-9     : UseAbility on slot (0=Active, 1-3=Bench)
+//   10-13   : Attach turn energy to slot (0-3)
+//   14-16   : Activate bench Pokemon (slots 1-3, not active)
+//   17-20   : DiscardFossil from slot (0-3)
+//   21-24   : Heal Pokemon at slot (0-3) - ability-triggered
+//   25-28   : AttachFromDiscard to slot (0-3) - ability-triggered
+//   29      : (reserved)
+//
+// SECTION 2: Hand Actions (30-129)
+// ---------------------------------
+// These map hand cards (up to 20) to actions with optional targets.
+// Formula: 30 + (hand_index * 5) + interaction_type
+//
+//   Hand Index 0:  30-34
+//   Hand Index 1:  35-39
+//   Hand Index 2:  40-44
+//   ...
+//   Hand Index 19: 125-129
+//
+// Interaction Types per hand slot:
+//   +0 : Play/Evolve (no target or self-target for trainers/evolutions)
+//   +1 : Target Active (slot 0)
+//   +2 : Target Bench 1 (slot 1)
+//   +3 : Target Bench 2 (slot 2)
+//   +4 : Target Bench 3 (slot 3)
+//
+// SECTION 3: Resolution Actions (130-174)
+// ----------------------------------------
+// These handle complex multi-step actions and special cases.
+//
+//   130-133 : ApplyDamage to opponent slot (0-3) - attack targeting
+//   134     : (reserved)
+//   135-138 : Resolution Place/Evolve to slot (0-3) - from deck search
+//   139     : (reserved)
+//   140-159 : Select hand card by index (0-19) - for discard/communicate
+//   160     : DrawCard
+//   161     : Noop (pass)
+//   162     : ApplyEeveeBagDamageBoost
+//   163     : HealAllEeveeEvolutions
+//   164     : MoveEnergy
+//   165     : MoveAllDamage
+//   166     : ShuffleOpponentSupporter
+//   167     : DiscardOpponentSupporter
+//   168     : Attach (non-turn energy, e.g. from ability)
+//   169-174 : (reserved for future expansion)
+//
+// =============================================================================
+
+use std::collections::HashMap;
 
 use crate::actions::{Action, SimpleAction};
 use crate::models::Card;
@@ -9,16 +70,49 @@ use crate::move_generation::generate_possible_actions;
 use crate::state::State;
 use crate::tool_ids::ToolId;
 
-// Action Space 2
+// --- Constants ---
 
+/// Total size of the discrete action space
 pub const ACTION_SPACE_SIZE: usize = 175;
 
+// --- Helper Types ---
+
+/// Maps for resolving hand cards to action indices
+struct HandMaps {
+    /// Card ID -> hand index
+    card_index: HashMap<String, usize>,
+    /// ToolId -> hand index (for tools specifically)
+    tool_index: HashMap<ToolId, usize>,
+}
+
+/// Build index maps from the current player's hand.
+///
+/// This creates two maps:
+/// - `card_index`: Maps card IDs to their position in hand
+/// - `tool_index`: Maps ToolIds to their position in hand (first occurrence only)
+fn build_hand_maps(hand: &[Card]) -> HandMaps {
+    let mut card_index = HashMap::with_capacity(hand.len());
+    let mut tool_index = HashMap::new();
+
+    for (idx, card) in hand.iter().enumerate() {
+        card_index.insert(card.get_id(), idx);
+
+        if let Card::Trainer(t) = card {
+            if let Some(tool_id) = ToolId::from_trainer_card(t) {
+                // First occurrence wins (lowest index)
+                tool_index.entry(*tool_id).or_insert(idx);
+            }
+        }
+    }
+
+    HandMaps {
+        card_index,
+        tool_index,
+    }
+}
+
 /// Converts a SimpleAction to a canonical action index.
-fn action_to_index(
-    action: &SimpleAction,
-    hand_index_map: &std::collections::HashMap<String, usize>,
-    tool_index_map: &std::collections::HashMap<ToolId, usize>,
-) -> Option<usize> {
+fn action_to_index(action: &SimpleAction, maps: &HandMaps) -> Option<usize> {
     let index = match action {
         // --- 1. Board Actions (0-29) ---
         SimpleAction::EndTurn => Some(0),
@@ -87,7 +181,7 @@ fn action_to_index(
 
         // Play Trainer (No Target)
         SimpleAction::Play { trainer_card } => {
-            hand_index_map.get(&trainer_card.id).and_then(|&idx| {
+            maps.card_index.get(&trainer_card.id).and_then(|&idx| {
                 if idx < 20 {
                     Some(30 + (idx * 5) + 0)
                 } else {
@@ -98,7 +192,7 @@ fn action_to_index(
 
         // Place Pokemon (Bench)
         SimpleAction::Place(card, in_play_idx) => {
-            if let Some(&idx) = hand_index_map.get(&card.get_id()) {
+            if let Some(&idx) = maps.card_index.get(&card.get_id()) {
                 if idx < 20 && *in_play_idx <= 3 {
                     // Place is targeted to a slot.
                     // 1 + slot.
@@ -118,7 +212,7 @@ fn action_to_index(
 
         // Evolve Pokemon
         SimpleAction::Evolve(card, in_play_idx) => {
-            if let Some(&idx) = hand_index_map.get(&card.get_id()) {
+            if let Some(&idx) = maps.card_index.get(&card.get_id()) {
                 if idx < 20 && *in_play_idx <= 3 {
                     // 0 = Play/Evolve
                     Some(30 + (idx * 5) + 0)
@@ -141,7 +235,7 @@ fn action_to_index(
             tool_id,
         } => {
             // Try to find the tool in hand (Direct Play)
-            if let Some(&idx) = tool_index_map.get(tool_id) {
+            if let Some(&idx) = maps.tool_index.get(tool_id) {
                 if idx < 20 && *in_play_idx <= 3 {
                     // Hand Action: Play from Hand to Slot
                     Some(30 + (idx * 5) + 1 + in_play_idx)
@@ -176,7 +270,7 @@ fn action_to_index(
 
         // Hand Resolution Actions (Select Hand Card)
         SimpleAction::DiscardOwnCard { card } => {
-            hand_index_map.get(&card.get_id()).and_then(|&idx| {
+            maps.card_index.get(&card.get_id()).and_then(|&idx| {
                 if idx < 20 {
                     Some(140 + idx)
                 } else {
@@ -184,13 +278,14 @@ fn action_to_index(
                 }
             })
         }
-        SimpleAction::CommunicatePokemon { hand_pokemon: card } => hand_index_map
+        SimpleAction::CommunicatePokemon { hand_pokemon: card } => maps
+            .card_index
             .get(&card.get_id())
             .and_then(|&idx| if idx < 20 { Some(140 + idx) } else { None }),
         SimpleAction::ShufflePokemonIntoDeck { hand_pokemon } => {
             // For ShufflePokemonIntoDeck, it's a Vec<Card>. Use first.
             if let Some(c) = hand_pokemon.first() {
-                hand_index_map.get(&c.get_id()).and_then(|&idx| {
+                maps.card_index.get(&c.get_id()).and_then(|&idx| {
                     if idx < 20 {
                         Some(140 + idx)
                     } else {
@@ -230,26 +325,10 @@ pub fn get_action_mask(state: &State) -> Vec<bool> {
     let mut mask = vec![false; ACTION_SPACE_SIZE];
 
     let (actor, valid_actions) = generate_possible_actions(state);
+    let maps = build_hand_maps(&state.hands[actor]);
 
-    // Build hand index map and tool index map for this state
-    let mut hand_index_map = std::collections::HashMap::new();
-    let mut tool_index_map = std::collections::HashMap::new();
-
-    for (idx, card) in state.hands[actor].iter().enumerate() {
-        hand_index_map.insert(card.get_id(), idx);
-
-        if let Card::Trainer(t) = card {
-            if let Some(tool_id) = ToolId::from_trainer_card(t) {
-                // If we haven't seen this tool yet, map it.
-                // If there are duplicates, the first one (lowest index) is used, which is fine.
-                tool_index_map.entry(*tool_id).or_insert(idx);
-            }
-        }
-    }
-
-    // Mark valid actions in the mask
     for action in &valid_actions {
-        if let Some(index) = action_to_index(&action.action, &hand_index_map, &tool_index_map) {
+        if let Some(index) = action_to_index(&action.action, &maps) {
             if index < ACTION_SPACE_SIZE {
                 mask[index] = true;
             }
@@ -262,26 +341,12 @@ pub fn get_action_mask(state: &State) -> Vec<bool> {
 /// Get the list of valid actions with their indices.
 pub fn get_indexed_actions(state: &State) -> Vec<(usize, Action)> {
     let (actor, valid_actions) = generate_possible_actions(state);
-
-    // Build hand index map and tool map
-    let mut hand_index_map = std::collections::HashMap::new();
-    let mut tool_index_map = std::collections::HashMap::new();
-
-    for (idx, card) in state.hands[actor].iter().enumerate() {
-        hand_index_map.insert(card.get_id(), idx);
-
-        if let Card::Trainer(t) = card {
-            if let Some(tool_id) = ToolId::from_trainer_card(t) {
-                tool_index_map.entry(*tool_id).or_insert(idx);
-            }
-        }
-    }
+    let maps = build_hand_maps(&state.hands[actor]);
 
     valid_actions
         .into_iter()
         .filter_map(|action| {
-            action_to_index(&action.action, &hand_index_map, &tool_index_map)
-                .map(|idx| (idx, action))
+            action_to_index(&action.action, &maps).map(|idx| (idx, action))
         })
         .collect()
 }
