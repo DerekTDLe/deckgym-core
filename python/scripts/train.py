@@ -43,26 +43,27 @@ class TrainingConfig:
     tensorboard_dir: str = "./logs/"
     
     # Training duration
-    total_timesteps: int = 10_000_000
+    total_timesteps: int = 30_000_000
     checkpoint_freq: int = 100_000
     
     # PPO hyperparameters
     learning_rate: float = 1e-4           # Reduced from 3e-4 (approx_kl was too high)
-    n_steps: int = 4096                   # Experience collected per update
+    n_steps: int = 8192                   # More experience per update (was 4096)
     batch_size: int = 512                 # Minibatch size for optimization
-    n_epochs: int = 10                    # Optimization epochs per update
-    gamma: float = 0.99                   # Discount factor
+    n_epochs: int = 8                     # Reduced to compensate for larger n_steps
+    gamma: float = 0.98                   # Reduced for shorter episodes (was 0.99)
     gae_lambda: float = 0.95              # GAE lambda
     ent_coef: float = 0.01                # Entropy bonus (exploration)
+    vf_coef: float = 0.5                  # Value function coefficient (default)
     clip_range: float = 0.2               # PPO clipping range
     
     # Network architecture
     policy_layers: tuple = (512, 512, 256, 128)   # Deeper policy network
-    value_layers: tuple = (512, 256, 128)         # Simpler value network
+    value_layers: tuple = (512, 512, 256)         # Match policy depth for better value estimation
     use_silu: bool = True                         # Use SiLU activation (better than ReLU)
     
     # Self-play
-    frozen_opponent_update_freq: int = 50_000     # Base frequency (adaptive adjusts this)
+    frozen_opponent_update_freq: int = 75_000     # Slower updates for stability (was 50k)
     adaptive_frozen_opponent: bool = True         # Enable adaptive opponent updates
     target_win_rate: float = 0.55                 # Target win rate for adaptive updates
     
@@ -472,6 +473,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         gamma=config.gamma,
         gae_lambda=config.gae_lambda,
         ent_coef=config.ent_coef,
+        vf_coef=config.vf_coef,
         clip_range=config.clip_range,
         policy_kwargs=policy_kwargs,
         verbose=1,
@@ -552,17 +554,17 @@ if __name__ == "__main__":
     parser.add_argument("--save", default="models/rl_bot", help="Model save path")
     
     # Training
-    parser.add_argument("--steps", type=int, default=10_000_000, help="Total training steps")
+    parser.add_argument("--steps", type=int, default=30_000_000, help="Total training steps")
     parser.add_argument("--checkpoint-freq", type=int, default=100_000, help="Checkpoint frequency")
     
     # PPO hyperparameters
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--batch-size", type=int, default=512, help="Batch size")
-    parser.add_argument("--n-epochs", type=int, default=10, help="PPO epochs per update")
+    parser.add_argument("--n-epochs", type=int, default=8, help="PPO epochs per update")
     parser.add_argument("--ent-coef", type=float, default=0.01, help="Entropy coefficient")
     
     # Self-play
-    parser.add_argument("--opponent-update-freq", type=int, default=50_000, help="Frozen opponent update frequency")
+    parser.add_argument("--opponent-update-freq", type=int, default=75_000, help="Frozen opponent update frequency")
     parser.add_argument("--warmup-ratio", type=float, default=0.10, help="Curriculum warmup ratio (0-1)")
     
     # Parallelization
