@@ -20,6 +20,8 @@ import torch
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
+from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.monitor import Monitor
 
 from deckgym.env import DeckGymEnv
 from deckgym.deck_loader import CurriculumDeckLoader
@@ -66,6 +68,9 @@ class TrainingConfig:
     max_turns: int = 99              # Official Pokemon TCG Pocket limit
     max_actions_per_turn: int = 50   # Prevents single-turn infinite loops
     max_total_actions: int = 500     # Prevents runaway episodes
+    
+    # Parallel environments (DummyVecEnv - no IPC overhead)
+    n_envs: int = 1                   # Number of environments (1=single, >1=DummyVecEnv)
     
     # Device
     device: str = "auto"
@@ -289,11 +294,14 @@ class FrozenOpponentCallback(BaseCallback):
     
     This creates a slowly-moving target that prevents self-play collapse
     while still providing meaningful training signal.
+    
+    Supports both single env and DummyVecEnv.
     """
     
-    def __init__(self, env, update_freq: int, verbose: int = 0):
+    def __init__(self, env, n_envs: int = 1, update_freq: int = 50_000, verbose: int = 0):
         super().__init__(verbose)
         self.env = env
+        self.n_envs = n_envs
         self.update_freq = update_freq
         self.last_update = 0
     
@@ -308,24 +316,48 @@ class FrozenOpponentCallback(BaseCallback):
         return True
     
     def _update_frozen_opponent(self):
-        """Save current model and load as frozen opponent."""
+        """Save current model and load as frozen opponent on CPU."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "frozen_model")
             self.model.save(path)
-            frozen_model = MaskablePPO.load(path)
+            # Load on CPU to avoid GPU contention with policy training
+            frozen_model = MaskablePPO.load(path, device="cpu")
         
-        # Unwrap ActionMasker to get SelfPlayEnv
-        inner_env = self.env.env if hasattr(self.env, 'env') else self.env
-        inner_env.set_opponent_model(frozen_model)
+        if self.n_envs == 1:
+            # Single env: unwrap Monitor -> ActionMasker to get SelfPlayEnv
+            inner_env = self.env.env.env if hasattr(self.env.env, 'env') else self.env.env
+            inner_env.set_opponent_model(frozen_model)
+        else:
+            # DummyVecEnv: update all environments (Monitor -> ActionMasker -> SelfPlayEnv)
+            for i in range(self.n_envs):
+                self.env.envs[i].env.env.set_opponent_model(frozen_model)
 
 
 # =============================================================================
-# Action Masking
+# Action Masking & Environment Factory
 # =============================================================================
 
 def mask_fn(env: SelfPlayEnv) -> np.ndarray:
     """Provide action mask to MaskablePPO."""
     return env.action_masks()
+
+
+def make_env(
+    deck_loader: CurriculumDeckLoader,
+    config: TrainingConfig,
+) -> callable:
+    """
+    Factory function to create self-play environments.
+    
+    For DummyVecEnv, all envs share the same deck_loader (efficient).
+    Monitor wrapper enables episode stats for TensorBoard.
+    """
+    def _init() -> gym.Env:
+        env = SelfPlayEnv(deck_loader, config=config)
+        env = ActionMasker(env, mask_fn)
+        env = Monitor(env)  # Track ep_len, ep_rew for TensorBoard
+        return env
+    return _init
 
 
 # =============================================================================
@@ -348,15 +380,23 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     print(f"  Batch size:         {config.batch_size}")
     print(f"  Entropy coef:       {config.ent_coef}")
     print(f"  Policy network:     {config.policy_layers}")
+    print(f"  N environments:     {config.n_envs}")
     print(f"  Device:             {config.device}")
     
-    # Setup environment
+    # Setup environment(s)
     print("\n[1/4] Loading decks...")
     deck_loader = CurriculumDeckLoader(config.simple_deck_path, config.meta_deck_path)
     
-    print("[2/4] Creating environment...")
-    env = SelfPlayEnv(deck_loader, config=config)
-    env = ActionMasker(env, mask_fn)
+    print(f"[2/4] Creating {config.n_envs} environment(s)...")
+    if config.n_envs == 1:
+        # Single environment (simpler)
+        single_env = SelfPlayEnv(deck_loader, config=config)
+        env = ActionMasker(single_env, mask_fn)
+        env = Monitor(env)  # Track ep_len, ep_rew for TensorBoard
+    else:
+        # Multiple environments with DummyVecEnv (no IPC overhead)
+        env = DummyVecEnv([make_env(deck_loader, config) for _ in range(config.n_envs)])
+        single_env = None  # Will be set after model init
     
     # Setup model
     print("[3/4] Initializing model...")
@@ -399,17 +439,26 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         ),
         FrozenOpponentCallback(
             env,
+            n_envs=config.n_envs,
             update_freq=config.frozen_opponent_update_freq,
             verbose=1,
         ),
     ]
     
-    # Initialize frozen opponent
+    # Initialize frozen opponent on CPU (to avoid GPU contention)
+    print("      Loading frozen opponent on CPU...")
     with tempfile.TemporaryDirectory() as tmpdir:
         path = os.path.join(tmpdir, "initial_frozen")
         model.save(path)
-        initial_frozen = MaskablePPO.load(path)
-    env.env.set_opponent_model(initial_frozen)
+        initial_frozen = MaskablePPO.load(path, device="cpu")
+    
+    if config.n_envs == 1:
+        # Single env: unwrap Monitor -> ActionMasker to get SelfPlayEnv 
+        env.env.env.set_opponent_model(initial_frozen)
+    else:
+        # Set opponent on all envs in DummyVecEnv (Monitor -> ActionMasker -> SelfPlayEnv)
+        for i in range(config.n_envs):
+            env.envs[i].env.env.set_opponent_model(initial_frozen)
     
     # Train
     print("[4/4] Starting training...")
@@ -460,6 +509,9 @@ if __name__ == "__main__":
     parser.add_argument("--opponent-update-freq", type=int, default=50_000, help="Frozen opponent update frequency")
     parser.add_argument("--warmup-steps", type=int, default=100_000, help="Curriculum warmup steps")
     
+    # Parallelization
+    parser.add_argument("--n-envs", type=int, default=1, help="Number of parallel environments (DummyVecEnv)")
+    
     # Device
     parser.add_argument("--device", default="auto", choices=["cpu", "cuda", "auto"])
     
@@ -478,7 +530,9 @@ if __name__ == "__main__":
         ent_coef=args.ent_coef,
         frozen_opponent_update_freq=args.opponent_update_freq,
         curriculum_warmup_steps=args.warmup_steps,
+        n_envs=args.n_envs,
         device=args.device,
     )
     
     train(config)
+

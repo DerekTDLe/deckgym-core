@@ -15,12 +15,13 @@ class DeckGymEnv(gym.Env):
     Gymnasium environment to play Pokémon TCG Pocket.
 
     Observation space:
-        Box(163,) - Flattened game state tensor including:
-        - Global info: turn, points, deck/hand/discard sizes, energy types
-        - Board state: HP, energy, status for each Pokemon slot (8 slots total)
+        Box(755,) - Flattened game state tensor including:
+        - Global info (17): turn, points, deck/hand/discard sizes, energy types
+        - Board state (704): 8 slots × 88 features (HP, energy, attacks, status, abilities)
+        - Hand features (34): Pokemon counts, trainer categories, can-evolve flags
 
     Action space:
-        Discrete(120) - Canonical action indices covering all SimpleAction variants:
+        Discrete(130) - Canonical action indices covering all SimpleAction variants:
         - 0: EndTurn
         - 1-2: Attack (index 0, 1)
         - 3-5: Retreat to bench position (1, 2, 3)
@@ -41,7 +42,7 @@ class DeckGymEnv(gym.Env):
         - 86-95: ShuffleOpponentSupporter
         - 96-105: DiscardOpponentSupporter
         - 106-115: DiscardOwnCard
-        - 116-119: Special actions (EeveeBag, MoveEnergy, etc.)
+        - 116-129: Special actions (EeveeBag, MoveEnergy, etc.)
 
     Reward:
         +1.0 for winning, -1.0 for losing, 0.0 otherwise.
