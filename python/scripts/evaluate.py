@@ -122,7 +122,7 @@ def play_game(
 
         result, steps = _play_game_loop(game, model, rl_player_idx)
 
-    except Exception:
+    except BaseException:
         result, steps = 0, 0  # Count errors as draws
 
     finally:
@@ -150,15 +150,19 @@ def _play_game_loop(game, model, rl_player_idx: int) -> tuple[int, int]:
     max_steps = 500
     steps = 0
 
-    while not game.is_game_over() and steps < max_steps:
-        current_player = game.current_player()
+    try:
+        while not game.is_game_over() and steps < max_steps:
+            current_player = game.current_player()
 
-        if current_player == rl_player_idx:
-            _execute_rl_turn(game, model)
-        else:
-            game.play_tick()
+            if current_player == rl_player_idx:
+                _execute_rl_turn(game, model)
+            else:
+                game.play_tick()
 
-        steps += 1
+            steps += 1
+    except BaseException:
+        # Rust panic or other error - count as draw
+        return 0, steps
 
     return _determine_result(game, rl_player_idx), steps
 
@@ -207,14 +211,20 @@ def run_benchmark(
     rl_decks: list[str],
     opponent_decks: list[str],
     model,
-    games_per_deck: int,
+    total_games_per_bot: int,
     mirror: bool = False,
 ) -> dict[str, BenchmarkResult]:
-    """Run a benchmark scenario against all opponent types."""
+    """Run a benchmark scenario against all opponent types.
+    
+    Args:
+        total_games_per_bot: Target total games per opponent bot type.
+    """
     results = {opp: BenchmarkResult() for opp in OPPONENT_TYPES}
 
-    total_matchups = len(rl_decks) * (1 if mirror else len(opponent_decks))
-    total_games = total_matchups * games_per_deck * len(OPPONENT_TYPES)
+    # Calculate games per matchup to reach target total
+    num_matchups = len(rl_decks) * (1 if mirror else len(opponent_decks))
+    games_per_matchup = max(1, total_games_per_bot // num_matchups)
+    total_games = num_matchups * games_per_matchup * len(OPPONENT_TYPES)
     game_count = 0
 
     with console.status(f"[bold green]Running {name}...") as status:
@@ -223,7 +233,7 @@ def run_benchmark(
 
             for opp_deck in opp_deck_list:
                 for opp_type in OPPONENT_TYPES:
-                    for game_idx in range(games_per_deck):
+                    for game_idx in range(games_per_matchup):
                         rl_is_first = game_idx % 2 == 0
                         seed = random.randint(0, 2**32 - 1)
 
@@ -355,7 +365,7 @@ def main():
 
     console.print("[bold blue]═══ Pokemon TCG Pocket RL Evaluation ═══[/bold blue]")
     console.print(f"Model: {args.model}")
-    console.print(f"Games per matchup: {args.games_per_deck}")
+    console.print(f"Games per bot: {args.games}")
 
     # Load resources
     console.print("\n[1/2] Loading model...")
@@ -370,24 +380,24 @@ def main():
     # Run selected benchmarks
     if args.benchmark in ["all", "mirror"]:
         all_results["mirror"] = _run_mirror_benchmark(
-            simple_loader, meta_loader, model, args.games_per_deck
+            simple_loader, meta_loader, model, args.games
         )
 
     if args.benchmark in ["all", "easy"]:
         all_results["easy"] = _run_winrate_benchmark(
-            "Easy", meta_loader, model, args.games_per_deck,
+            "Easy", meta_loader, model, args.games,
             rl_high_wr=True, opp_high_wr=False
         )
 
     if args.benchmark in ["all", "hard"]:
         all_results["hard"] = _run_winrate_benchmark(
-            "Hard", meta_loader, model, args.games_per_deck,
+            "Hard", meta_loader, model, args.games,
             rl_high_wr=False, opp_high_wr=True
         )
 
     if args.benchmark in ["all", "random"]:
         all_results["random"] = _run_random_benchmark(
-            meta_loader, model, args.games_per_deck
+            meta_loader, model, args.games
         )
 
     # Output
@@ -405,7 +415,7 @@ def parse_args():
     parser.add_argument("--model", type=str, required=True, help="Path to model (.zip)")
     parser.add_argument("--simple-decks", type=str, default="simple_deck.json")
     parser.add_argument("--meta-decks", type=str, default="meta_deck.json")
-    parser.add_argument("--games-per-deck", type=int, default=50)
+    parser.add_argument("--games", type=int, default=1000, help="Total games per bot type")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--output", type=str, default=None, help="Output JSON path")
     parser.add_argument(
@@ -422,7 +432,7 @@ def parse_args():
 # Benchmark Implementations
 # =============================================================================
 
-def _run_mirror_benchmark(simple_loader, meta_loader, model, games_per_deck) -> dict:
+def _run_mirror_benchmark(simple_loader, meta_loader, model, total_games) -> dict:
     """Run mirror matchup benchmark."""
     console.print("\n[bold cyan]═══ Mirror Matchup ═══[/bold cyan]")
     console.print("Same deck for both players (3 simple + 7 meta archetypes)")
@@ -431,14 +441,14 @@ def _run_mirror_benchmark(simple_loader, meta_loader, model, games_per_deck) -> 
     meta_decks = sample_diverse_meta_decks(meta_loader, 7)
 
     results = run_benchmark(
-        "Mirror", simple_decks + meta_decks, [], model, games_per_deck, mirror=True
+        "Mirror", simple_decks + meta_decks, [], model, total_games, mirror=True
     )
     print_results_table("Mirror Matchup", results)
     return {k: vars(v) for k, v in results.items()}
 
 
 def _run_winrate_benchmark(
-    name: str, loader, model, games_per_deck, rl_high_wr: bool, opp_high_wr: bool
+    name: str, loader, model, total_games, rl_high_wr: bool, opp_high_wr: bool
 ) -> dict:
     """Run win-rate based benchmark (easy or hard)."""
     console.print(f"\n[bold cyan]═══ {name} Matchup ═══[/bold cyan]")
@@ -446,24 +456,26 @@ def _run_winrate_benchmark(
     opp_desc = "high WR" if opp_high_wr else "low WR"
     console.print(f"RL uses {rl_desc} decks vs opponent {opp_desc} decks")
 
-    rl_decks = sample_decks_by_winrate(loader, 10, high_wr=rl_high_wr)
-    opp_decks = sample_decks_by_winrate(loader, 10, high_wr=opp_high_wr)
+    # Use fewer decks to keep total games manageable (5x5 = 25 matchups)
+    rl_decks = sample_decks_by_winrate(loader, 5, high_wr=rl_high_wr)
+    opp_decks = sample_decks_by_winrate(loader, 5, high_wr=opp_high_wr)
     console.print(f"  RL decks: {len(rl_decks)}, Opponent decks: {len(opp_decks)}")
 
-    results = run_benchmark(name, rl_decks, opp_decks, model, games_per_deck)
+    results = run_benchmark(name, rl_decks, opp_decks, model, total_games)
     print_results_table(f"{name} Matchup", results)
     return {k: vars(v) for k, v in results.items()}
 
 
-def _run_random_benchmark(loader, model, games_per_deck) -> dict:
+def _run_random_benchmark(loader, model, total_games) -> dict:
     """Run random matchup benchmark."""
     console.print("\n[bold cyan]═══ Random Matchup ═══[/bold cyan]")
     console.print("Random meta decks for both players")
 
-    rl_decks = [loader.sample_deck() for _ in range(10)]
-    opp_decks = [loader.sample_deck() for _ in range(10)]
+    # Use fewer decks (5x5 = 25 matchups) 
+    rl_decks = [loader.sample_deck() for _ in range(5)]
+    opp_decks = [loader.sample_deck() for _ in range(5)]
 
-    results = run_benchmark("Random", rl_decks, opp_decks, model, games_per_deck)
+    results = run_benchmark("Random", rl_decks, opp_decks, model, total_games)
     print_results_table("Random Matchup", results)
     return {k: vars(v) for k, v in results.items()}
 
