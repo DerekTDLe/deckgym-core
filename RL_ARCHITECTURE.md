@@ -154,10 +154,87 @@ python python/scripts/evaluate.py --model models/rl_bot.zip --benchmark all
 ```
 
 ### Key CLI Arguments
-| Argument | Default | Description |
-|----------|---------|-------------|
 | `--steps` | 1,000,000 | Total training timesteps |
 | `--lr` | 3e-4 | Learning rate |
 | `--ent-coef` | 0.01 | Entropy coefficient (exploration) |
 | `--batch-size` | 512 | Minibatch size |
 | `--opponent-update-freq` | 50,000 | Frozen opponent update frequency |
+
+---
+
+## Latest Evaluation Results
+
+> **Model**: `models/rl_bot.zip` (~7M training steps, ~19MB)  
+> **Date**: 2025-12-23
+
+### Current Hyperparameters
+
+| Parameter | Value |
+|-----------|-------|
+| Learning Rate | 3e-4 |
+| Batch Size | 512 |
+| N Steps | 4096 |
+| N Epochs | 10 |
+| Entropy Coef | 0.01 |
+| Clip Range | 0.2 |
+| Policy Network | 512-512-256 |
+| Value Network | 512-512-256 |
+| Frozen Opponent Update | 50k steps |
+
+### Benchmark Results (1000 games/bot)
+
+#### Mirror Matchup (Same deck for both players)
+
+| Opponent | Wins | Losses | Draws | Win Rate |
+|----------|------|--------|-------|----------|
+| Random | 853 | 13 | 134 | **85.3%** |
+| AttachAttack | 809 | 66 | 125 | **80.9%** |
+| EndTurn | 899 | 0 | 101 | **89.9%** |
+| WeightedRandom | 712 | 141 | 147 | **71.2%** |
+| ValueFunction | 751 | 102 | 147 | **75.1%** |
+| Expectiminimax(2) | 208 | 684 | 108 | **20.8%** |
+| EvolutionRusher | 578 | 299 | 123 | **57.8%** |
+
+#### Easy Matchup (RL high WR decks vs opponent low WR decks)
+
+| Opponent | Wins | Losses | Draws | Win Rate |
+|----------|------|--------|-------|----------|
+| Random | 752 | 25 | 223 | **75.2%** |
+| AttachAttack | 803 | 27 | 170 | **80.3%** |
+| EndTurn | 876 | 0 | 124 | **87.6%** |
+| WeightedRandom | 567 | 177 | 256 | **56.7%** |
+| ValueFunction | 692 | 127 | 181 | **69.2%** |
+| Expectiminimax(2) | 232 | 589 | 179 | **23.2%** |
+| EvolutionRusher | 585 | 228 | 187 | **58.5%** |
+
+#### Hard Matchup (RL low WR decks vs opponent high WR decks)
+
+| Opponent | Wins | Losses | Draws | Win Rate |
+|----------|------|--------|-------|----------|
+| Random | 820 | 34 | 146 | **82.0%** |
+| AttachAttack | 827 | 59 | 114 | **82.7%** |
+| EndTurn | 934 | 1 | 65 | **93.4%** |
+| WeightedRandom | 659 | 179 | 162 | **65.9%** |
+| ValueFunction | 723 | 133 | 144 | **72.3%** |
+| Expectiminimax(2) | 243 | 587 | 170 | **24.3%** |
+| EvolutionRusher | 636 | 196 | 168 | **63.6%** |
+
+#### Summary
+
+| Benchmark | Win Rate |
+|-----------|----------|
+| Mirror | **68.7%** |
+| Easy | **64.4%** |
+| Hard | **69.2%** |
+| Random | **59.6%** |
+
+### Known Issues
+
+> [!WARNING]
+> **Abnormally High Draw Rate**: Draw rates are currently 10-25% across benchmarks (expected: <1%). 
+> 
+> **Suspected causes:**
+> 1. **Game timeouts** at 500 actions without winner
+> 2. **Rust panics** caught and counted as draws (e.g., "Attacking Pokemon should be there when modifying damage")
+> 
+> This requires investigation to improve both game engine robustness and evaluation accuracy.

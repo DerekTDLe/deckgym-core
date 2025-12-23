@@ -280,6 +280,23 @@ class MetaDeckLoader:
         """Get top N decks by strength."""
         return sorted(self.decks, key=lambda d: d.strength, reverse=True)[:n]
     
+    def filter_by_win_rate(self, min_rate: float = 0.0, max_rate: float = 100.0) -> list[DeckInfo]:
+        """
+        Filter decks by win rate equivalent (strength * 100).
+        
+        Since strength is 0-1, we treat it as win rate percentage.
+        
+        Args:
+            min_rate: Minimum win rate % (e.g., 55.0 for 55%)
+            max_rate: Maximum win rate % (e.g., 100.0 for 100%)
+        
+        Returns:
+            List of decks within the win rate range.
+        """
+        min_strength = min_rate / 100.0
+        max_strength = max_rate / 100.0
+        return [d for d in self.decks if min_strength <= d.strength <= max_strength]
+    
     def __len__(self) -> int:
         return len(self.decks)
 
