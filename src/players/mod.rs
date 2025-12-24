@@ -42,7 +42,7 @@ pub enum PlayerCode {
     R,
     H,
     W,
-    M,
+    M { iterations: u64 },  // MCTS with configurable iterations
     V,
     E { max_depth: usize },
     ER, // Evolution Rusher
@@ -68,13 +68,22 @@ pub fn parse_player_code(s: &str) -> Result<PlayerCode, String> {
         return Err(format!("Invalid player code: {s}. Use 'e<number>' for ExpectiMiniMax with depth, e.g., 'e2', 'e5'"));
     }
 
+    // Check if it starts with 'm' followed by digits (e.g., m100, m500)
+    if lower.starts_with('m') && lower.len() > 1 {
+        let rest = &lower[1..];
+        if let Ok(iterations) = rest.parse::<u64>() {
+            return Ok(PlayerCode::M { iterations });
+        }
+        return Err(format!("Invalid player code: {s}. Use 'm<number>' for MCTS with iterations, e.g., 'm100', 'm500'"));
+    }
+
     match lower.as_str() {
         "aa" => Ok(PlayerCode::AA),
         "et" => Ok(PlayerCode::ET),
         "r" => Ok(PlayerCode::R),
         "h" => Ok(PlayerCode::H),
         "w" => Ok(PlayerCode::W),
-        "m" => Ok(PlayerCode::M),
+        "m" => Ok(PlayerCode::M { iterations: 100 }), // Default 100 iterations
         "v" => Ok(PlayerCode::V),
         "e" => Ok(PlayerCode::E { max_depth: 3 }), // Default depth
         "er" => Ok(PlayerCode::ER),
@@ -117,7 +126,7 @@ fn get_player(deck: Deck, player: &PlayerCode) -> Box<dyn Player> {
         PlayerCode::R => Box::new(RandomPlayer { deck }),
         PlayerCode::H => Box::new(HumanPlayer { deck }),
         PlayerCode::W => Box::new(WeightedRandomPlayer { deck }),
-        PlayerCode::M => Box::new(MctsPlayer::new(deck, 100)),
+        PlayerCode::M { iterations } => Box::new(MctsPlayer::new(deck, *iterations)),
         PlayerCode::V => Box::new(ValueFunctionPlayer { deck }),
         PlayerCode::E { max_depth } => Box::new(ExpectiMiniMaxPlayer {
             deck,
