@@ -89,7 +89,7 @@ class DeckGymEnv(gym.Env):
             seed=game_seed
         )
 
-        obs = np.array(self.game.get_obs(), dtype=np.float32)
+        obs = self._sanitize_obs(np.array(self.game.get_obs(), dtype=np.float32))
         return obs, {}
 
     def step(self, action: int):
@@ -113,13 +113,21 @@ class DeckGymEnv(gym.Env):
             # End episode with neutral reward to avoid crashing training
             print(f"WARNING: Panic in step_action: {e}")
             try:
-                obs = np.array(self.game.get_obs(), dtype=np.float32)
+                obs = self._sanitize_obs(np.array(self.game.get_obs(), dtype=np.float32))
             except BaseException:
                 obs = np.zeros(self.observation_space.shape, dtype=np.float32)
             return obs, 0.0, True, False, {"error": str(e)}
         
-        obs = np.array(self.game.get_obs(), dtype=np.float32)
+        obs = self._sanitize_obs(np.array(self.game.get_obs(), dtype=np.float32))
         return obs, reward, done, False, {"action": info_str}
+    
+    def _sanitize_obs(self, obs: np.ndarray) -> np.ndarray:
+        """Check and fix corrupted observations containing NaN or inf values."""
+        if np.any(np.isnan(obs)) or np.any(np.isinf(obs)):
+            bad_indices = np.where(np.isnan(obs) | np.isinf(obs))[0]
+            print(f"WARNING: Corrupted observation at indices {bad_indices[:10]}... Sanitizing.")
+            obs = np.nan_to_num(obs, nan=0.0, posinf=1.0, neginf=-1.0)
+        return obs
 
     def action_masks(self) -> np.ndarray:
         """
