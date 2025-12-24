@@ -41,6 +41,7 @@ class TrainingConfig:
     save_path: str = "models/rl_bot"
     checkpoint_dir: str = "./checkpoints/"
     tensorboard_dir: str = "./logs/"
+    resume_path: str = None  # Path to checkpoint to resume from (None = start fresh)
     
     # Training duration
     total_timesteps: int = 30_000_000
@@ -480,6 +481,8 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     print(f"  Policy network:     {config.policy_layers}")
     print(f"  N environments:     {config.n_envs}")
     print(f"  Device:             {config.device}")
+    if config.resume_path:
+        print(f"  Resume from:        {config.resume_path}")
     
     # Setup environment(s)
     print("\n[1/4] Loading decks...")
@@ -507,24 +510,47 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         activation_fn=activation_fn,
     )
     
-    model = MaskablePPO(
-        "MlpPolicy",
-        env,
-        learning_rate=config.get_learning_rate_schedule(),  # Cyclical LR
-        n_steps=config.n_steps,
-        batch_size=config.batch_size,
-        n_epochs=config.n_epochs,
-        gamma=config.gamma,
-        gae_lambda=config.gae_lambda,
-        ent_coef=config.ent_coef,
-        vf_coef=config.vf_coef,
-        clip_range=config.clip_range,
-        target_kl=config.target_kl,  # Stop epoch early if KL too high
-        policy_kwargs=policy_kwargs,
-        verbose=1,
-        device=config.device,
-        tensorboard_log=config.tensorboard_dir,
-    )
+    if config.resume_path:
+        # Resume from existing checkpoint
+        print(f"      Resuming from: {config.resume_path}")
+        model = MaskablePPO.load(
+            config.resume_path,
+            env=env,
+            device=config.device,
+            tensorboard_log=config.tensorboard_dir,
+        )
+        # Update hyperparameters for fine-tuning
+        model.learning_rate = config.get_learning_rate_schedule()
+        model.n_steps = config.n_steps
+        model.batch_size = config.batch_size
+        model.n_epochs = config.n_epochs
+        model.gamma = config.gamma
+        model.gae_lambda = config.gae_lambda
+        model.ent_coef = config.ent_coef
+        model.vf_coef = config.vf_coef
+        model.clip_range = config.clip_range
+        model.target_kl = config.target_kl
+        print(f"      Updated hyperparameters (LR={config.base_learning_rate}, target_kl={config.target_kl})")
+    else:
+        # Create new model from scratch
+        model = MaskablePPO(
+            "MlpPolicy",
+            env,
+            learning_rate=config.get_learning_rate_schedule(),  # Cyclical LR
+            n_steps=config.n_steps,
+            batch_size=config.batch_size,
+            n_epochs=config.n_epochs,
+            gamma=config.gamma,
+            gae_lambda=config.gae_lambda,
+            ent_coef=config.ent_coef,
+            vf_coef=config.vf_coef,
+            clip_range=config.clip_range,
+            target_kl=config.target_kl,  # Stop epoch early if KL too high
+            policy_kwargs=policy_kwargs,
+            verbose=1,
+            device=config.device,
+            tensorboard_log=config.tensorboard_dir,
+        )
     
     # Setup callbacks
     callbacks = [
@@ -617,6 +643,9 @@ if __name__ == "__main__":
     # Parallelization
     parser.add_argument("--n-envs", type=int, default=8, help="Number of parallel environments (DummyVecEnv)")
     
+    # Resume
+    parser.add_argument("--resume", default=None, help="Path to checkpoint to resume training from")
+    
     # Device
     parser.add_argument("--device", default="auto", choices=["cpu", "cuda", "auto"])
     
@@ -627,6 +656,7 @@ if __name__ == "__main__":
         simple_deck_path=args.simple,
         meta_deck_path=args.meta,
         save_path=args.save,
+        resume_path=args.resume,
         total_timesteps=args.steps,
         checkpoint_freq=args.checkpoint_freq,
         base_learning_rate=args.lr,
