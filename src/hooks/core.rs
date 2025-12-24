@@ -122,7 +122,9 @@ pub(crate) fn on_evolve(actor: usize, state: &mut State, to_card: &Card) {
 /// Called when a basic Pokémon is played to the bench from hand
 pub(crate) fn on_end_turn(player_ending_turn: usize, state: &mut State) {
     // Check if active Pokémon has an end-of-turn ability
-    let active = state.get_active(player_ending_turn);
+    let Some(active) = state.maybe_get_active(player_ending_turn) else {
+        return; // No active Pokemon, nothing to check
+    };
     if let Some(ability_id) = AbilityId::from_pokemon_id(&active.card.get_id()[..]) {
         if ability_id == AbilityId::A4a010EnteiExLegendaryPulse
             || ability_id == AbilityId::A4a020SuicuneExLegendaryPulse
@@ -138,8 +140,9 @@ pub(crate) fn on_end_turn(player_ending_turn: usize, state: &mut State) {
         if ability_id == AbilityId::A3b057SnorlaxExFullMouthManner {
             // At the end of your turn, if this Pokémon is in the Active Spot, heal 20 damage from it.
             debug!("Full-Mouth Manner: Healing 20 damage from active");
-            let active = state.get_active_mut(player_ending_turn);
-            active.heal(20);
+            if let Some(active) = state.in_play_pokemon[player_ending_turn][0].as_mut() {
+                active.heal(20);
+            }
         }
     }
 
@@ -402,8 +405,10 @@ fn get_reduced_card_effect_modifiers(
     if !is_active_to_active {
         return 0;
     }
-    state
-        .get_active(target_player)
+    let Some(active) = state.maybe_get_active(target_player) else {
+        return 0;
+    };
+    active
         .get_active_effects()
         .iter()
         .filter(|effect| matches!(effect, CardEffect::ReducedDamage { .. }))
@@ -450,7 +455,9 @@ fn get_weakness_modifier(
     if !is_active_to_active {
         return 0;
     }
-    let receiving = state.get_active(target_player);
+    let Some(receiving) = state.maybe_get_active(target_player) else {
+        return 0;
+    };
 
     // Check if defender has NoWeakness effect active
     if receiving

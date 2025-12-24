@@ -9,7 +9,9 @@ use crate::{
 };
 
 pub(crate) fn can_retreat(state: &State) -> bool {
-    let active = state.get_active(state.current_player);
+    let Some(active) = state.maybe_get_active(state.current_player) else {
+        return false; // No active Pokemon, cannot retreat
+    };
 
     // Check if active card has CardEffect::NoRetreat
     let has_no_retreat_effect = active.get_active_effects().contains(&CardEffect::NoRetreat);
