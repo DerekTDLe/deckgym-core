@@ -171,37 +171,42 @@ sudo cargo flamegraph --root --dev -- simulate example_decks/venusaur-exeggutor.
 
 The repository includes a deep reinforcement learning agent trained using PPO (Proximal Policy Optimization) with self-play.
 
-### Elo Leaderboard (Baseline Model - 30M Steps)
+### Elo Leaderboard
 
 | Rank | Player | Elo | Win Rate |
 |------|--------|-----|----------|
-| 1 | Expectiminimax(5) | ~2020 | ~84% |
-| 2 | Expectiminimax(4) | ~2000 | ~80% |
-| 3 | Expectiminimax(3) | ~1980 | ~82% |
-| 4 | Expectiminimax(2) | ~1890 | ~76% |
-| 5 | **RL Agent (30M)** | **~1750** | **~62%** |
-| 6 | EvolutionRusher | ~1550 | ~44% |
-| 7 | ValueFunction | ~1450 | ~31% |
-| 8 | WeightedRandom | ~1340 | ~38% |
-| 9 | AttachAttack | ~1270 | ~30% |
-| 10 | EndTurn | ~1200 | ~0% |
-| 11 | Random | ~1080 | ~20% |
+| 1 | Expectiminimax(5) | 2020 | 84.0% |
+| 2 | Expectiminimax(4) | 2000 | 80.0% |
+| 3 | Expectiminimax(3) | 1978 | 82.0% |
+| 4 | Expectiminimax(2) | 1893 | 76.2% |
+| 5 | **RL Agent (20M)** | **1833** | **66.3%** |
+| 6 | RL Agent (30M) | 1820 | 64.2% |
+| 7 | RL Agent (10M) | 1761 | 61.8% |
+| 8 | EvolutionRusher | 1549 | 44.2% |
+| 9 | ValueFunction | 1451 | 31.3% |
+| 10 | WeightedRandom | 1340 | 38.2% |
+| 11 | AttachAttack | 1273 | 29.6% |
+| 12 | EndTurn | 1200 | 0.0% |
+| 13 | Random | 1081 | 19.8% |
 
-The RL agent at 30M steps ranks **5th** among all bots, outperforming heuristic-based bots but still ~200 Elo below search-based methods (Expectiminimax).
+**Key findings:**
+- Peak performance at **20M steps** (1833 Elo), slight regression at 30M (1820 Elo)
+- RL agent ranks **5th**, beating all heuristic bots but trailing Expectiminimax (~170 Elo gap)
+- 30M model kept as reference baseline; 20M recommended for deployment
 
-### Training Trends (0-30M Steps) for the Baseline Model
+### Training Trends (0-30M Steps)
 
 | Metric | Trend | Interpretation |
 |--------|-------|----------------|
 | `policy_gradient_loss` | ↓ Decreasing | Agent learning better actions |
-| `value_loss` | ↓ Decreasing (occasional spikes, should be fixed) | Value function improving |
+| `value_loss` | ↓ Decreasing (occasional spikes) | Value function improving |
 | `explained_variance` | ↑ 0.60+ | Good return prediction |
 | `approx_kl` | ↑ 0.025-0.04 | Policy changing, possible instability |
 | `entropy_loss` | → ~-0.38 | Moderate exploration |
-| `ep_len_mean` | 34→43 | Longer, less "rush" games |
+| `ep_len_mean` | 34→43 | Longer, more strategic games |
 
 **Key observations:**
-- Training is **stable** but **not converged** at 30M steps
+- Training is **stable** but **not monotonically improving** after 20M steps
 - High `approx_kl` (~0.04) suggests policy volatility due to diverse deck matchups (389 archetypes)
 - Value function learns well (`explained_variance` >0.6)
 - The agent beats all heuristic bots but struggles against tree-search (Expectiminimax)
@@ -210,14 +215,14 @@ The RL agent at 30M steps ranks **5th** among all bots, outperforming heuristic-
 
 ```bash
 # Train new model (30M steps, ~8 hours on GPU)
-cd python && python scripts/train.py --steps 30000000
+cd python && python python/scripts/train.py --steps 30000000
 
 # Resume training from checkpoint
-python scripts/train.py --resume checkpoints/rl_bot_30M.zip --steps 10000000 --lr 5e-5
+python python/scripts/train.py --resume checkpoints/rl_bot_30M.zip --steps 10000000 --lr 5e-5
 
 # Evaluate with Elo system
-python scripts/evaluate.py init --games 50 --workers 8  # Initialize baselines (once)
-python scripts/evaluate.py eval models/rl_bot.zip --games 50  # Evaluate agent
+python python/scripts/evaluate.py init --games 50 --workers 8  # Initialize baselines (once)
+python python/scripts/evaluate.py eval models/rl_bot.zip --games 50  # Evaluate agent
 ```
 
 ### Hyperparameters (Default Config)
