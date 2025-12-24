@@ -1,27 +1,29 @@
 #!/usr/bin/env python3
 """
-Evaluate a trained Pokemon TCG Pocket RL agent against various bot opponents.
+Incremental Elo Evaluation System for Pokemon TCG Pocket RL.
 
-Benchmarks:
-- Mirror: Same deck for both players (tests pure skill)
-- Easy: RL uses high-WR decks vs low-WR decks
-- Hard: RL uses low-WR decks vs high-WR decks
-- Random: Random meta decks for both players
+Features:
+- Initialize baseline bot ratings with round-robin tournament
+- Evaluate a new agent against baselines and compute its Elo
+- Store Elo in model metadata for RL checkpoints
 """
 
 import argparse
+import itertools
 import json
 import os
+import pickle
 import random
 import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable, Dict, List
 
 import numpy as np
 from rich.console import Console
 from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -33,111 +35,189 @@ from deckgym.deck_loader import MetaDeckLoader
 # Configuration
 # =============================================================================
 
-OPPONENT_TYPES = ["r", "aa", "et", "w", "v", "e2", "er"]
-OPPONENT_NAMES = {
-    "r": "Random",
-    "aa": "AttachAttack",
-    "et": "EndTurn",
-    "w": "WeightedRandom",
-    "v": "ValueFunction",
-    "e2": "Expectiminimax(2)",
-    "er": "EvolutionRusher",
-}
+INITIAL_ELO = 1500.0
+K_FACTOR_NEW = 40      # K for players with < 30 games
+K_FACTOR_MID = 24      # K for players with 30-100 games
+K_FACTOR_STABLE = 16   # K for players with > 100 games
+
+# Baseline bots for evaluation
+BASELINE_BOTS = [
+    ("Random", "r"),
+    ("AttachAttack", "aa"),
+    ("EndTurn", "et"),
+    ("WeightedRandom", "w"),
+    ("ValueFunction", "v"),
+    ("EvolutionRusher", "er"),
+    ("Expectiminimax(2)", "e2"),
+    ("Expectiminimax(3)", "e3"),
+    ("MCTS(100)", "m100"),
+    ("MCTS(500)", "m500"),
+]
+
+ELO_CACHE_PATH = Path("elo_baselines.json")
 
 console = Console()
 
 
 # =============================================================================
-# Data Structures
+# Elo System
 # =============================================================================
 
 @dataclass
-class BenchmarkResult:
-    """Aggregated results for a benchmark scenario."""
+class EloPlayer:
+    """A player in the Elo rating system."""
+    name: str
+    bot_code: str  # Code for game creation (e.g., "r", "e2")
+    elo: float = INITIAL_ELO
+    games: int = 0
     wins: int = 0
     losses: int = 0
     draws: int = 0
-    draw_timeout: int = 0      # 500 steps reached without game end
-    draw_exception: int = 0    # Rust panic or other error
-    draw_legitimate: int = 0   # Game ended with winner=None
-    total_steps: int = 0
-
-    @property
-    def total(self) -> int:
-        return self.wins + self.losses + self.draws
-
+    is_rl: bool = False  # True for RL agents
+    
     @property
     def win_rate(self) -> float:
-        return self.wins / self.total if self.total > 0 else 0.0
+        total = self.wins + self.losses + self.draws
+        return self.wins / total if total > 0 else 0.0
+    
+    def get_k_factor(self) -> float:
+        """Adaptive K-factor: higher for new players, lower for established."""
+        if self.games < 30:
+            return K_FACTOR_NEW
+        elif self.games < 100:
+            return K_FACTOR_MID
+        return K_FACTOR_STABLE
+    
+    def to_dict(self) -> dict:
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, d: dict) -> "EloPlayer":
+        return cls(**d)
 
 
-# =============================================================================
-# Model Interface
-# =============================================================================
-
-def load_model(model_path: str):
-    """Load a trained MaskablePPO model."""
-    from sb3_contrib import MaskablePPO
-    return MaskablePPO.load(model_path)
+def expected_score(elo_a: float, elo_b: float) -> float:
+    """Calculate expected score (probability of winning) for player A."""
+    return 1.0 / (1.0 + 10.0 ** ((elo_b - elo_a) / 400.0))
 
 
-def get_rl_action(model, obs: np.ndarray, action_mask: np.ndarray) -> int:
-    """Get deterministic action from RL model."""
-    if model is None:
-        valid = np.where(action_mask)[0]
-        return int(np.random.choice(valid)) if len(valid) > 0 else 0
-    action, _ = model.predict(obs, deterministic=True, action_masks=action_mask)
-    return int(action)
+def update_elo(player_a: EloPlayer, player_b: EloPlayer, winner: Optional[EloPlayer]):
+    """Update Elo ratings after a match. Winner is None for draw."""
+    expected_a = expected_score(player_a.elo, player_b.elo)
+    expected_b = expected_score(player_b.elo, player_a.elo)
+    
+    k_a = player_a.get_k_factor()
+    k_b = player_b.get_k_factor()
+    
+    if winner is None:
+        # Draw
+        player_a.elo += k_a * (0.5 - expected_a)
+        player_b.elo += k_b * (0.5 - expected_b)
+        player_a.draws += 1
+        player_b.draws += 1
+    elif winner.name == player_a.name:
+        player_a.elo += k_a * (1.0 - expected_a)
+        player_b.elo += k_b * (0.0 - expected_b)
+        player_a.wins += 1
+        player_b.losses += 1
+    else:
+        player_a.elo += k_a * (0.0 - expected_a)
+        player_b.elo += k_b * (1.0 - expected_b)
+        player_a.losses += 1
+        player_b.wins += 1
+    
+    player_a.games += 1
+    player_b.games += 1
 
 
 # =============================================================================
 # Game Execution
 # =============================================================================
 
-def play_game(
+def play_match(
+    player_a: EloPlayer,
+    player_b: EloPlayer,
     deck_a: str,
     deck_b: str,
-    model,
-    rl_is_player_a: bool,
-    opponent_type: str,
+    rl_model=None,
     seed: Optional[int] = None,
-) -> tuple[int, int, str]:
+) -> Optional[EloPlayer]:
     """
-    Play a single game between RL agent and bot opponent.
-
-    Args:
-        deck_a: Deck string for player A
-        deck_b: Deck string for player B
-        model: Trained RL model
-        rl_is_player_a: Whether RL controls player A
-        opponent_type: Bot type code (e.g., "aa", "v")
-        seed: Random seed for reproducibility
-
+    Play a single match between two players.
+    
     Returns:
-        (result, steps, draw_reason): result is +1 win, -1 loss, 0 draw
-        draw_reason is "timeout", "exception", "legitimate", or "" if not a draw
+        Winner EloPlayer, or None for draw
     """
     import deckgym
-
-    # Write decks to temp files (required by game constructor)
+    
     deck_a_path, deck_b_path = _write_temp_decks(deck_a, deck_b)
-    draw_reason = ""
-
+    
     try:
-        players = ["r", opponent_type] if rl_is_player_a else [opponent_type, "r"]
-        game = deckgym.Game(deck_a_path, deck_b_path, players=players, seed=seed)
-        rl_player_idx = 0 if rl_is_player_a else 1
-
-        result, steps, draw_reason = _play_game_loop(game, model, rl_player_idx)
-
-    except BaseException as e:
-        result, steps, draw_reason = 0, 0, "exception"
-
+        # If player is RL, use "r" as placeholder (we'll control manually)
+        bot_a = "r" if player_a.is_rl else player_a.bot_code
+        bot_b = "r" if player_b.is_rl else player_b.bot_code
+        
+        game = deckgym.Game(deck_a_path, deck_b_path, players=[bot_a, bot_b], seed=seed)
+        
+        max_steps = 500
+        steps = 0
+        
+        while not game.is_game_over() and steps < max_steps:
+            current = game.current_player()
+            current_player = player_a if current == 0 else player_b
+            
+            if current_player.is_rl:
+                # RL agent plays
+                _execute_rl_turn(game, rl_model)
+            else:
+                # Bot plays
+                game.play_tick()
+            
+            steps += 1
+        
+        # Determine winner
+        if steps >= max_steps and not game.is_game_over():
+            return None  # Draw (timeout)
+        
+        outcome = game.get_state().winner
+        if outcome is None:
+            return None  # Draw
+        
+        outcome_str = str(outcome)
+        match = re.search(r"Win\((\d+)\)", outcome_str)
+        if match:
+            winner_idx = int(match.group(1))
+            return player_a if winner_idx == 0 else player_b
+        
+        return None
+        
+    except BaseException:
+        return None  # Draw (exception)
     finally:
         os.unlink(deck_a_path)
         os.unlink(deck_b_path)
 
-    return result, steps, draw_reason
+
+def _execute_rl_turn(game, model):
+    """Execute a single RL agent turn."""
+    obs = np.array(game.get_obs(), dtype=np.float32)
+    mask = np.array(game.get_action_mask(), dtype=bool)
+    
+    if not mask.any():
+        mask[0] = True
+    
+    if model is None:
+        valid = np.where(mask)[0]
+        action = int(np.random.choice(valid)) if len(valid) > 0 else 0
+    else:
+        action, _ = model.predict(obs, deterministic=True, action_masks=mask)
+        action = int(action)
+    
+    try:
+        game.step_action(action)
+    except (ValueError, Exception):
+        valid = [i for i, v in enumerate(mask) if v]
+        game.step_action(valid[0] if valid else 0)
 
 
 def _write_temp_decks(deck_a: str, deck_b: str) -> tuple[str, str]:
@@ -145,380 +225,279 @@ def _write_temp_decks(deck_a: str, deck_b: str) -> tuple[str, str]:
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         f.write(deck_a)
         path_a = f.name
-
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         f.write(deck_b)
         path_b = f.name
-
     return path_a, path_b
 
 
-def _play_game_loop(game, model, rl_player_idx: int) -> tuple[int, int, str]:
-    """Execute the main game loop.
-    
-    Returns:
-        (result, steps, draw_reason): result is +1 win, -1 loss, 0 draw
-        draw_reason is "timeout", "exception", "legitimate", or "" if not a draw
+# =============================================================================
+# Baseline Initialization
+# =============================================================================
+
+def initialize_baselines(
+    deck_loader: MetaDeckLoader,
+    games_per_matchup: int = 10,
+    save_path: Path = ELO_CACHE_PATH,
+) -> Dict[str, EloPlayer]:
     """
-    max_steps = 500
-    steps = 0
+    Initialize baseline bot ratings via round-robin tournament.
+    
+    Each baseline plays against every other baseline.
+    Results are saved to a cache file for reuse.
+    """
+    console.print("[bold cyan]═══ Initializing Baseline Elo Ratings ═══[/bold cyan]")
+    
+    # Create baseline players
+    players = {
+        name: EloPlayer(name=name, bot_code=code)
+        for name, code in BASELINE_BOTS
+    }
+    
+    matchups = list(itertools.combinations(players.keys(), 2))
+    total_games = len(matchups) * games_per_matchup
+    
+    console.print(f"Running {total_games} games ({len(BASELINE_BOTS)} bots, {games_per_matchup} games/matchup)")
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Baseline tournament", total=total_games)
+        
+        game_count = 0
+        for name_a, name_b in matchups:
+            player_a = players[name_a]
+            player_b = players[name_b]
+            
+            for game_idx in range(games_per_matchup):
+                deck_a = deck_loader.sample_deck()
+                deck_b = deck_loader.sample_deck()
+                seed = random.randint(0, 2**32 - 1)
+                
+                # Alternate who goes first
+                if game_idx % 2 == 0:
+                    winner = play_match(player_a, player_b, deck_a, deck_b, seed=seed)
+                else:
+                    winner = play_match(player_b, player_a, deck_b, deck_a, seed=seed)
+                
+                update_elo(player_a, player_b, winner)
+                
+                game_count += 1
+                progress.update(task, completed=game_count)
+    
+    # Save to cache
+    cache_data = {name: player.to_dict() for name, player in players.items()}
+    with open(save_path, "w") as f:
+        json.dump(cache_data, f, indent=2)
+    console.print(f"[green]Saved baseline ratings to {save_path}[/green]")
+    
+    # Print leaderboard
+    print_leaderboard(list(players.values()))
+    
+    return players
 
-    try:
-        while not game.is_game_over() and steps < max_steps:
-            current_player = game.current_player()
 
-            if current_player == rl_player_idx:
-                _execute_rl_turn(game, model)
-            else:
-                game.play_tick()
-
-            steps += 1
-    except BaseException as e:
-        # Rust panic or other error - count as draw
-        print(f"DEBUG: Exception in game: {type(e).__name__}: {e}")
-        return 0, steps, "exception"
-
-    # Check if we hit the step limit
-    if steps >= max_steps and not game.is_game_over():
-        return 0, steps, "timeout"
-
-    result = _determine_result(game, rl_player_idx)
-    draw_reason = "legitimate" if result == 0 else ""
-    return result, steps, draw_reason
-
-
-def _execute_rl_turn(game, model):
-    """Execute a single RL agent turn."""
-    obs = np.array(game.get_obs(), dtype=np.float32)
-    mask = np.array(game.get_action_mask(), dtype=bool)
-
-    if not mask.any():
-        mask[0] = True  # Fallback: force end turn
-
-    action = get_rl_action(model, obs, mask)
-
-    try:
-        game.step_action(action)
-    except ValueError:
-        # Invalid action - try first valid one
-        valid = [i for i, v in enumerate(mask) if v]
-        game.step_action(valid[0] if valid else 0)
-
-
-def _determine_result(game, rl_player_idx: int) -> int:
-    """Determine game result from RL agent's perspective."""
-    outcome = game.get_state().winner
-
-    if outcome is None:
-        return 0  # Draw/timeout
-
-    outcome_str = str(outcome)
-    match = re.search(r"Win\((\d+)\)", outcome_str)
-
-    if match:
-        winner_idx = int(match.group(1))
-        return 1 if winner_idx == rl_player_idx else -1
-
-    return 0  # Tie or unknown
+def load_baselines(cache_path: Path = ELO_CACHE_PATH) -> Optional[Dict[str, EloPlayer]]:
+    """Load baseline ratings from cache if available."""
+    if not cache_path.exists():
+        return None
+    
+    with open(cache_path) as f:
+        cache_data = json.load(f)
+    
+    return {name: EloPlayer.from_dict(data) for name, data in cache_data.items()}
 
 
 # =============================================================================
-# Benchmark Runner
+# Agent Evaluation
 # =============================================================================
 
-def run_benchmark(
-    name: str,
-    rl_decks: list[str],
-    opponent_decks: list[str],
-    model,
-    total_games_per_bot: int,
-    mirror: bool = False,
-) -> dict[str, BenchmarkResult]:
-    """Run a benchmark scenario against all opponent types.
+def evaluate_agent(
+    model_path: str,
+    baselines: Dict[str, EloPlayer],
+    deck_loader: MetaDeckLoader,
+    games_per_baseline: int = 20,
+    save_elo_to_model: bool = True,
+) -> EloPlayer:
+    """
+    Evaluate an RL agent against all baselines and compute its Elo.
     
     Args:
-        total_games_per_bot: Target total games per opponent bot type.
+        model_path: Path to the RL model checkpoint
+        baselines: Dictionary of baseline EloPlayers
+        deck_loader: Deck loader for sampling game decks
+        games_per_baseline: Games to play against each baseline
+        save_elo_to_model: If True, append Elo to model filename
+    
+    Returns:
+        EloPlayer for the evaluated agent
     """
-    results = {opp: BenchmarkResult() for opp in OPPONENT_TYPES}
-
-    # Calculate games per matchup to reach target total
-    num_matchups = len(rl_decks) * (1 if mirror else len(opponent_decks))
-    games_per_matchup = max(1, total_games_per_bot // num_matchups)
-    total_games = num_matchups * games_per_matchup * len(OPPONENT_TYPES)
-    game_count = 0
-
-    with console.status(f"[bold green]Running {name}...") as status:
-        for rl_deck in rl_decks:
-            opp_deck_list = [rl_deck] if mirror else opponent_decks
-
-            for opp_deck in opp_deck_list:
-                for opp_type in OPPONENT_TYPES:
-                    for game_idx in range(games_per_matchup):
-                        rl_is_first = game_idx % 2 == 0
-                        seed = random.randint(0, 2**32 - 1)
-
-                        try:
-                            result, steps, draw_reason = play_game(
-                                rl_deck, opp_deck, model,
-                                rl_is_player_a=rl_is_first,
-                                opponent_type=opp_type,
-                                seed=seed,
-                            )
-                            _record_result(results[opp_type], result, steps, draw_reason)
-                        except Exception:
-                            results[opp_type].draws += 1
-                            results[opp_type].draw_exception += 1
-
-                        game_count += 1
-                        if game_count % 100 == 0:
-                            pct = game_count / total_games * 100
-                            status.update(f"[bold green]{name}: {game_count}/{total_games} ({pct:.0f}%)")
-
-    return results
-
-
-def _record_result(result: BenchmarkResult, outcome: int, steps: int, draw_reason: str = ""):
-    """Record a single game result."""
-    if outcome == 1:
-        result.wins += 1
-    elif outcome == -1:
-        result.losses += 1
-    else:
-        result.draws += 1
-        # Track draw type
-        if draw_reason == "timeout":
-            result.draw_timeout += 1
-        elif draw_reason == "exception":
-            result.draw_exception += 1
-        elif draw_reason == "legitimate":
-            result.draw_legitimate += 1
-    result.total_steps += steps
-
-
-# =============================================================================
-# Deck Selection
-# =============================================================================
-
-def sample_decks_by_winrate(loader: MetaDeckLoader, n: int, high_wr: bool) -> list[str]:
-    """Sample decks from high or low win rate archetypes."""
-    if high_wr:
-        decks_info = loader.filter_by_win_rate(min_rate=55.0, max_rate=100.0)
-    else:
-        decks_info = loader.filter_by_win_rate(min_rate=0.0, max_rate=45.0)
-
-    if not decks_info:
-        decks_info = loader.decks  # Fallback to all
-
-    # Sample unique archetypes
-    result = []
-    used_archetypes = set()
-    shuffled = list(decks_info)
-    random.shuffle(shuffled)
-
-    for deck_info in shuffled:
-        if len(result) >= n:
-            break
-        if deck_info.archetype in used_archetypes:
-            continue
-        if deck_info.deck_string:
-            result.append(deck_info.deck_string)
-            used_archetypes.add(deck_info.archetype)
-
-    return result
+    from sb3_contrib import MaskablePPO
+    
+    console.print(f"\n[bold cyan]═══ Evaluating Agent ═══[/bold cyan]")
+    console.print(f"Model: {model_path}")
+    console.print(f"Games per baseline: {games_per_baseline}")
+    
+    # Load model
+    model = MaskablePPO.load(model_path)
+    
+    # Create RL player
+    agent_name = Path(model_path).stem
+    rl_player = EloPlayer(name=agent_name, bot_code="rl", is_rl=True)
+    
+    total_games = len(baselines) * games_per_baseline
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Evaluating agent", total=total_games)
+        
+        game_count = 0
+        for baseline_name, baseline in baselines.items():
+            # Create a copy of baseline for this evaluation (don't modify cached baselines)
+            baseline_copy = EloPlayer.from_dict(baseline.to_dict())
+            
+            for game_idx in range(games_per_baseline):
+                deck_a = deck_loader.sample_deck()
+                deck_b = deck_loader.sample_deck()
+                seed = random.randint(0, 2**32 - 1)
+                
+                # Alternate who goes first
+                if game_idx % 2 == 0:
+                    winner = play_match(rl_player, baseline_copy, deck_a, deck_b, 
+                                       rl_model=model, seed=seed)
+                else:
+                    winner = play_match(baseline_copy, rl_player, deck_b, deck_a,
+                                       rl_model=model, seed=seed)
+                
+                update_elo(rl_player, baseline_copy, winner)
+                
+                game_count += 1
+                progress.update(task, completed=game_count,
+                               description=f"vs {baseline_name}: {game_count}/{total_games}")
+    
+    # Print results
+    console.print(f"\n[bold green]Agent Elo: {rl_player.elo:.0f}[/bold green]")
+    console.print(f"Record: {rl_player.wins}W - {rl_player.losses}L - {rl_player.draws}D")
+    console.print(f"Win Rate: {rl_player.win_rate:.1%}")
+    
+    # Save Elo to model by renaming/copying
+    if save_elo_to_model:
+        _save_elo_to_model(model_path, rl_player.elo)
+    
+    # Print comparison leaderboard
+    all_players = list(baselines.values()) + [rl_player]
+    all_players.sort(key=lambda p: p.elo, reverse=True)
+    print_leaderboard(all_players, highlight=agent_name)
+    
+    return rl_player
 
 
-def sample_diverse_meta_decks(loader: MetaDeckLoader, n: int) -> list[str]:
-    """Sample meta decks from diverse archetypes."""
-    decks = []
-    used = set()
+def _save_elo_to_model(model_path: str, elo: float):
+    """Save Elo rating alongside the model."""
+    elo_path = Path(model_path).with_suffix(".elo")
+    with open(elo_path, "w") as f:
+        json.dump({"elo": round(elo, 1), "model": model_path}, f)
+    console.print(f"[green]Saved Elo to {elo_path}[/green]")
 
-    for _ in range(n * 4):  # Over-sample to ensure diversity
-        if len(decks) >= n:
-            break
-        info = loader.sample_deck_info()
-        if info.archetype not in used:
-            decks.append(info.deck_string)
-            used.add(info.archetype)
 
-    return decks
+def load_model_elo(model_path: str) -> Optional[float]:
+    """Load Elo rating for a model if available."""
+    elo_path = Path(model_path).with_suffix(".elo")
+    if elo_path.exists():
+        with open(elo_path) as f:
+            return json.load(f).get("elo")
+    return None
 
 
 # =============================================================================
-# Output Formatting
+# Output
 # =============================================================================
 
-def print_results_table(name: str, results: dict[str, BenchmarkResult]):
-    """Display results as a formatted table."""
-    table = Table(title=f"{name} Results")
-    table.add_column("Opponent", style="cyan")
-    table.add_column("Wins", justify="right", style="green")
-    table.add_column("Losses", justify="right", style="red")
-    table.add_column("Draws", justify="right", style="yellow")
-    table.add_column("Draw Breakdown", justify="right", style="dim")
-    table.add_column("Win Rate", justify="right", style="bold")
-
-    for opp in OPPONENT_TYPES:
-        r = results[opp]
-        wr_style = "green" if r.win_rate >= 0.5 else "red"
-        # Draw breakdown: T=timeout, E=exception, L=legitimate
-        draw_breakdown = f"T:{r.draw_timeout} E:{r.draw_exception} L:{r.draw_legitimate}"
+def print_leaderboard(players: List[EloPlayer], highlight: str = None):
+    """Display Elo leaderboard."""
+    sorted_players = sorted(players, key=lambda p: p.elo, reverse=True)
+    
+    table = Table(title="Elo Leaderboard")
+    table.add_column("Rank", justify="right", style="bold")
+    table.add_column("Player", style="cyan")
+    table.add_column("Elo", justify="right", style="bold yellow")
+    table.add_column("Games", justify="right")
+    table.add_column("W-L-D", justify="right")
+    table.add_column("Win Rate", justify="right")
+    
+    for rank, player in enumerate(sorted_players, 1):
+        elo_str = f"{player.elo:.0f}"
+        wld = f"{player.wins}-{player.losses}-{player.draws}"
+        wr = f"{player.win_rate:.1%}"
+        wr_style = "green" if player.win_rate >= 0.5 else "red"
+        
+        # Highlight the evaluated agent
+        name_style = "bold magenta" if player.name == highlight else "cyan"
+        
         table.add_row(
-            OPPONENT_NAMES.get(opp, opp),
-            str(r.wins),
-            str(r.losses),
-            str(r.draws),
-            draw_breakdown,
-            f"[{wr_style}]{r.win_rate:.1%}[/{wr_style}]",
+            str(rank),
+            f"[{name_style}]{player.name}[/{name_style}]",
+            elo_str,
+            str(player.games),
+            wld,
+            f"[{wr_style}]{wr}[/{wr_style}]",
         )
-
+    
     console.print(table)
 
 
-def print_summary(all_results: dict):
-    """Print overall summary across all benchmarks."""
-    console.print("\n[bold green]═══ Summary ═══[/bold green]")
-    for scenario, results in all_results.items():
-        total_w = sum(r["wins"] for r in results.values())
-        total_g = sum(r["wins"] + r["losses"] + r["draws"] for r in results.values())
-        wr = total_w / total_g if total_g else 0
-        console.print(f"  {scenario.capitalize():8s}: {total_w:4d}/{total_g:4d} ({wr:.1%})")
-
-
 # =============================================================================
-# Main
+# CLI
 # =============================================================================
 
 def main():
-    args = parse_args()
-
-    if args.seed:
-        random.seed(args.seed)
-        np.random.seed(args.seed)
-
-    console.print("[bold blue]═══ Pokemon TCG Pocket RL Evaluation ═══[/bold blue]")
-    console.print(f"Model: {args.model}")
-    console.print(f"Games per bot: {args.games}")
-
-    # Load resources
-    model = None
-    if args.model.lower() == "random":
-        console.print("\n[1/2] Using Random Agent (No Model)...")
+    parser = argparse.ArgumentParser(description="Elo Evaluation System")
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
+    
+    # init-baselines command
+    init_parser = subparsers.add_parser("init", help="Initialize baseline bot ratings")
+    init_parser.add_argument("--meta-decks", default="meta_deck.json", help="Meta deck file")
+    init_parser.add_argument("--games", type=int, default=20, help="Games per matchup")
+    init_parser.add_argument("--output", default="elo_baselines.json", help="Output cache file")
+    
+    # evaluate command
+    eval_parser = subparsers.add_parser("eval", help="Evaluate an RL agent")
+    eval_parser.add_argument("model", help="Path to model checkpoint (.zip)")
+    eval_parser.add_argument("--meta-decks", default="meta_deck.json", help="Meta deck file")
+    eval_parser.add_argument("--games", type=int, default=20, help="Games per baseline")
+    eval_parser.add_argument("--baselines", default="elo_baselines.json", help="Baseline cache file")
+    eval_parser.add_argument("--no-save-elo", action="store_true", help="Don't save Elo to model")
+    
+    args = parser.parse_args()
+    
+    if args.command == "init":
+        deck_loader = MetaDeckLoader(args.meta_decks)
+        initialize_baselines(deck_loader, args.games, Path(args.output))
+        
+    elif args.command == "eval":
+        deck_loader = MetaDeckLoader(args.meta_decks)
+        
+        # Load or initialize baselines
+        baselines = load_baselines(Path(args.baselines))
+        if baselines is None:
+            console.print("[yellow]No baseline cache found. Initializing...[/yellow]")
+            baselines = initialize_baselines(deck_loader, games_per_matchup=10)
+        
+        evaluate_agent(
+            args.model,
+            baselines,
+            deck_loader,
+            games_per_baseline=args.games,
+            save_elo_to_model=not args.no_save_elo,
+        )
     else:
-        console.print("\n[1/2] Loading model...")
-        model = load_model(args.model)
+        parser.print_help()
 
-    console.print("[2/2] Loading decks...")
-    simple_loader = MetaDeckLoader(args.simple_decks)
-    meta_loader = MetaDeckLoader(args.meta_decks)
-
-    all_results = {}
-
-    # Run selected benchmarks
-    if args.benchmark in ["all", "mirror"]:
-        all_results["mirror"] = _run_mirror_benchmark(
-            simple_loader, meta_loader, model, args.games
-        )
-
-    if args.benchmark in ["all", "easy"]:
-        all_results["easy"] = _run_winrate_benchmark(
-            "Easy", meta_loader, model, args.games,
-            rl_high_wr=True, opp_high_wr=False
-        )
-
-    if args.benchmark in ["all", "hard"]:
-        all_results["hard"] = _run_winrate_benchmark(
-            "Hard", meta_loader, model, args.games,
-            rl_high_wr=False, opp_high_wr=True
-        )
-
-    if args.benchmark in ["all", "random"]:
-        all_results["random"] = _run_random_benchmark(
-            meta_loader, model, args.games
-        )
-
-    # Output
-    print_summary(all_results)
-
-    if args.output:
-        with open(args.output, "w") as f:
-            json.dump(all_results, f, indent=2)
-        console.print(f"\n[green]Results saved to {args.output}[/green]")
-
-
-def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Evaluate RL agent")
-    parser.add_argument("--model", type=str, required=True, help="Path to model (.zip)")
-    parser.add_argument("--simple-decks", type=str, default="simple_deck.json")
-    parser.add_argument("--meta-decks", type=str, default="meta_deck.json")
-    parser.add_argument("--games", type=int, default=1000, help="Total games per bot type")
-    parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--output", type=str, default=None, help="Output JSON path")
-    parser.add_argument(
-        "--benchmark",
-        type=str,
-        choices=["all", "mirror", "easy", "hard", "random"],
-        default="all",
-        help="Which benchmark to run",
-    )
-    return parser.parse_args()
-
-
-# =============================================================================
-# Benchmark Implementations
-# =============================================================================
-
-def _run_mirror_benchmark(simple_loader, meta_loader, model, total_games) -> dict:
-    """Run mirror matchup benchmark."""
-    console.print("\n[bold cyan]═══ Mirror Matchup ═══[/bold cyan]")
-    console.print("Same deck for both players (3 simple + 7 meta archetypes)")
-
-    simple_decks = [simple_loader.sample_deck() for _ in range(3)]
-    meta_decks = sample_diverse_meta_decks(meta_loader, 7)
-
-    results = run_benchmark(
-        "Mirror", simple_decks + meta_decks, [], model, total_games, mirror=True
-    )
-    print_results_table("Mirror Matchup", results)
-    return {k: vars(v) for k, v in results.items()}
-
-
-def _run_winrate_benchmark(
-    name: str, loader, model, total_games, rl_high_wr: bool, opp_high_wr: bool
-) -> dict:
-    """Run win-rate based benchmark (easy or hard)."""
-    console.print(f"\n[bold cyan]═══ {name} Matchup ═══[/bold cyan]")
-    rl_desc = "high WR" if rl_high_wr else "low WR"
-    opp_desc = "high WR" if opp_high_wr else "low WR"
-    console.print(f"RL uses {rl_desc} decks vs opponent {opp_desc} decks")
-
-    # Use fewer decks to keep total games manageable (5x5 = 25 matchups)
-    rl_decks = sample_decks_by_winrate(loader, 5, high_wr=rl_high_wr)
-    opp_decks = sample_decks_by_winrate(loader, 5, high_wr=opp_high_wr)
-    console.print(f"  RL decks: {len(rl_decks)}, Opponent decks: {len(opp_decks)}")
-
-    results = run_benchmark(name, rl_decks, opp_decks, model, total_games)
-    print_results_table(f"{name} Matchup", results)
-    return {k: vars(v) for k, v in results.items()}
-
-
-def _run_random_benchmark(loader, model, total_games) -> dict:
-    """Run random matchup benchmark."""
-    console.print("\n[bold cyan]═══ Random Matchup ═══[/bold cyan]")
-    console.print("Random meta decks for both players")
-
-    # Use fewer decks (5x5 = 25 matchups) 
-    rl_decks = [loader.sample_deck() for _ in range(5)]
-    opp_decks = [loader.sample_deck() for _ in range(5)]
-
-    results = run_benchmark("Random", rl_decks, opp_decks, model, total_games)
-    print_results_table("Random Matchup", results)
-    return {k: vars(v) for k, v in results.items()}
-
-
-# =============================================================================
-# Entry Point
-# =============================================================================
 
 if __name__ == "__main__":
     main()
