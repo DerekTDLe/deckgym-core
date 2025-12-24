@@ -175,3 +175,70 @@ and manually copy-paste into the ever changing `src/actions/effect_mechanic_map.
 **Profiling Main Script**
 sudo cargo flamegraph --root --dev -- simulate example_decks/venusaur-exeggutor.txt example_decks/weezing-arbok.txt --num 1000 && open flamegraph.svg
 ```
+
+## Reinforcement Learning Agent
+
+The repository includes a deep reinforcement learning agent trained using PPO (Proximal Policy Optimization) with self-play.
+
+### Elo Leaderboard (Baseline Model - 30M Steps)
+
+| Rank | Player | Elo | Win Rate |
+|------|--------|-----|----------|
+| 1 | Expectiminimax(5) | ~2020 | ~84% |
+| 2 | Expectiminimax(4) | ~2000 | ~80% |
+| 3 | Expectiminimax(3) | ~1980 | ~82% |
+| 4 | Expectiminimax(2) | ~1890 | ~76% |
+| 5 | **RL Agent (30M)** | **~1750** | **~62%** |
+| 6 | EvolutionRusher | ~1550 | ~44% |
+| 7 | ValueFunction | ~1450 | ~31% |
+| 8 | WeightedRandom | ~1340 | ~38% |
+| 9 | AttachAttack | ~1270 | ~30% |
+| 10 | EndTurn | ~1200 | ~0% |
+| 11 | Random | ~1080 | ~20% |
+
+The RL agent at 30M steps ranks **5th** among all bots, outperforming heuristic-based bots but still ~200 Elo below search-based methods (Expectiminimax).
+
+### Training Trends (0-30M Steps) for the Baseline Model
+
+| Metric | Trend | Interpretation |
+|--------|-------|----------------|
+| `policy_gradient_loss` | ↓ Decreasing | Agent learning better actions |
+| `value_loss` | ↓ Decreasing (occasional spikes, should be fixed) | Value function improving |
+| `explained_variance` | ↑ 0.60+ | Good return prediction |
+| `approx_kl` | ↑ 0.025-0.04 | Policy changing, possible instability |
+| `entropy_loss` | → ~-0.38 | Moderate exploration |
+| `ep_len_mean` | 34→43 | Longer, less "rush" games |
+
+**Key observations:**
+- Training is **stable** but **not converged** at 30M steps
+- High `approx_kl` (~0.04) suggests policy volatility due to diverse deck matchups (389 archetypes)
+- Value function learns well (`explained_variance` >0.6)
+- The agent beats all heuristic bots but struggles against tree-search (Expectiminimax)
+
+### Training Commands
+
+```bash
+# Train new model (30M steps, ~8 hours on GPU)
+cd python && python scripts/train.py --steps 30000000
+
+# Resume training from checkpoint
+python scripts/train.py --resume checkpoints/rl_bot_30M.zip --steps 10000000 --lr 5e-5
+
+# Evaluate with Elo system
+python scripts/evaluate.py init --games 50 --workers 8  # Initialize baselines (once)
+python scripts/evaluate.py eval models/rl_bot.zip --games 50  # Evaluate agent
+```
+
+### Hyperparameters (Default Config)
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `total_timesteps` | 30M | Training duration |
+| `n_steps` | 8192 | Experience per update |
+| `batch_size` | 512 | Minibatch size |
+| `learning_rate` | 1e-4 (cyclical) | Adaptive LR schedule |
+| `target_kl` | 0.015 | Early stopping threshold |
+| `gamma` | 0.98 | Discount factor |
+| `ent_coef` | 0.01 | Exploration bonus |
+| `policy_layers` | (512, 512, 256, 128) | Network architecture |
+
