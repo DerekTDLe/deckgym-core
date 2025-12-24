@@ -1,0 +1,102 @@
+{
+  "Random": {
+    "name": "Random",
+    "bot_code": "r",
+    "elo": 1080.9939721281462,
+    "games": 450,
+    "wins": 89,
+    "losses": 354,
+    "draws": 7,
+    "is_rl": false
+  },
+  "AttachAttack": {
+    "name": "AttachAttack",
+    "bot_code": "aa",
+    "elo": 1272.599032937774,
+    "games": 450,
+    "wins": 133,
+    "losses": 299,
+    "draws": 18,
+    "is_rl": false
+  },
+  "EndTurn": {
+    "name": "EndTurn",
+    "bot_code": "et",
+    "elo": 1200.0206918484557,
+    "games": 450,
+    "wins": 0,
+    "losses": 398,
+    "draws": 52,
+    "is_rl": false
+  },
+  "WeightedRandom": {
+    "name": "WeightedRandom",
+    "bot_code": "w",
+    "elo": 1339.8315431765398,
+    "games": 450,
+    "wins": 172,
+    "losses": 275,
+    "draws": 3,
+    "is_rl": false
+  },
+  "ValueFunction": {
+    "name": "ValueFunction",
+    "bot_code": "v",
+    "elo": 1450.7696847803966,
+    "games": 450,
+    "wins": 141,
+    "losses": 277,
+    "draws": 32,
+    "is_rl": false
+  },
+  "EvolutionRusher": {
+    "name": "EvolutionRusher",
+    "bot_code": "er",
+    "elo": 1548.871066449345,
+    "games": 450,
+    "wins": 199,
+    "losses": 239,
+    "draws": 12,
+    "is_rl": false
+  },
+  "Expectiminimax(2)": {
+    "name": "Expectiminimax(2)",
+    "bot_code": "e2",
+    "elo": 1893.4789192600813,
+    "games": 450,
+    "wins": 343,
+    "losses": 104,
+    "draws": 3,
+    "is_rl": false
+  },
+  "Expectiminimax(3)": {
+    "name": "Expectiminimax(3)",
+    "bot_code": "e3",
+    "elo": 1978.1376844270417,
+    "games": 450,
+    "wins": 369,
+    "losses": 79,
+    "draws": 2,
+    "is_rl": false
+  },
+  "Expectiminimax(4)": {
+    "name": "Expectiminimax(4)",
+    "bot_code": "e4",
+    "elo": 1999.984189811206,
+    "games": 450,
+    "wins": 360,
+    "losses": 89,
+    "draws": 1,
+    "is_rl": false
+  },
+  "Expectiminimax(5)": {
+    "name": "Expectiminimax(5)",
+    "bot_code": "e5",
+    "elo": 2019.9108650323333,
+    "games": 450,
+    "wins": 378,
+    "losses": 70,
+    "draws": 2,
+    "is_rl": false
+  }
+}
