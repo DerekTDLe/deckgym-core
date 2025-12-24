@@ -12,13 +12,13 @@ import argparse
 import itertools
 import json
 import os
-import pickle
 import random
 import re
 import tempfile
-from dataclasses import dataclass, field, asdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Optional, Callable, Dict, List
+from typing import Optional, Dict, List
 
 import numpy as np
 from rich.console import Console
@@ -235,15 +235,77 @@ def _write_temp_decks(deck_a: str, deck_b: str) -> tuple[str, str]:
 # Baseline Initialization
 # =============================================================================
 
+def _play_baseline_game(args: tuple) -> tuple:
+    """
+    Worker function for parallel baseline game execution.
+    
+    Args:
+        args: (bot_code_a, bot_code_b, deck_a, deck_b, seed, swap_order)
+    
+    Returns:
+        (bot_code_a, bot_code_b, winner_code_or_none)
+    """
+    import deckgym
+    
+    bot_code_a, bot_code_b, deck_a, deck_b, seed, swap_order = args
+    
+    # Swap order if needed
+    if swap_order:
+        bot_code_a, bot_code_b = bot_code_b, bot_code_a
+        deck_a, deck_b = deck_b, deck_a
+    
+    deck_a_path, deck_b_path = _write_temp_decks(deck_a, deck_b)
+    
+    try:
+        game = deckgym.Game(deck_a_path, deck_b_path, players=[bot_code_a, bot_code_b], seed=seed)
+        
+        max_steps = 500
+        steps = 0
+        
+        while not game.is_game_over() and steps < max_steps:
+            game.play_tick()
+            steps += 1
+        
+        if steps >= max_steps and not game.is_game_over():
+            winner_code = None  # Draw
+        else:
+            outcome = game.get_state().winner
+            if outcome is None:
+                winner_code = None
+            else:
+                outcome_str = str(outcome)
+                match = re.search(r"Win\((\d+)\)", outcome_str)
+                if match:
+                    winner_idx = int(match.group(1))
+                    winner_code = bot_code_a if winner_idx == 0 else bot_code_b
+                else:
+                    winner_code = None
+        
+        # Return original order (before swap)
+        if swap_order:
+            return (bot_code_b, bot_code_a, winner_code)
+        return (bot_code_a, bot_code_b, winner_code)
+        
+    except BaseException:
+        if swap_order:
+            return (bot_code_b, bot_code_a, None)
+        return (bot_code_a, bot_code_b, None)
+    finally:
+        os.unlink(deck_a_path)
+        os.unlink(deck_b_path)
+
+
 def initialize_baselines(
     deck_loader: MetaDeckLoader,
     games_per_matchup: int = 10,
     save_path: Path = ELO_CACHE_PATH,
+    n_workers: int = 8,
 ) -> Dict[str, EloPlayer]:
     """
     Initialize baseline bot ratings via round-robin tournament.
     
     Each baseline plays against every other baseline.
+    Games are run in parallel for speedup.
     Results are saved to a cache file for reuse.
     """
     console.print("[bold cyan]═══ Initializing Baseline Elo Ratings ═══[/bold cyan]")
@@ -253,12 +315,25 @@ def initialize_baselines(
         name: EloPlayer(name=name, bot_code=code)
         for name, code in BASELINE_BOTS
     }
+    code_to_name = {code: name for name, code in BASELINE_BOTS}
     
-    matchups = list(itertools.combinations(players.keys(), 2))
+    matchups = list(itertools.combinations(BASELINE_BOTS, 2))
     total_games = len(matchups) * games_per_matchup
     
-    console.print(f"Running {total_games} games ({len(BASELINE_BOTS)} bots, {games_per_matchup} games/matchup)")
+    console.print(f"Running {total_games} games ({len(BASELINE_BOTS)} bots, {games_per_matchup} games/matchup, {n_workers} workers)")
     
+    # Prepare all game arguments
+    game_args = []
+    for (name_a, code_a), (name_b, code_b) in matchups:
+        for game_idx in range(games_per_matchup):
+            deck_a = deck_loader.sample_deck()
+            deck_b = deck_loader.sample_deck()
+            seed = random.randint(0, 2**32 - 1)
+            swap_order = game_idx % 2 == 1  # Alternate who goes first
+            game_args.append((code_a, code_b, deck_a, deck_b, seed, swap_order))
+    
+    # Run games in parallel
+    results = []
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -266,26 +341,29 @@ def initialize_baselines(
     ) as progress:
         task = progress.add_task("Baseline tournament", total=total_games)
         
-        game_count = 0
-        for name_a, name_b in matchups:
-            player_a = players[name_a]
-            player_b = players[name_b]
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            futures = [executor.submit(_play_baseline_game, args) for args in game_args]
             
-            for game_idx in range(games_per_matchup):
-                deck_a = deck_loader.sample_deck()
-                deck_b = deck_loader.sample_deck()
-                seed = random.randint(0, 2**32 - 1)
-                
-                # Alternate who goes first
-                if game_idx % 2 == 0:
-                    winner = play_match(player_a, player_b, deck_a, deck_b, seed=seed)
-                else:
-                    winner = play_match(player_b, player_a, deck_b, deck_a, seed=seed)
-                
-                update_elo(player_a, player_b, winner)
-                
-                game_count += 1
-                progress.update(task, completed=game_count)
+            for future in as_completed(futures):
+                result = future.result()
+                results.append(result)
+                progress.update(task, completed=len(results))
+    
+    # Update Elo ratings from results (sequential to maintain consistency)
+    for code_a, code_b, winner_code in results:
+        name_a = code_to_name[code_a]
+        name_b = code_to_name[code_b]
+        player_a = players[name_a]
+        player_b = players[name_b]
+        
+        if winner_code is None:
+            winner = None
+        elif winner_code == code_a:
+            winner = player_a
+        else:
+            winner = player_b
+        
+        update_elo(player_a, player_b, winner)
     
     # Save to cache
     cache_data = {name: player.to_dict() for name, player in players.items()}
@@ -463,6 +541,7 @@ def main():
     init_parser = subparsers.add_parser("init", help="Initialize baseline bot ratings")
     init_parser.add_argument("--meta-decks", default="meta_deck.json", help="Meta deck file")
     init_parser.add_argument("--games", type=int, default=20, help="Games per matchup")
+    init_parser.add_argument("--workers", type=int, default=8, help="Parallel workers")
     init_parser.add_argument("--output", default="elo_baselines.json", help="Output cache file")
     
     # evaluate command
@@ -477,7 +556,7 @@ def main():
     
     if args.command == "init":
         deck_loader = MetaDeckLoader(args.meta_decks)
-        initialize_baselines(deck_loader, args.games, Path(args.output))
+        initialize_baselines(deck_loader, args.games, Path(args.output), args.workers)
         
     elif args.command == "eval":
         deck_loader = MetaDeckLoader(args.meta_decks)
