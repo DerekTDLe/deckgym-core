@@ -175,7 +175,7 @@ class SelfPlayEnv(gym.Env):
         # Execute agent's action
         try:
             obs, reward, done, truncated, info = self._env.step(action)
-        except Exception as e:
+        except BaseException as e:
             print(f"WARNING: Game error during agent turn: {e}")
             return self._end_episode_error(str(e))
         
@@ -192,7 +192,7 @@ class SelfPlayEnv(gym.Env):
         """Return valid action mask for the agent."""
         try:
             return self._env.action_masks()
-        except Exception as e:
+        except BaseException as e:
             # Panic recovery - reset and return EndTurn-only
             print(f"WARNING: Panic in SelfPlayEnv.action_masks: {e}")
             self._env.reset()
@@ -232,7 +232,7 @@ class SelfPlayEnv(gym.Env):
                 final_reward = -reward  # Invert reward (opponent's loss = agent's gain)
                 if done or truncated:
                     break
-        except Exception as e:
+        except BaseException as e:
             print(f"WARNING: Game error during opponent turn: {e}")
             return obs, info, 0.0, True
         

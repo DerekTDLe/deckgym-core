@@ -108,12 +108,13 @@ class DeckGymEnv(gym.Env):
         """
         try:
             reward, done, info_str = self.game.step_action(action)
-        except Exception as e:
+        except BaseException as e:
             # Handle Rust panics and invalid actions gracefully
             # End episode with neutral reward to avoid crashing training
+            print(f"WARNING: Panic in step_action: {e}")
             try:
                 obs = np.array(self.game.get_obs(), dtype=np.float32)
-            except Exception:
+            except BaseException:
                 obs = np.zeros(self.observation_space.shape, dtype=np.float32)
             return obs, 0.0, True, False, {"error": str(e)}
         
@@ -129,7 +130,7 @@ class DeckGymEnv(gym.Env):
         """
         try:
             mask = np.array(self.game.get_action_mask(), dtype=np.bool_)
-        except Exception as e:
+        except BaseException as e:
             # Rust panic - game in corrupted state
             # Reset and return EndTurn-only mask to recover
             print(f"WARNING: Panic in action_masks, resetting game: {e}")
