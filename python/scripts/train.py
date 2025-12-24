@@ -528,7 +528,8 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         model.gae_lambda = config.gae_lambda
         model.ent_coef = config.ent_coef
         model.vf_coef = config.vf_coef
-        model.clip_range = config.clip_range
+        # clip_range must be a callable (schedule) for SB3
+        model.clip_range = lambda _: config.clip_range
         model.target_kl = config.target_kl
         print(f"      Updated hyperparameters (LR={config.base_learning_rate}, target_kl={config.target_kl})")
     else:
