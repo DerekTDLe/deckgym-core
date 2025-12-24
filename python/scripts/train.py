@@ -47,7 +47,8 @@ class TrainingConfig:
     checkpoint_freq: int = 100_000
     
     # PPO hyperparameters
-    learning_rate: float = 1e-4           # Reduced from 3e-4 (approx_kl was too high)
+    base_learning_rate: float = 1e-4      # Base LR for cyclical schedule
+    min_learning_rate: float = 3e-5       # Floor LR
     n_steps: int = 8192                   # More experience per update (was 4096)
     batch_size: int = 512                 # Minibatch size for optimization
     n_epochs: int = 8                     # Reduced to compensate for larger n_steps
@@ -56,6 +57,7 @@ class TrainingConfig:
     ent_coef: float = 0.01                # Entropy bonus (exploration)
     vf_coef: float = 0.5                  # Value function coefficient (default)
     clip_range: float = 0.2               # PPO clipping range
+    target_kl: float = 0.015              # Stop epoch early if KL > target (stabilizes training)
     
     # Network architecture
     policy_layers: tuple = (512, 512, 256, 128)   # Deeper policy network
@@ -85,6 +87,39 @@ class TrainingConfig:
     def curriculum_warmup_steps(self) -> int:
         """Compute warmup steps from ratio."""
         return int(self.total_timesteps * self.curriculum_warmup_ratio)
+    
+    def get_learning_rate_schedule(self):
+        """
+        Create cyclical learning rate schedule for self-play.
+        
+        LR boosts slightly after each frozen opponent update to help 
+        the agent adapt to the new opponent, then decays during the cycle.
+        Global decay also applied over training progress.
+        """
+        base_lr = self.base_learning_rate
+        min_lr = self.min_learning_rate
+        frozen_freq = self.frozen_opponent_update_freq
+        total_steps = self.total_timesteps
+        
+        def lr_schedule(progress_remaining: float) -> float:
+            # progress_remaining goes from 1.0 to 0.0
+            progress = 1.0 - progress_remaining
+            current_step = progress * total_steps
+            
+            # Global decay: 100% -> 50% over training
+            global_decay = 0.5 + 0.5 * progress_remaining
+            
+            # Cycle progress within frozen opponent window
+            cycle_progress = (current_step % frozen_freq) / frozen_freq
+            
+            # Boost at start of cycle (after frozen update), decay during cycle
+            # Boost: +30% at cycle start, decays to 0% at cycle end
+            cycle_boost = 1.0 + 0.3 * (1.0 - cycle_progress)
+            
+            lr = base_lr * global_decay * cycle_boost
+            return max(min_lr, lr)
+        
+        return lr_schedule
 
 
 # Default configuration
@@ -438,7 +473,8 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     print("=" * 60)
     print(f"\nConfiguration:")
     print(f"  Total timesteps:    {config.total_timesteps:,}")
-    print(f"  Learning rate:      {config.learning_rate}")
+    print(f"  Learning rate:      {config.base_learning_rate} (cyclical, min={config.min_learning_rate})")
+    print(f"  Target KL:          {config.target_kl}")
     print(f"  Batch size:         {config.batch_size}")
     print(f"  Entropy coef:       {config.ent_coef}")
     print(f"  Policy network:     {config.policy_layers}")
@@ -474,7 +510,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     model = MaskablePPO(
         "MlpPolicy",
         env,
-        learning_rate=config.learning_rate,
+        learning_rate=config.get_learning_rate_schedule(),  # Cyclical LR
         n_steps=config.n_steps,
         batch_size=config.batch_size,
         n_epochs=config.n_epochs,
@@ -483,6 +519,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         ent_coef=config.ent_coef,
         vf_coef=config.vf_coef,
         clip_range=config.clip_range,
+        target_kl=config.target_kl,  # Stop epoch early if KL too high
         policy_kwargs=policy_kwargs,
         verbose=1,
         device=config.device,
@@ -566,7 +603,9 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint-freq", type=int, default=100_000, help="Checkpoint frequency")
     
     # PPO hyperparameters
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Base learning rate (cyclical)")
+    parser.add_argument("--min-lr", type=float, default=3e-5, help="Minimum learning rate floor")
+    parser.add_argument("--target-kl", type=float, default=0.015, help="Target KL for early stopping")
     parser.add_argument("--batch-size", type=int, default=512, help="Batch size")
     parser.add_argument("--n-epochs", type=int, default=8, help="PPO epochs per update")
     parser.add_argument("--ent-coef", type=float, default=0.01, help="Entropy coefficient")
@@ -590,7 +629,9 @@ if __name__ == "__main__":
         save_path=args.save,
         total_timesteps=args.steps,
         checkpoint_freq=args.checkpoint_freq,
-        learning_rate=args.lr,
+        base_learning_rate=args.lr,
+        min_learning_rate=args.min_lr,
+        target_kl=args.target_kl,
         batch_size=args.batch_size,
         n_epochs=args.n_epochs,
         ent_coef=args.ent_coef,
