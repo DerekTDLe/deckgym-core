@@ -50,8 +50,8 @@ BASELINE_BOTS = [
     ("EvolutionRusher", "er"),
     ("Expectiminimax(2)", "e2"),
     ("Expectiminimax(3)", "e3"),
-    ("MCTS(100)", "m100"),
-    ("MCTS(500)", "m500"),
+    ("Expectiminimax(4)", "e4"),
+    ("Expectiminimax(5)", "e5"),
 ]
 
 ELO_CACHE_PATH = Path("elo_baselines.json")
