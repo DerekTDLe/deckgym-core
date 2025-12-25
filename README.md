@@ -180,17 +180,17 @@ sudo cargo flamegraph --root --dev -- simulate example_decks/venusaur-exeggutor.
 
 The repository includes a deep reinforcement learning agent trained using PPO (Proximal Policy Optimization) with self-play.
 
-### Elo Leaderboard
+### Elo Leaderboard (300 games/baseline)
 
 | Rank | Player | Elo | Win Rate |
 |------|--------|-----|----------|
 | 1 | Expectiminimax(5) | 2020 | 84.0% |
 | 2 | Expectiminimax(4) | 2000 | 80.0% |
 | 3 | Expectiminimax(3) | 1978 | 82.0% |
-| 4 | Expectiminimax(2) | 1893 | 76.2% |
-| 5 | **RL Agent (20M)** | **1833** | **66.3%** |
-| 6 | RL Agent (30M) | 1820 | 64.2% |
-| 7 | RL Agent (10M) | 1761 | 61.8% |
+| 4 | **RL Agent (42M)** | **1935** | **69.4%** |
+| 5 | Expectiminimax(2) | 1893 | 76.2% |
+| 6 | RL Agent (30M) | 1866 | 69.1% |
+| 7 | RL Agent (50.4M) | 1855 | 69.4% |
 | 8 | EvolutionRusher | 1549 | 44.2% |
 | 9 | ValueFunction | 1451 | 31.3% |
 | 10 | WeightedRandom | 1340 | 38.2% |
@@ -199,46 +199,56 @@ The repository includes a deep reinforcement learning agent trained using PPO (P
 | 13 | Random | 1081 | 19.8% |
 
 **Key findings:**
-- Peak performance at **20M steps** (1833 Elo), slight regression at 30M (1820 Elo)
-- RL agent ranks **5th**, beating all heuristic bots but trailing Expectiminimax (~170 Elo gap)
-- 30M model kept as reference baseline; 20M recommended for deployment
+- Best checkpoint: **42M steps** (1935 Elo) - only model to beat Expectiminimax(2)
+- Training plateau around **1900 Elo** after 40M steps
+- Ceiling appears to be ~1910-1935 Elo with current approach
 
-### Training Trends (0-30M Steps)
+### Training Comparison: Baseline vs Improved
 
-| Metric | Trend | Interpretation |
-|--------|-------|----------------|
-| `policy_gradient_loss` | ↓ Decreasing | Agent learning better actions |
-| `value_loss` | ↓ Decreasing (occasional spikes) | Value function improving |
-| `explained_variance` | ↑ 0.60+ | Good return prediction |
-| `approx_kl` | ↑ 0.025-0.04 | Policy changing, possible instability |
-| `entropy_loss` | → ~-0.38 | Moderate exploration |
-| `ep_len_mean` | 34→43 | Longer, more strategic games |
+| Metric | Baseline (no target_kl) | Improved (target_kl=0.015) |
+|--------|-------------------------|----------------------------|
+| Peak Elo | 1833 @ 20M | **1911 @ 42M** |
+| Peak steps | 20M (then regression) | 42M (plateau) |
+| Best WR | 66.3% | **69.3%** |
+| Stability | Regressed after peak | Stable plateau |
 
-**Key observations:**
-- Training is **stable** but **not monotonically improving** after 20M steps
-- High `approx_kl` (~0.04) suggests policy volatility due to diverse deck matchups (389 archetypes)
-- Value function learns well (`explained_variance` >0.6)
-- The agent beats all heuristic bots but struggles against tree-search (Expectiminimax)
+The `target_kl` clipping and cyclical LR schedule improved both peak performance (+78 Elo) and training stability (no regression).
+
+### Training Progression
+
+```
+Steps (M)  Elo   WR      Comment
+─────────────────────────────────────────────
+1.2M       1740  58.4%   Initial learning
+7.2M       1859  64.1%   First peak
+12M        1888  65.1%   Strong improvement
+27.6M      1896  68.0%   Approaching plateau
+42M        1935  69.4%   Best single eval - beats e2
+50.4M      1855  69.4%   Plateau / slight regression
+57.6M      1866  69.2%   
+```
 
 ### Training Commands
 
 ```bash
-# Train new model (30M steps, ~8 hours on GPU)
-cd python && python python/scripts/train.py --steps 30000000
+# Train new model
+python python/scripts/train.py --steps 60000000
 
-# Resume training from checkpoint
-python python/scripts/train.py --resume checkpoints/rl_bot_30M.zip --steps 10000000 --lr 5e-5
+# Resume from best checkpoint
+python python/scripts/train.py --resume checkpoints/rl_bot_42000000_steps.zip --steps 20000000 --lr 5e-5
 
-# Evaluate with Elo system
-python python/scripts/evaluate.py init --games 50 --workers 8  # Initialize baselines (once)
-python python/scripts/evaluate.py eval models/rl_bot.zip --games 50  # Evaluate agent
+# Evaluate all checkpoints
+python python/scripts/evaluate_checkpoints.py --dir checkpoints --games 300
+
+# Evaluate single model
+python python/scripts/evaluate.py eval models/rl_bot.zip --games 300
 ```
 
-### Hyperparameters (Default Config)
+### Hyperparameters (Current Config)
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `total_timesteps` | 30M | Training duration |
+| `total_timesteps` | 60M | Training duration |
 | `n_steps` | 8192 | Experience per update |
 | `batch_size` | 512 | Minibatch size |
 | `learning_rate` | 1e-4 (cyclical) | Adaptive LR schedule |
@@ -246,4 +256,3 @@ python python/scripts/evaluate.py eval models/rl_bot.zip --games 50  # Evaluate 
 | `gamma` | 0.98 | Discount factor |
 | `ent_coef` | 0.01 | Exploration bonus |
 | `policy_layers` | (512, 512, 256, 128) | Network architecture |
-
