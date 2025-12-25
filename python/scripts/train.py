@@ -546,6 +546,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
             ent_coef=config.ent_coef,
             vf_coef=config.vf_coef,
             clip_range=config.clip_range,
+            clip_range_vf=config.clip_range,  # Clip value function updates to reduce spikes
             target_kl=config.target_kl,  # Stop epoch early if KL too high
             policy_kwargs=policy_kwargs,
             verbose=1,
