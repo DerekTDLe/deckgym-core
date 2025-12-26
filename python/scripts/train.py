@@ -11,6 +11,7 @@ Starting player alternates randomly each game (controlled by game seed).
 import os
 import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -29,6 +30,7 @@ from stable_baselines3.common.monitor import Monitor
 from deckgym.env import DeckGymEnv
 from deckgym.deck_loader import CurriculumDeckLoader, MetaDeckLoader
 from deckgym.attention_policy import CardAttentionExtractor, create_attention_policy_kwargs
+from deckgym.curriculum import CurriculumManager
 
 
 # =============================================================================
@@ -503,6 +505,84 @@ class FrozenOpponentCallback(BaseCallback):
                 self.env.envs[i].env.env.set_opponent_model(frozen_model)
 
 
+class CurriculumEvalCallback(BaseCallback):
+    """
+    Periodically evaluates the agent and manages curriculum stage transitions.
+    
+    Uses quick_eval_vs_bot() for fast evaluation against the current stage opponent.
+    Automatically advances stages when win rate threshold is reached.
+    """
+    
+    def __init__(
+        self,
+        env,
+        curriculum,  # CurriculumManager instance
+        deck_loader: MetaDeckLoader,
+        n_envs: int = 1,
+        eval_freq: int = 100_000,
+        verbose: int = 1,
+    ):
+        super().__init__(verbose)
+        self.env = env
+        self.curriculum = curriculum
+        self.deck_loader = deck_loader
+        self.n_envs = n_envs
+        self.eval_freq = eval_freq
+        self.last_eval = 0
+    
+    def _on_step(self) -> bool:
+        if self.num_timesteps - self.last_eval < self.eval_freq:
+            return True
+        
+        self.last_eval = self.num_timesteps
+        stage = self.curriculum.current_stage
+        
+        # Skip evaluation for self-play stage
+        if stage.opponent == "self":
+            if self.verbose > 0:
+                print(f"[Step {self.num_timesteps:,}] In self-play stage, skipping eval")
+            return True
+        
+        # Run quick evaluation
+        if self.verbose > 0:
+            print(f"[Step {self.num_timesteps:,}] Evaluating vs {stage.opponent} ({stage.eval_games} games)...")
+        
+        # Import here to avoid circular imports
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent))
+        from evaluate import quick_eval_vs_bot
+        
+        win_rate = quick_eval_vs_bot(
+            self.model,
+            stage.opponent,
+            self.deck_loader,
+            n_games=stage.eval_games,
+            verbose=False,
+        )
+        
+        if self.verbose > 0:
+            print(f"[Step {self.num_timesteps:,}] WR vs {stage.opponent}: {win_rate:.1%} (threshold: {stage.win_rate_threshold:.0%})")
+        
+        # Check for stage advancement
+        if self.curriculum.check_advancement(win_rate):
+            new_stage = self.curriculum.current_stage
+            self._update_opponent_type(new_stage.opponent)
+        
+        return True
+    
+    def _update_opponent_type(self, opponent_type: str):
+        """Update all environments to use the new opponent type."""
+        if self.n_envs == 1:
+            inner_env = self.env.env.env if hasattr(self.env.env, 'env') else self.env.env
+            inner_env.set_opponent_type(opponent_type)
+        else:
+            for i in range(self.n_envs):
+                self.env.envs[i].env.env.set_opponent_type(opponent_type)
+        
+        if self.verbose > 0:
+            print(f"[CURRICULUM] Switched all envs to opponent_type='{opponent_type}'")
+
+
 # =============================================================================
 # Action Masking & Environment Factory
 # =============================================================================
@@ -515,15 +595,21 @@ def mask_fn(env: SelfPlayEnv) -> np.ndarray:
 def make_env(
     deck_loader: CurriculumDeckLoader,
     config: TrainingConfig,
+    opponent_type: str = "e2",
 ) -> callable:
     """
-    Factory function to create self-play environments.
+    Factory function to create training environments.
+    
+    Args:
+        deck_loader: Deck loader for sampling
+        config: Training config
+        opponent_type: "e2", "e3", or "self"
     
     For DummyVecEnv, all envs share the same deck_loader (efficient).
     Monitor wrapper enables episode stats for TensorBoard.
     """
     def _init() -> gym.Env:
-        env = SelfPlayEnv(deck_loader, config=config)
+        env = SelfPlayEnv(deck_loader, opponent_type=opponent_type, config=config)
         env = ActionMasker(env, mask_fn)
         env = Monitor(env)  # Track ep_len, ep_rew for TensorBoard
         return env
@@ -559,16 +645,25 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     # Setup environment(s)
     print("\n[1/4] Loading decks...")
     deck_loader = CurriculumDeckLoader(config.simple_deck_path, config.meta_deck_path)
+    meta_loader = MetaDeckLoader(config.meta_deck_path)  # For evaluation
     
-    print(f"[2/4] Creating {config.n_envs} environment(s)...")
+    # Create curriculum manager for automatic stage transitions
+    curriculum = CurriculumManager(
+        simple_loader=MetaDeckLoader(config.simple_deck_path),
+        meta_loader=meta_loader,
+    )
+    initial_opponent = curriculum.current_stage.opponent
+    print(f"      Curriculum stage: {curriculum.current_stage.name} (vs {initial_opponent})")
+    
+    print(f"[2/4] Creating {config.n_envs} environment(s) with opponent_type='{initial_opponent}'...")
     if config.n_envs == 1:
         # Single environment (simpler)
-        single_env = SelfPlayEnv(deck_loader, config=config)
+        single_env = SelfPlayEnv(deck_loader, opponent_type=initial_opponent, config=config)
         env = ActionMasker(single_env, mask_fn)
         env = Monitor(env)  # Track ep_len, ep_rew for TensorBoard
     else:
         # Multiple environments with DummyVecEnv (no IPC overhead)
-        env = DummyVecEnv([make_env(deck_loader, config) for _ in range(config.n_envs)])
+        env = DummyVecEnv([make_env(deck_loader, config, initial_opponent) for _ in range(config.n_envs)])
         single_env = None  # Will be set after model init
     
     # Setup model
@@ -655,35 +750,49 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
             save_path=config.checkpoint_dir,
             name_prefix="rl_bot",
         ),
-        FrozenOpponentCallback(
+        CurriculumEvalCallback(
             env,
+            curriculum=curriculum,
+            deck_loader=meta_loader,
             n_envs=config.n_envs,
-            update_freq=config.frozen_opponent_update_freq,
-            adaptive=config.adaptive_frozen_opponent,
-            target_win_rate=config.target_win_rate,
+            eval_freq=100_000,  # Evaluate every 100k steps
             verbose=1,
         ),
     ]
     
-    # Initialize frozen opponent on CPU (to avoid GPU contention)
-    print("      Loading frozen opponent on CPU...")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = os.path.join(tmpdir, "initial_frozen")
-        model.save(path)
-        initial_frozen = MaskablePPO.load(path, device="cpu")
+    # FrozenOpponentCallback only needed for self-play stage
+    if initial_opponent == "self":
+        callbacks.append(
+            FrozenOpponentCallback(
+                env,
+                n_envs=config.n_envs,
+                update_freq=config.frozen_opponent_update_freq,
+                adaptive=config.adaptive_frozen_opponent,
+                target_win_rate=config.target_win_rate,
+                verbose=1,
+            )
+        )
     
-    if config.n_envs == 1:
-        # Single env: unwrap Monitor -> ActionMasker to get SelfPlayEnv 
-        env.env.env.set_opponent_model(initial_frozen)
-    else:
-        # Set opponent on all envs in DummyVecEnv (Monitor -> ActionMasker -> SelfPlayEnv)
-        for i in range(config.n_envs):
-            env.envs[i].env.env.set_opponent_model(initial_frozen)
+    # Initialize frozen opponent only for self-play stage
+    if initial_opponent == "self":
+        print("      Loading frozen opponent on CPU...")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "initial_frozen")
+            model.save(path)
+            initial_frozen = MaskablePPO.load(path, device="cpu")
+        
+        if config.n_envs == 1:
+            env.env.env.set_opponent_model(initial_frozen)
+        else:
+            for i in range(config.n_envs):
+                env.envs[i].env.env.set_opponent_model(initial_frozen)
     
     # Train
     print("[4/4] Starting training...")
     print(f"      Checkpoints: every {config.checkpoint_freq:,} steps")
-    print(f"      Opponent updates: every {config.frozen_opponent_update_freq:,} steps")
+    print(f"      Curriculum eval: every 100,000 steps")
+    if initial_opponent == "self":
+        print(f"      Opponent updates: every {config.frozen_opponent_update_freq:,} steps")
     
     model.learn(
         total_timesteps=config.total_timesteps,
