@@ -788,6 +788,24 @@ impl PyGame {
         crate::rl::OBSERVATION_SIZE
     }
 
+    /// Get the number of global features in observation.
+    #[staticmethod]
+    fn global_features_size() -> usize {
+        crate::rl::GLOBAL_FEATURES
+    }
+
+    /// Get the number of features per card.
+    #[staticmethod]
+    fn features_per_card() -> usize {
+        crate::rl::FEATURES_PER_CARD
+    }
+
+    /// Get the maximum number of cards in game observation.
+    #[staticmethod]
+    fn max_cards_in_game() -> usize {
+        crate::rl::MAX_CARDS_IN_GAME
+    }
+
     /// Get the size of the action space.
     #[staticmethod]
     fn action_space_size() -> usize {
