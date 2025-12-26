@@ -21,6 +21,9 @@ pub use attack_categories::{
 };
 pub use observation::get_observation_tensor;
 pub use observation::OBSERVATION_SIZE;
+pub use observation::GLOBAL_FEATURES;
+pub use observation::FEATURES_PER_CARD;
+pub use observation::MAX_CARDS_IN_GAME;
 pub use supporter_categories::{
     encode_supporter_categories, get_supporter_effect_categories, SupporterEffectCategory,
     NUM_SUPPORTER_EFFECT_CATEGORIES,

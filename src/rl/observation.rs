@@ -1,16 +1,14 @@
-// Observation Tensor Generation
+// Observation Tensor Generation - V2: Set-Based Card Encoding
 //
-// Converts game State into a flat f32 vector for neural network input.
+// Encodes all cards in the game as a set with position features.
+// Each card gets the same feature template regardless of its location.
 //
-// This version includes feature-based card representation for generalization:
-// - Pokemon cards encoded by their stats (stage, HP, energy type, attack damage, effect categories)
-// - Trainer cards in hand encoded by their effect categories
-// - Tool cards attached to Pokemon encoded by their effect type
-// - No card ID lookup - the agent learns from card properties, not identity
+// Order: Allied (board → hand → discard → deck) then Opponent (board → discard, hand/deck as counts)
+// Total: 40 card slots × ~60 features + global features
 
 use crate::card_ids::CardId;
 use crate::hooks::{get_retreat_cost, get_stage};
-use crate::models::{Card, EnergyType};
+use crate::models::{Card, EnergyType, PlayedCard};
 use crate::state::State;
 use crate::tool_ids::ToolId;
 
@@ -22,100 +20,91 @@ use super::supporter_categories::{encode_supporter_categories, NUM_SUPPORTER_EFF
 // CONSTANTS
 // =============================================================================
 
-/// Number of energy types in the game
+/// Number of energy types in the game for the cards
 pub const NUM_ENERGY_TYPES: usize = 10;
+
+/// Number of energy types in the game for the decks (Colorless and Dragon are excluded)
+pub const NUM_ENERGY_TYPES_DECK: usize = 8;
 
 /// Number of board slots per player (1 Active + 3 Bench)
 pub const SLOTS_PER_PLAYER: usize = 4;
 
 /// Number of distinct tool types for one-hot encoding
-pub const NUM_TOOL_TYPES: usize = 7;
+pub const NUM_TOOL_TYPES: usize = 8; // none + 7 tools
+
+/// Maximum cards in observation (20 per player × 2 players = 40)
+/// Each player always has exactly 20 cards distributed across zones.
+/// Self cards: full visibility. Opponent cards: board/discard visible, hand/deck hidden (visibility=0).
+pub const MAX_CARDS_IN_GAME: usize = 40;
 
 // --- Normalization Constants ---
-// These define the maximum expected values for feature normalization (0-1 range)
 
-/// Maximum turn count before clamping (usually a game finish earlier)
 const MAX_TURNS: f32 = 30.0;
-
-/// Points needed to win
 const MAX_POINTS: f32 = 3.0;
-
-/// Typical starting deck size for normalization
-const MAX_DECK_SIZE: f32 = 15.0;
-
-/// Expected maximum discard pile size (equals to number of cards in a deck)
+const MAX_DECK_SIZE: f32 = 20.0;
 const MAX_DISCARD_SIZE: f32 = 20.0;
-
-/// Maximum HP for normalization (covers EX/mega Pokemon)
+const MAX_HAND_SIZE: f32 = 10.0;
 const MAX_HP: f32 = 250.0;
-
-/// Maximum energy attached to a single Pokemon (arbitrary limit as it is clamped)
 const MAX_ENERGY_ATTACHED: f32 = 5.0;
-
-/// Maximum missing energy for an attack (arbitrary limit as it is clamped)
-const MAX_MISSING_ENERGY: f32 = 4.0;
-
-/// Maximum attack damage for normalization (arbitrary limit as it is clamped)
 const MAX_ATTACK_DAMAGE: f32 = 200.0;
-
-/// Maximum energy cost for an attack (arbitrary limit as it is clamped)
 const MAX_ENERGY_COST: f32 = 4.0;
-
-/// Maximum retreat cost
 const MAX_RETREAT_COST: f32 = 4.0;
 
-/// Maximum Pokemon counts in hand per stage (arbitrary limit)
-const MAX_BASIC_IN_HAND: f32 = 5.0;
-const MAX_STAGE1_IN_HAND: f32 = 3.0;
-const MAX_STAGE2_IN_HAND: f32 = 2.0;
+// --- Zone and Owner encoding ---
 
-/// Maximum trainers of same category in hand (arbitrary limit)
-const MAX_TRAINER_CATEGORY_COUNT: f32 = 4.0;
+/// Zone one-hot indices
+const ZONE_BOARD: usize = 0;
+const ZONE_HAND: usize = 1;
+const ZONE_DISCARD: usize = 2;
+const ZONE_DECK: usize = 3;
+const NUM_ZONES: usize = 4;
 
-/// Maximum playable cards in hand (hardcoded limit)
-const MAX_PLAYABLE_CARDS: f32 = 10.0;
+/// Number of board slots for position encoding
+const NUM_BOARD_SLOTS: usize = 4;
 
 // --- Feature Dimensions ---
 
-/// Features per board slot (enhanced with effect categories and tool)
-pub const FEATURES_PER_SLOT: usize = 1                             // Stage (0=Basic, 0.5=Stage1, 1.0=Stage2)
-    + 2                                   // HP current ratio, HP max normalized
-    + NUM_ENERGY_TYPES                    // Card's energy type (one-hot)
-    + NUM_ENERGY_TYPES                    // Weakness type (one-hot)
-    + 1                                   // Knockout points (1/3=normal, 2/3=ex, 1.0=mega)
-    + NUM_ENERGY_TYPES                    // Energy attached (count per type)
-    + 1                                   // Energy delta (missing energy for strongest attack)
-    + 4                                   // Attack 1: damage, cost, has_effect, has_attack
-    + NUM_ATTACK_EFFECT_CATEGORIES        // Attack 1 effect categories
-    + 4                                   // Attack 2: damage, cost, has_effect, has_attack
-    + NUM_ATTACK_EFFECT_CATEGORIES        // Attack 2 effect categories
-    + 4                                   // Status: Poison, Sleep, Paralyze, Confusion
-    + NUM_ABILITY_EFFECT_CATEGORIES       // Ability effect categories
-    + 1                                   // Retreat cost
-    + NUM_TOOL_TYPES;                     // Attached tool (one-hot: none, GiantCape, RockyHelmet, PoisonBarb, LeafCape, ElectricalCord, InflatableBoat, HeavyHelmet)
+/// Card features (intrinsic properties)
+pub const CARD_INTRINSIC_FEATURES: usize = 1  // is_pokemon (0=trainer, 1=pokemon)
+    + 1                                        // stage (0/0.5/1.0)
+    + NUM_ENERGY_TYPES                         // card energy type (one-hot)
+    + 2                                        // hp_current, hp_max (normalized)
+    + NUM_ENERGY_TYPES                         // weakness (one-hot)
+    + 1                                        // ko_points (normalized)
+    + NUM_ENERGY_TYPES                         // energy attached (per type)
+    + 4                                        // attack1: damage, cost, has_effect, exists
+    + NUM_ATTACK_EFFECT_CATEGORIES             // attack1 effect categories
+    + 4                                        // attack2: damage, cost, has_effect, exists
+    + NUM_ATTACK_EFFECT_CATEGORIES             // attack2 effect categories 
+    + 4                                        // status: poison, sleep, para, confuse
+    + NUM_ABILITY_EFFECT_CATEGORIES            // ability categories
+    + NUM_SUPPORTER_EFFECT_CATEGORIES          // supporter categories (for trainers)
+    + 1                                        // retreat cost
+    + NUM_TOOL_TYPES;                          // attached tool (one-hot)
 
-/// Hand features per player
-pub const HAND_FEATURES_PER_PLAYER: usize = 3                             // Pokemon counts: Basic, Stage1, Stage2
-    + NUM_SUPPORTER_EFFECT_CATEGORIES     // Aggregated trainer effect categories
-    + 1                                   // Can evolve active
-    + 1; // Total playable cards count
+/// Position features (where the card is)
+pub const CARD_POSITION_FEATURES: usize = NUM_ZONES  // zone one-hot (board/hand/discard/deck)
+    + 1                                              // owner (0=self, 1=opponent)
+    + NUM_BOARD_SLOTS                                // slot one-hot (if on board)
+    + 1;                                             // visibility (1=full, 0=hidden)
 
-/// Global features
-pub const GLOBAL_FEATURES: usize = 1                             // Turn count (normalized)
-    + 2                                   // Points (self, opponent)
-    + 4                                   // Deck sizes, Discard sizes
-    + NUM_ENERGY_TYPES; // Deck energy composition
+/// Total features per card slot
+pub const FEATURES_PER_CARD: usize = CARD_INTRINSIC_FEATURES + CARD_POSITION_FEATURES;
 
-/// Board features (all slots for both players)
-pub const BOARD_FEATURES: usize = 2 * SLOTS_PER_PLAYER * FEATURES_PER_SLOT;
-
-/// Hand features for both players
-pub const HAND_FEATURES: usize = 2 * HAND_FEATURES_PER_PLAYER;
+/// Global features (game state)
+pub const GLOBAL_FEATURES: usize = 1   // turn count
+    + 2                                 // points (self, opponent)  
+    + 2                                 // deck sizes (self, opponent)
+    + 2                                 // hand sizes (self, opponent)
+    + 2                                 // discard sizes (self, opponent)
+    + 2 * NUM_ENERGY_TYPES_DECK;        // deck energy composition (self + opponent)
 
 /// Total observation size
-pub const OBSERVATION_SIZE: usize = GLOBAL_FEATURES + BOARD_FEATURES + HAND_FEATURES;
+pub const OBSERVATION_SIZE: usize = GLOBAL_FEATURES + (MAX_CARDS_IN_GAME * FEATURES_PER_CARD);
 
-// --- Main Function ---
+// =============================================================================
+// MAIN OBSERVATION FUNCTION
+// =============================================================================
 
 /// Converts the game state into a flat observation tensor.
 pub fn get_observation_tensor(state: &State, perspective: usize) -> Vec<f32> {
@@ -125,13 +114,70 @@ pub fn get_observation_tensor(state: &State, perspective: usize) -> Vec<f32> {
     // --- Global Features ---
     encode_global_features(state, perspective, &mut obs);
 
-    // --- Board Features ---
-    encode_board_state(state, perspective, &mut obs);
-    encode_board_state(state, opponent, &mut obs);
+    // --- All Cards (set-based encoding) ---
+    let mut card_count = 0;
 
-    // --- Hand Features ---
-    encode_hand_features(state, perspective, &mut obs);
-    encode_hand_features(state, opponent, &mut obs);
+    // === SELF CARDS (full visibility) ===
+    
+    // Self board (Active + Bench)
+    for slot in 0..SLOTS_PER_PLAYER {
+        if let Some(pokemon) = &state.in_play_pokemon[perspective][slot] {
+            encode_in_play_pokemon(pokemon, state, ZONE_BOARD, 0.0, slot, 1.0, &mut obs);
+            card_count += 1;
+        }
+    }
+
+    // Self hand
+    for card in &state.hands[perspective] {
+        encode_card(card, None, state, ZONE_HAND, 0.0, None, 1.0, &mut obs);
+        card_count += 1;
+    }
+
+    // Self discard
+    for card in &state.discard_piles[perspective] {
+        encode_card(card, None, state, ZONE_DISCARD, 0.0, None, 1.0, &mut obs);
+        card_count += 1;
+    }
+
+    // Self deck (visible to self, composition known but not order)
+    for card in &state.decks[perspective].cards {
+        encode_card(card, None, state, ZONE_DECK, 0.0, None, 1.0, &mut obs);
+        card_count += 1;
+    }
+
+    // === OPPONENT CARDS (partial visibility) ===
+
+    // Opponent board (fully visible)
+    for slot in 0..SLOTS_PER_PLAYER {
+        if let Some(pokemon) = &state.in_play_pokemon[opponent][slot] {
+            encode_in_play_pokemon(pokemon, state, ZONE_BOARD, 1.0, slot, 1.0, &mut obs);
+            card_count += 1;
+        }
+    }
+
+    // Opponent discard (fully visible)
+    for card in &state.discard_piles[opponent] {
+        encode_card(card, None, state, ZONE_DISCARD, 1.0, None, 1.0, &mut obs);
+        card_count += 1;
+    }
+
+    // Opponent hand (hidden - visibility=0, position only)
+    for _ in &state.hands[opponent] {
+        encode_hidden_card(ZONE_HAND, 1.0, &mut obs);
+        card_count += 1;
+    }
+
+    // Opponent deck (hidden - visibility=0, position only)
+    for _ in &state.decks[opponent].cards {
+        encode_hidden_card(ZONE_DECK, 1.0, &mut obs);
+        card_count += 1;
+    }
+
+    // === Pad remaining slots with zeros ===
+    while card_count < MAX_CARDS_IN_GAME {
+        encode_empty_slot(&mut obs);
+        card_count += 1;
+    }
 
     debug_assert_eq!(
         obs.len(),
@@ -143,147 +189,313 @@ pub fn get_observation_tensor(state: &State, perspective: usize) -> Vec<f32> {
     obs
 }
 
-// --- Helper Functions ---
+// =============================================================================
+// ENCODING FUNCTIONS
+// =============================================================================
 
 fn encode_global_features(state: &State, perspective: usize, obs: &mut Vec<f32>) {
     let opponent = 1 - perspective;
 
-    // Turn count (normalized, clamped)
+    // Turn count
     obs.push((state.turn_count as f32 / MAX_TURNS).clamp(0.0, 1.0));
 
-    // Points (max 3 to win)
+    // Points
     obs.push(state.points[perspective] as f32 / MAX_POINTS);
     obs.push(state.points[opponent] as f32 / MAX_POINTS);
 
-    // Deck sizes (normalized)
+    // Deck sizes
     obs.push((state.decks[perspective].cards.len() as f32 / MAX_DECK_SIZE).clamp(0.0, 1.0));
     obs.push((state.decks[opponent].cards.len() as f32 / MAX_DECK_SIZE).clamp(0.0, 1.0));
 
-    // Discard pile sizes
+    // Hand sizes
+    obs.push((state.hands[perspective].len() as f32 / MAX_HAND_SIZE).clamp(0.0, 1.0));
+    obs.push((state.hands[opponent].len() as f32 / MAX_HAND_SIZE).clamp(0.0, 1.0));
+
+    // Discard sizes
     obs.push((state.discard_piles[perspective].len() as f32 / MAX_DISCARD_SIZE).clamp(0.0, 1.0));
     obs.push((state.discard_piles[opponent].len() as f32 / MAX_DISCARD_SIZE).clamp(0.0, 1.0));
 
-    // Deck energy composition (multi-hot)
-    let deck_energies = &state.decks[perspective].energy_types;
-    for energy in all_energy_types() {
-        obs.push(if deck_energies.contains(&energy) {
-            1.0
-        } else {
-            0.0
-        });
-    }
-}
-
-fn encode_board_state(state: &State, player: usize, obs: &mut Vec<f32>) {
-    for slot in 0..SLOTS_PER_PLAYER {
-        if let Some(pokemon) = &state.in_play_pokemon[player][slot] {
-            // Stage (0=Basic, 0.5=Stage1, 1.0=Stage2)
-            let stage = get_stage(pokemon);
-            obs.push(stage as f32 / 2.0);
-
-            // HP
-            obs.push(pokemon.remaining_hp as f32 / pokemon.total_hp as f32);
-            obs.push((pokemon.total_hp as f32 / MAX_HP).clamp(0.0, 1.0));
-
-            // Card's energy type (one-hot)
-            let card_energy = pokemon.get_energy_type();
-            for energy in all_energy_types() {
-                obs.push(if card_energy == Some(energy) {
-                    1.0
-                } else {
-                    0.0
-                });
-            }
-
-            // Weakness type (one-hot)
-            let weakness = if let Card::Pokemon(p) = &pokemon.card {
-                p.weakness
-            } else {
-                None
-            };
-            for energy in all_energy_types() {
-                obs.push(if weakness == Some(energy) { 1.0 } else { 0.0 });
-            }
-
-            // Knockout points (normalized: 1/3, 2/3, or 1.0)
-            let ko_points = pokemon.card.get_knockout_points();
-            obs.push(ko_points as f32 / MAX_POINTS);
-
-            // Energy attached (count per type, normalized)
-            let energy_counts = count_energy(&pokemon.attached_energy);
-            for energy in all_energy_types() {
-                obs.push((*energy_counts.get(&energy).unwrap_or(&0) as f32 / MAX_ENERGY_ATTACHED).clamp(0.0, 1.0));
-            }
-
-            // Energy delta for strongest attack
-            let attacks = pokemon.get_attacks();
-            let strongest_attack = if attacks.len() > 1 {
-                attacks.get(1)
-            } else {
-                attacks.first()
-            };
-            let missing_energy = if let Some(attack) = strongest_attack {
-                calculate_missing_energy(&pokemon.attached_energy, &attack.energy_required)
-            } else {
-                0
-            };
-            obs.push((missing_energy as f32 / MAX_MISSING_ENERGY).clamp(0.0, 1.0));
-
-            // Attack 1 features
-            if let Some(attack) = attacks.first() {
-                obs.push((attack.fixed_damage as f32 / MAX_ATTACK_DAMAGE).clamp(0.0, 1.0));
-                obs.push((attack.energy_required.len() as f32 / MAX_ENERGY_COST).clamp(0.0, 1.0));
-                obs.push(if attack.effect.is_some() { 1.0 } else { 0.0 });
-                obs.push(1.0); // has_attack
-
-                // Effect categories
-                let effect_cats = encode_attack_effect_text(attack.effect.as_deref());
-                obs.extend_from_slice(&effect_cats);
-            } else {
-                // No attack 1
-                obs.extend_from_slice(&[0.0; 4 + NUM_ATTACK_EFFECT_CATEGORIES]);
-            }
-
-            // Attack 2 features
-            if let Some(attack) = attacks.get(1) {
-                obs.push((attack.fixed_damage as f32 / MAX_ATTACK_DAMAGE).clamp(0.0, 1.0));
-                obs.push((attack.energy_required.len() as f32 / MAX_ENERGY_COST).clamp(0.0, 1.0));
-                obs.push(if attack.effect.is_some() { 1.0 } else { 0.0 });
-                obs.push(1.0); // has_attack
-
-                let effect_cats = encode_attack_effect_text(attack.effect.as_deref());
-                obs.extend_from_slice(&effect_cats);
-            } else {
-                // No attack 2
-                obs.extend_from_slice(&[0.0; 4 + NUM_ATTACK_EFFECT_CATEGORIES]);
-            }
-
-            // Status conditions
-            obs.push(if pokemon.poisoned { 1.0 } else { 0.0 });
-            obs.push(if pokemon.asleep { 1.0 } else { 0.0 });
-            obs.push(if pokemon.paralyzed { 1.0 } else { 0.0 });
-            obs.push(if pokemon.confused { 1.0 } else { 0.0 });
-
-            // Ability effect categories
-            let ability_cats = encode_ability_from_card_id(&pokemon.card.get_id());
-            obs.extend_from_slice(&ability_cats);
-
-            // Retreat cost
-            obs.push((get_retreat_cost(state, pokemon).len() as f32 / MAX_RETREAT_COST).clamp(0.0, 1.0));
-
-            // Attached tool (one-hot encoding)
-            encode_tool(&pokemon.attached_tool, obs);
-        } else {
-            // Empty slot
-            for _ in 0..FEATURES_PER_SLOT {
-                obs.push(0.0);
-            }
+    // Deck energy composition (self and opponent - visible info)
+    for player in [perspective, opponent] {
+        let deck_energies = &state.decks[player].energy_types;
+        for energy in deck_energy_types() {
+            obs.push(if deck_energies.contains(&energy) { 1.0 } else { 0.0 });
         }
     }
 }
 
-/// Encode attached tool as one-hot vector.
-/// Order: [None, GiantCape, RockyHelmet, PoisonBarb, LeafCape, ElectricalCord, InflatableBoat, HeavyHelmet]
+/// Encode an InPlayPokemon (on board)
+fn encode_in_play_pokemon(
+    pokemon: &PlayedCard,
+    state: &State,
+    zone: usize,
+    owner: f32,
+    slot: usize,
+    visibility: f32,
+    obs: &mut Vec<f32>,
+) {
+    // --- Intrinsic Features ---
+    
+    // is_pokemon
+    obs.push(1.0);
+
+    // Stage
+    let stage = get_stage(pokemon);
+    obs.push(stage as f32 / 2.0);
+
+    // Card energy type (one-hot)
+    let card_energy = pokemon.get_energy_type();
+    for energy in all_energy_types() {
+        obs.push(if card_energy == Some(energy) { 1.0 } else { 0.0 });
+    }
+
+    // HP
+    obs.push(pokemon.remaining_hp as f32 / pokemon.total_hp as f32);
+    obs.push((pokemon.total_hp as f32 / MAX_HP).clamp(0.0, 1.0));
+
+    // Weakness
+    let weakness = if let Card::Pokemon(p) = &pokemon.card {
+        p.weakness
+    } else {
+        None
+    };
+    for energy in all_energy_types() {
+        obs.push(if weakness == Some(energy) { 1.0 } else { 0.0 });
+    }
+
+    // KO points
+    let ko_points = pokemon.card.get_knockout_points();
+    obs.push(ko_points as f32 / MAX_POINTS);
+
+    // Energy attached
+    let energy_counts = count_energy(&pokemon.attached_energy);
+    for energy in all_energy_types() {
+        obs.push((*energy_counts.get(&energy).unwrap_or(&0) as f32 / MAX_ENERGY_ATTACHED).clamp(0.0, 1.0));
+    }
+
+    // Attacks
+    let attacks = pokemon.get_attacks();
+    if let Some(attack) = attacks.first() {
+        encode_attack(attack, obs);
+    } else {
+        encode_no_attack(obs);
+    }
+    if let Some(attack) = attacks.get(1) {
+        encode_attack(attack, obs);
+    } else {
+        encode_no_attack(obs);
+    }
+
+    // Status
+    obs.push(if pokemon.poisoned { 1.0 } else { 0.0 });
+    obs.push(if pokemon.asleep { 1.0 } else { 0.0 });
+    obs.push(if pokemon.paralyzed { 1.0 } else { 0.0 });
+    obs.push(if pokemon.confused { 1.0 } else { 0.0 });
+
+    // Ability
+    let ability_cats = encode_ability_from_card_id(&pokemon.card.get_id());
+    obs.extend_from_slice(&ability_cats);
+
+    // Supporter categories (not applicable for pokemon, zeros)
+    for _ in 0..NUM_SUPPORTER_EFFECT_CATEGORIES {
+        obs.push(0.0);
+    }
+
+    // Retreat cost
+    obs.push((get_retreat_cost(state, pokemon).len() as f32 / MAX_RETREAT_COST).clamp(0.0, 1.0));
+
+    // Tool
+    encode_tool(&pokemon.attached_tool, obs);
+
+    // --- Position Features ---
+    encode_position(zone, owner, Some(slot), visibility, obs);
+}
+
+/// Encode a Card (in hand/discard/deck)
+fn encode_card(
+    card: &Card,
+    _in_play: Option<&PlayedCard>,
+    _state: &State,
+    zone: usize,
+    owner: f32,
+    slot: Option<usize>,
+    visibility: f32,
+    obs: &mut Vec<f32>,
+) {
+    match card {
+        Card::Pokemon(pokemon_card) => {
+            // is_pokemon
+            obs.push(1.0);
+
+            // Stage
+            obs.push(pokemon_card.stage as f32 / 2.0);
+
+            // Card energy type
+            let card_energy = pokemon_card.energy_type;
+            for energy in all_energy_types() {
+                obs.push(if card_energy == energy { 1.0 } else { 0.0 });
+            }
+
+            // HP (max HP only for cards not in play)
+            obs.push(1.0); // current HP = max (not in play)
+            obs.push((pokemon_card.hp as f32 / MAX_HP).clamp(0.0, 1.0));
+
+            // Weakness
+            for energy in all_energy_types() {
+                obs.push(if pokemon_card.weakness == Some(energy) { 1.0 } else { 0.0 });
+            }
+
+            // KO points
+            obs.push(card.get_knockout_points() as f32 / MAX_POINTS);
+
+            // Energy attached (none for cards not in play)
+            for _ in 0..NUM_ENERGY_TYPES {
+                obs.push(0.0);
+            }
+
+            // Attacks
+            if let Some(attack) = pokemon_card.attacks.first() {
+                encode_attack(attack, obs);
+            } else {
+                encode_no_attack(obs);
+            }
+            if let Some(attack) = pokemon_card.attacks.get(1) {
+                encode_attack(attack, obs);
+            } else {
+                encode_no_attack(obs);
+            }
+
+            // Status (none for cards not in play)
+            obs.extend_from_slice(&[0.0; 4]);
+
+            // Ability
+            let ability_cats = encode_ability_from_card_id(&pokemon_card.id);
+            obs.extend_from_slice(&ability_cats);
+
+            // Supporter categories (not applicable)
+            for _ in 0..NUM_SUPPORTER_EFFECT_CATEGORIES {
+                obs.push(0.0);
+            }
+
+            // Retreat cost
+            obs.push((pokemon_card.retreat_cost.len() as f32 / MAX_RETREAT_COST).clamp(0.0, 1.0));
+
+            // Tool (none for cards not in play)
+            encode_tool(&None, obs);
+        }
+        Card::Trainer(trainer) => {
+            // is_pokemon
+            obs.push(0.0);
+
+            // Stage (not applicable for trainers)
+            obs.push(0.0);
+
+            // Energy type (not applicable)
+            for _ in 0..NUM_ENERGY_TYPES {
+                obs.push(0.0);
+            }
+
+            // HP (not applicable)
+            obs.push(0.0);
+            obs.push(0.0);
+
+            // Weakness (not applicable)
+            for _ in 0..NUM_ENERGY_TYPES {
+                obs.push(0.0);
+            }
+
+            // KO points (not applicable)
+            obs.push(0.0);
+
+            // Energy attached (not applicable)
+            for _ in 0..NUM_ENERGY_TYPES {
+                obs.push(0.0);
+            }
+
+            // Attacks (not applicable)
+            encode_no_attack(obs);
+            encode_no_attack(obs);
+
+            // Status (not applicable)
+            obs.extend_from_slice(&[0.0; 4]);
+
+            // Ability (not applicable)
+            obs.extend_from_slice(&[0.0; NUM_ABILITY_EFFECT_CATEGORIES]);
+
+            // Supporter categories
+            if let Some(card_id) = CardId::from_card_id(&trainer.id) {
+                let cats = encode_supporter_categories(card_id);
+                obs.extend_from_slice(&cats);
+            } else {
+                obs.extend_from_slice(&[0.0; NUM_SUPPORTER_EFFECT_CATEGORIES]);
+            }
+
+            // Retreat cost (not applicable)
+            obs.push(0.0);
+
+            // Tool (not applicable)
+            encode_tool(&None, obs);
+        }
+    }
+
+    // --- Position Features ---
+    encode_position(zone, owner, slot, visibility, obs);
+}
+
+/// Encode a hidden card (opponent's hand/deck)
+fn encode_hidden_card(zone: usize, owner: f32, obs: &mut Vec<f32>) {
+    // All intrinsic features are zeros for hidden cards
+    for _ in 0..CARD_INTRINSIC_FEATURES {
+        obs.push(0.0);
+    }
+
+    // Position features (visibility = 0)
+    encode_position(zone, owner, None, 0.0, obs);
+}
+
+/// Encode an empty slot (padding)
+fn encode_empty_slot(obs: &mut Vec<f32>) {
+    for _ in 0..FEATURES_PER_CARD {
+        obs.push(0.0);
+    }
+}
+
+/// Encode position features
+fn encode_position(zone: usize, owner: f32, slot: Option<usize>, visibility: f32, obs: &mut Vec<f32>) {
+    // Zone one-hot
+    for i in 0..NUM_ZONES {
+        obs.push(if i == zone { 1.0 } else { 0.0 });
+    }
+
+    // Owner
+    obs.push(owner);
+
+    // Slot one-hot (if on board)
+    for i in 0..NUM_BOARD_SLOTS {
+        obs.push(if slot == Some(i) { 1.0 } else { 0.0 });
+    }
+
+    // Visibility
+    obs.push(visibility);
+}
+
+/// Encode an attack
+fn encode_attack(attack: &crate::models::Attack, obs: &mut Vec<f32>) {
+    obs.push((attack.fixed_damage as f32 / MAX_ATTACK_DAMAGE).clamp(0.0, 1.0));
+    obs.push((attack.energy_required.len() as f32 / MAX_ENERGY_COST).clamp(0.0, 1.0));
+    obs.push(if attack.effect.is_some() { 1.0 } else { 0.0 });
+    obs.push(1.0); // has_attack
+
+    let effect_cats = encode_attack_effect_text(attack.effect.as_deref());
+    obs.extend_from_slice(&effect_cats);
+}
+
+/// Encode absence of an attack (zeros)
+fn encode_no_attack(obs: &mut Vec<f32>) {
+    obs.extend_from_slice(&[0.0; 4 + NUM_ATTACK_EFFECT_CATEGORIES]);
+}
+
+/// Encode attached tool as one-hot vector
 fn encode_tool(tool: &Option<ToolId>, obs: &mut Vec<f32>) {
     let tool_idx = match tool {
         None => 0,
@@ -298,105 +510,14 @@ fn encode_tool(tool: &Option<ToolId>, obs: &mut Vec<f32>) {
         Some(ToolId::B1219HeavyHelmet) => 7,
     };
 
-    // One-hot encoding (including "no tool" at index 0)
     for i in 0..NUM_TOOL_TYPES {
         obs.push(if i == tool_idx { 1.0 } else { 0.0 });
     }
 }
 
-fn encode_hand_features(state: &State, player: usize, obs: &mut Vec<f32>) {
-    let hand = &state.hands[player];
-
-    // Count Pokemon by stage
-    let mut basic_count = 0;
-    let mut stage1_count = 0;
-    let mut stage2_count = 0;
-
-    // Aggregate trainer effect categories
-    let mut trainer_cats = [0.0_f32; NUM_SUPPORTER_EFFECT_CATEGORIES];
-
-    for card in hand {
-        match card {
-            Card::Pokemon(pokemon) => match pokemon.stage {
-                0 => basic_count += 1,
-                1 => stage1_count += 1,
-                _ => stage2_count += 1,
-            },
-            Card::Trainer(trainer) => {
-                // Aggregate trainer effect categories
-                if let Some(card_id) = CardId::from_card_id(&trainer.id) {
-                    let cats = encode_supporter_categories(card_id);
-                    for (i, &cat) in cats.iter().enumerate() {
-                        trainer_cats[i] += cat;
-                    }
-                }
-            }
-        }
-    }
-
-    // Pokemon counts (normalized)
-    obs.push((basic_count as f32 / MAX_BASIC_IN_HAND).clamp(0.0, 1.0));
-    obs.push((stage1_count as f32 / MAX_STAGE1_IN_HAND).clamp(0.0, 1.0));
-    obs.push((stage2_count as f32 / MAX_STAGE2_IN_HAND).clamp(0.0, 1.0));
-
-    // Trainer effect categories (normalized by count)
-    for cat in trainer_cats {
-        obs.push((cat / MAX_TRAINER_CATEGORY_COUNT).clamp(0.0, 1.0));
-    }
-
-    // Can evolve active
-    let can_evolve = can_evolve_active(state, player);
-    obs.push(if can_evolve { 1.0 } else { 0.0 });
-
-    // Total playable cards
-    let playable_count = basic_count
-        + stage1_count
-        + stage2_count
-        + trainer_cats.iter().filter(|&&c| c > 0.0).count();
-    obs.push((playable_count as f32 / MAX_PLAYABLE_CARDS).clamp(0.0, 1.0));
-}
-
-fn can_evolve_active(state: &State, player: usize) -> bool {
-    if let Some(active) = &state.in_play_pokemon[player][0] {
-        let active_name = active.get_name();
-        for card in &state.hands[player] {
-            if let Card::Pokemon(pokemon) = card {
-                if let Some(ref evolves_from) = pokemon.evolves_from {
-                    if evolves_from == &active_name {
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-    false
-}
-
-fn calculate_missing_energy(attached: &[EnergyType], required: &[EnergyType]) -> usize {
-    let mut attached_counts = count_energy(attached);
-    let mut missing = 0;
-    let mut colorless_needed = 0;
-
-    for energy in required {
-        if *energy == EnergyType::Colorless {
-            colorless_needed += 1;
-        } else {
-            let available = attached_counts.entry(*energy).or_insert(0);
-            if *available > 0 {
-                *available -= 1;
-            } else {
-                missing += 1;
-            }
-        }
-    }
-
-    let total_remaining: usize = attached_counts.values().sum();
-    if total_remaining < colorless_needed {
-        missing += colorless_needed - total_remaining;
-    }
-
-    missing
-}
+// =============================================================================
+// HELPERS
+// =============================================================================
 
 fn all_energy_types() -> [EnergyType; NUM_ENERGY_TYPES] {
     [
@@ -413,6 +534,20 @@ fn all_energy_types() -> [EnergyType; NUM_ENERGY_TYPES] {
     ]
 }
 
+/// Energy types that can appear in decks (excludes Colorless and Dragon)
+fn deck_energy_types() -> [EnergyType; NUM_ENERGY_TYPES_DECK] {
+    [
+        EnergyType::Grass,
+        EnergyType::Fire,
+        EnergyType::Water,
+        EnergyType::Lightning,
+        EnergyType::Psychic,
+        EnergyType::Fighting,
+        EnergyType::Darkness,
+        EnergyType::Metal,
+    ]
+}
+
 fn count_energy(energies: &[EnergyType]) -> std::collections::HashMap<EnergyType, usize> {
     let mut counts = std::collections::HashMap::new();
     for e in energies {
@@ -420,6 +555,10 @@ fn count_energy(energies: &[EnergyType]) -> std::collections::HashMap<EnergyType
     }
     counts
 }
+
+// =============================================================================
+// TESTS
+// =============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -438,7 +577,20 @@ mod tests {
         let obs = get_observation_tensor(&state, 0);
         for (i, &val) in obs.iter().enumerate() {
             assert!(val >= 0.0, "Value at index {} is negative: {}", i, val);
-            // Most values should be <= 1.0, but energy counts can be higher
+            assert!(val <= 1.0, "Value at index {} is > 1.0: {}", i, val);
         }
+    }
+
+    #[test]
+    fn test_features_per_card_calculation() {
+        // Verify our constant calculations are correct
+        println!("CARD_INTRINSIC_FEATURES: {}", CARD_INTRINSIC_FEATURES);
+        println!("CARD_POSITION_FEATURES: {}", CARD_POSITION_FEATURES);
+        println!("FEATURES_PER_CARD: {}", FEATURES_PER_CARD);
+        println!("GLOBAL_FEATURES: {}", GLOBAL_FEATURES);
+        println!("OBSERVATION_SIZE: {}", OBSERVATION_SIZE);
+        
+        assert!(FEATURES_PER_CARD > 50, "Expected ~60 features per card");
+        assert!(OBSERVATION_SIZE > 2000, "Expected ~2400 total features");
     }
 }

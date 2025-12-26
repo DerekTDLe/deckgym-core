@@ -180,6 +180,19 @@ sudo cargo flamegraph --root --dev -- simulate example_decks/venusaur-exeggutor.
 
 The repository includes a deep reinforcement learning agent trained using PPO (Proximal Policy Optimization) with self-play.
 
+### Architecture: Attention-Based Observation
+
+The agent uses a **card-level attention mechanism** that processes each card individually:
+
+| Feature | Value |
+|---------|-------|
+| Observation size | 4745 dims (25 global + 40 cards × 118 features) |
+| Architecture | Transformer Encoder (2 layers, 4 heads) |
+| Card encoding | Intrinsic properties + position + visibility |
+| Permutation invariant | ✅ Order of cards doesn't matter |
+
+See [RL_ARCHITECTURE.md](RL_ARCHITECTURE.md) for detailed architecture documentation.
+
 ### Elo Leaderboard (300 games/baseline)
 
 | Rank | Player | Elo | Win Rate |
@@ -189,70 +202,40 @@ The repository includes a deep reinforcement learning agent trained using PPO (P
 | 3 | Expectiminimax(3) | 1978 | 82.0% |
 | 4 | **RL Agent (42M)** | **1935** | **69.4%** |
 | 5 | Expectiminimax(2) | 1893 | 76.2% |
-| 6 | RL Agent (30M) | 1866 | 69.1% |
-| 7 | RL Agent (50.4M) | 1855 | 69.4% |
-| 8 | EvolutionRusher | 1549 | 44.2% |
-| 9 | ValueFunction | 1451 | 31.3% |
-| 10 | WeightedRandom | 1340 | 38.2% |
-| 11 | AttachAttack | 1273 | 29.6% |
-| 12 | EndTurn | 1200 | 0.0% |
-| 13 | Random | 1081 | 19.8% |
-
-**Key findings:**
-- Best checkpoint: **42M steps** (1935 Elo) - only model to beat Expectiminimax(2)
-- Training plateau around **1900 Elo** after 40M steps
-- Ceiling appears to be ~1910-1935 Elo with current approach
-
-### Training Comparison: Baseline vs Improved
-
-| Metric | Baseline (no target_kl) | Improved (target_kl=0.015) |
-|--------|-------------------------|----------------------------|
-| Peak Elo | 1833 @ 20M | **1911 @ 42M** |
-| Peak steps | 20M (then regression) | 42M (plateau) |
-| Best WR | 66.3% | **69.3%** |
-| Stability | Regressed after peak | Stable plateau |
-
-The `target_kl` clipping and cyclical LR schedule improved both peak performance (+78 Elo) and training stability (no regression).
-
-### Training Progression
-
-```
-Steps (M)  Elo   WR      Comment
-─────────────────────────────────────────────
-1.2M       1740  58.4%   Initial learning
-7.2M       1859  64.1%   First peak
-12M        1888  65.1%   Strong improvement
-27.6M      1896  68.0%   Approaching plateau
-42M        1935  69.4%   Best single eval - beats e2
-50.4M      1855  69.4%   Plateau / slight regression
-57.6M      1866  69.2%   
-```
+| 6 | EvolutionRusher | 1549 | 44.2% |
+| 7 | ValueFunction | 1451 | 31.3% |
+| 8 | WeightedRandom | 1340 | 38.2% |
+| 9 | AttachAttack | 1273 | 29.6% |
+| 10 | EndTurn | 1200 | 0.0% |
+| 11 | Random | 1081 | 19.8% |
 
 ### Training Commands
 
 ```bash
-# Train new model
-python python/scripts/train.py --steps 60000000
+# Train with attention (default)
+python python/scripts/train.py --steps 30000000
 
-# Resume from best checkpoint
-python python/scripts/train.py --resume checkpoints/rl_bot_42000000_steps.zip --steps 20000000 --lr 5e-5
+# Train without attention (MLP only)
+python python/scripts/train.py --no-attention --steps 30000000
 
-# Evaluate all checkpoints
-python python/scripts/evaluate_checkpoints.py --dir checkpoints --games 300
+# Custom attention config
+python python/scripts/train.py --attention-dim 256 --attention-heads 8
 
-# Evaluate single model
-python python/scripts/evaluate.py eval models/rl_bot.zip --games 300
+# Evaluate model
+python python/scripts/evaluate.py eval checkpoints/rl_bot_xxx_steps.zip --games 300
 ```
 
-### Hyperparameters (Current Config)
+### Hyperparameters (Attention Config)
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `total_timesteps` | 60M | Training duration |
-| `n_steps` | 8192 | Experience per update |
+| `attention_embed_dim` | 128 | Card embedding dimension |
+| `attention_num_heads` | 4 | Attention heads |
+| `attention_num_layers` | 2 | Transformer layers |
+| `learning_rate` | 5e-5 | Lower for larger model |
+| `ent_coef` | 0.02 | Exploration bonus |
 | `batch_size` | 512 | Minibatch size |
-| `learning_rate` | 1e-4 (cyclical) | Adaptive LR schedule |
-| `target_kl` | 0.015 | Early stopping threshold |
+| `n_steps` | 8192 | Experience per update |
 | `gamma` | 0.98 | Discount factor |
-| `ent_coef` | 0.01 | Exploration bonus |
-| `policy_layers` | (512, 512, 256, 128) | Network architecture |
+| `target_kl` | 0.015 | Early stopping threshold |
+

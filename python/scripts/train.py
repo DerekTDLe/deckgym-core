@@ -17,6 +17,9 @@ import numpy as np
 import gymnasium as gym
 import torch
 
+# Enable TensorFloat32 for faster matmul on Ampere+ GPUs
+torch.set_float32_matmul_precision('high')
+
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
@@ -25,6 +28,7 @@ from stable_baselines3.common.monitor import Monitor
 
 from deckgym.env import DeckGymEnv
 from deckgym.deck_loader import CurriculumDeckLoader
+from deckgym.attention_policy import CardAttentionExtractor, create_attention_policy_kwargs
 
 
 # =============================================================================
@@ -48,21 +52,25 @@ class TrainingConfig:
     checkpoint_freq: int = 100_000
     
     # PPO hyperparameters
-    base_learning_rate: float = 1e-4      # Base LR for cyclical schedule
-    min_learning_rate: float = 3e-5       # Floor LR
-    n_steps: int = 8192                   # More experience per update (was 4096)
+    base_learning_rate: float = 5e-5      # Lower LR for attention model (was 1e-4)
+    min_learning_rate: float = 1e-5       # Lower floor LR (was 3e-5)
+    n_steps: int = 8192                   # More experience per update
     batch_size: int = 512                 # Minibatch size for optimization
     n_epochs: int = 8                     # Reduced to compensate for larger n_steps
     gamma: float = 0.98                   # Reduced for shorter episodes (was 0.99)
     gae_lambda: float = 0.95              # GAE lambda
-    ent_coef: float = 0.01                # Entropy bonus (exploration)
+    ent_coef: float = 0.02                # Higher entropy for larger model (was 0.01)
     vf_coef: float = 0.5                  # Value function coefficient (default)
     clip_range: float = 0.2               # PPO clipping range
     target_kl: float = 0.015              # Stop epoch early if KL > target (stabilizes training)
     
     # Network architecture
-    policy_layers: tuple = (512, 512, 256, 128)   # Deeper policy network
-    value_layers: tuple = (512, 512, 256)         # Match policy depth for better value estimation
+    policy_layers: tuple = (512, 512, 256, 128)   # Deeper policy network (MLP only)
+    value_layers: tuple = (512, 512, 256)         # Match policy depth for better value estimation (MLP only)
+    use_attention: bool = True                    # Default to attention-based policy
+    attention_embed_dim: int = 128                # Balance speed/quality
+    attention_num_heads: int = 4                  # Balance speed/quality
+    attention_num_layers: int = 2                 # Keep 2 layers for capacity
     use_silu: bool = True                         # Use SiLU activation (better than ReLU)
     
     # Self-play
@@ -502,13 +510,26 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     # Setup model
     print("[3/4] Initializing model...")
     activation_fn = torch.nn.SiLU if config.use_silu else torch.nn.ReLU
-    policy_kwargs = dict(
-        net_arch=dict(
-            pi=list(config.policy_layers),
-            vf=list(config.value_layers),
-        ),
-        activation_fn=activation_fn,
-    )
+    
+    if config.use_attention:
+        # Use attention-based policy with CardAttentionExtractor
+        print(f"      Using attention policy (embed_dim={config.attention_embed_dim}, heads={config.attention_num_heads}, layers={config.attention_num_layers})")
+        policy_kwargs = create_attention_policy_kwargs(
+            embed_dim=config.attention_embed_dim,
+            num_heads=config.attention_num_heads,
+            num_layers=config.attention_num_layers,
+            net_arch=dict(pi=[256, 128], vf=[256, 128]),  # Smaller heads after attention
+        )
+        policy_kwargs["activation_fn"] = activation_fn
+    else:
+        # Use standard MLP policy
+        policy_kwargs = dict(
+            net_arch=dict(
+                pi=list(config.policy_layers),
+                vf=list(config.value_layers),
+            ),
+            activation_fn=activation_fn,
+        )
     
     if config.resume_path:
         # Resume from existing checkpoint
@@ -553,6 +574,10 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
             device=config.device,
             tensorboard_log=config.tensorboard_dir,
         )
+    
+    # NOTE: torch.compile() is intentionally NOT used because it breaks model saving/loading.
+    # The compiled model saves weights with "_orig_mod." prefix which SB3 cannot properly reload.
+    # This results in models loading with random weights instead of trained weights.
     
     # Setup callbacks
     callbacks = [
@@ -631,12 +656,12 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint-freq", type=int, default=100_000, help="Checkpoint frequency")
     
     # PPO hyperparameters
-    parser.add_argument("--lr", type=float, default=1e-4, help="Base learning rate (cyclical)")
-    parser.add_argument("--min-lr", type=float, default=3e-5, help="Minimum learning rate floor")
+    parser.add_argument("--lr", type=float, default=5e-5, help="Base learning rate (cyclical)")
+    parser.add_argument("--min-lr", type=float, default=1e-5, help="Minimum learning rate floor")
     parser.add_argument("--target-kl", type=float, default=0.015, help="Target KL for early stopping")
     parser.add_argument("--batch-size", type=int, default=512, help="Batch size")
     parser.add_argument("--n-epochs", type=int, default=8, help="PPO epochs per update")
-    parser.add_argument("--ent-coef", type=float, default=0.01, help="Entropy coefficient")
+    parser.add_argument("--ent-coef", type=float, default=0.02, help="Entropy coefficient")
     
     # Self-play
     parser.add_argument("--opponent-update-freq", type=int, default=75_000, help="Frozen opponent update frequency")
@@ -647,6 +672,12 @@ if __name__ == "__main__":
     
     # Resume
     parser.add_argument("--resume", default=None, help="Path to checkpoint to resume training from")
+    
+    # Attention policy (enabled by default now)
+    parser.add_argument("--no-attention", action="store_true", help="Disable attention, use MLP instead")
+    parser.add_argument("--attention-dim", type=int, default=128, help="Attention embedding dimension")
+    parser.add_argument("--attention-heads", type=int, default=4, help="Number of attention heads")
+    parser.add_argument("--attention-layers", type=int, default=2, help="Number of transformer layers")
     
     # Device
     parser.add_argument("--device", default="auto", choices=["cpu", "cuda", "auto"])
@@ -670,6 +701,10 @@ if __name__ == "__main__":
         frozen_opponent_update_freq=args.opponent_update_freq,
         curriculum_warmup_ratio=args.warmup_ratio,
         n_envs=args.n_envs,
+        use_attention=not args.no_attention,
+        attention_embed_dim=args.attention_dim,
+        attention_num_heads=args.attention_heads,
+        attention_num_layers=args.attention_layers,
         device=args.device,
     )
     
