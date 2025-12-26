@@ -109,10 +109,10 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         card_feats = card_feats_flat.view(batch_size, self.max_cards, self.features_per_card)
         
         # Create mask for empty card slots (all zeros = padding)
-        # A card is considered "present" if it has non-zero visibility feature
-        # Visibility is the last position feature (index -1 in card features)
-        visibility_idx = self.features_per_card - 1  # Last feature is visibility
-        card_mask = card_feats[:, :, visibility_idx] < 0.5  # True = masked (padding)
+        # A card is considered "present" if it has any non-zero features
+        # (visibility was removed, so we check if the card has any content)
+        card_sum = card_feats.abs().sum(dim=-1)  # [batch, max_cards]
+        card_mask = card_sum < 1e-6  # True = masked (empty slot)
         
         # Process global features
         global_out = self.global_proj(global_feats)
