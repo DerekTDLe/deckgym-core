@@ -27,7 +27,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.monitor import Monitor
 
 from deckgym.env import DeckGymEnv
-from deckgym.deck_loader import CurriculumDeckLoader
+from deckgym.deck_loader import CurriculumDeckLoader, MetaDeckLoader
 from deckgym.attention_policy import CardAttentionExtractor, create_attention_policy_kwargs
 
 
@@ -141,34 +141,39 @@ DEFAULT_CONFIG = TrainingConfig()
 
 class SelfPlayEnv(gym.Env):
     """
-    Gymnasium wrapper for self-play training.
+    Gymnasium wrapper for training against various opponents.
     
-    Player 0 (agent) trains against Player 1 (frozen opponent).
-    The frozen opponent is periodically updated with the agent's weights
-    to prevent self-play collapse.
+    Supports:
+    - "self": Frozen copy of agent (self-play)
+    - "e2", "e3", etc.: Rust expectiminimax bots
+    - "random": Random baseline
     
-    Note: Starting player is randomized by the game seed, so the agent
-    naturally learns to play from both first and second positions.
+    Player 0 (agent) trains against Player 1 (opponent).
+    Starting player is randomized by game seed.
     """
     
     def __init__(
         self,
-        deck_loader: CurriculumDeckLoader,
+        deck_loader,
         opponent_model=None,
+        opponent_type: str = "self",
         config: TrainingConfig = DEFAULT_CONFIG,
     ):
         """
-        Initialize the self-play environment.
+        Initialize the training environment.
         
         Args:
-            deck_loader: Samples deck pairs with curriculum difficulty
-            opponent_model: Frozen model for opponent (updated periodically)
-            config: Training configuration with game limits
+            deck_loader: Samples deck pairs
+            opponent_model: Frozen model for self-play (used when opponent_type="self")
+            opponent_type: "self", "e2", "e3", "v", "random"
+            config: Training configuration
         """
         self.deck_loader = deck_loader
         self.opponent_model = opponent_model
+        self.opponent_type = opponent_type
         self.config = config
         self._episode_actions = 0
+        self._current_decks = None  # (deck_a, deck_b) strings
         
         # Initialize with a dummy game to get space dimensions
         self._env = DeckGymEnv(*deck_loader.sample_pair())
@@ -179,6 +184,12 @@ class SelfPlayEnv(gym.Env):
         """Update the frozen opponent model."""
         self.opponent_model = model
     
+    def set_opponent_type(self, opponent_type: str):
+        """Change opponent type (e.g., 'self', 'e2', 'e3')."""
+        self.opponent_type = opponent_type
+        if opponent_type != "self":
+            self.opponent_model = None  # Clear frozen model when using bots
+    
     def reset(self, seed=None, options=None):
         """
         Reset environment with new random decks.
@@ -186,14 +197,44 @@ class SelfPlayEnv(gym.Env):
         The game seed determines starting player (random ~50/50).
         """
         deck_a, deck_b = self.deck_loader.sample_pair()
+        self._current_decks = (deck_a, deck_b)
+        
+        # Create the base environment
         self._env = DeckGymEnv(deck_a, deck_b, seed=seed)
         obs, info = self._env.reset(seed=seed)
+        
+        # For bot opponents, replace the game with one that has the bot
+        if self.opponent_type != "self":
+            self._replace_game_with_bot(deck_a, deck_b, seed)
+            # Re-get observation from the new game
+            obs = np.array(self._env.game.get_obs(), dtype=np.float32)
         
         # Play opponent's turns if they go first
         obs, info, _, _ = self._play_opponent_turns(obs, info)
         self._episode_actions = 0
         
         return obs, info
+    
+    def _replace_game_with_bot(self, deck_a: str, deck_b: str, seed=None):
+        """Replace _env.game with a PyGame that has bot opponent."""
+        import deckgym
+        
+        # Write decks to temp files (PyGame requires file paths for bot support)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            f.write(deck_a)
+            path_a = f.name
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            f.write(deck_b)
+            path_b = f.name
+        
+        try:
+            # Create game with: player 0 = random (agent controls), player 1 = bot
+            bot_game = deckgym.Game(path_a, path_b, players=['r', self.opponent_type], seed=seed)
+            # Replace the environment's game
+            self._env.game = bot_game
+        finally:
+            os.unlink(path_a)
+            os.unlink(path_b)
     
     def step(self, action):
         """
@@ -268,13 +309,29 @@ class SelfPlayEnv(gym.Env):
                     self._log_freeze_warning("episode_action_limit", self._episode_actions)
                     return obs, info, 0.0, True
                 
-                # Select opponent action
-                action = self._select_opponent_action(obs)
+                if self.opponent_type == "self":
+                    # Self-play: select action with frozen model, execute in _env
+                    action = self._select_opponent_action(obs)
+                    obs, reward, done, truncated, info = self._env.step(action)
+                    final_reward = -reward  # Invert reward (opponent's loss = agent's gain)
+                else:
+                    # Bot opponent: use play_tick() on the underlying game
+                    # play_tick() both selects AND executes the bot's action
+                    self._env.game.play_tick()
+                    # Get updated observation after bot's action
+                    obs = np.array(self._env.game.get_obs(), dtype=np.float32)
+                    done = self._env.game.is_game_over()
+                    if done:
+                        # Determine reward from winner
+                        state = self._env.game.get_state()
+                        if state.winner and state.winner.winner == 0:
+                            final_reward = 1.0  # Agent won
+                        elif state.winner and state.winner.winner == 1:
+                            final_reward = -1.0  # Opponent won
+                        else:
+                            final_reward = 0.0  # Draw
                 
-                # Execute action
-                obs, reward, done, truncated, info = self._env.step(action)
-                final_reward = -reward  # Invert reward (opponent's loss = agent's gain)
-                if done or truncated:
+                if done:
                     break
         except BaseException as e:
             print(f"WARNING: Game error during opponent turn: {e}")
@@ -283,16 +340,23 @@ class SelfPlayEnv(gym.Env):
         return obs, info, final_reward, done
     
     def _select_opponent_action(self, obs) -> int:
-        """Select action for the opponent using frozen model or random."""
-        action_mask = self._env.action_masks()
-        
-        if self.opponent_model is not None:
-            action, _ = self.opponent_model.predict(obs, action_masks=action_mask, deterministic=False)
+        """Select action for the opponent based on opponent_type."""
+        if self.opponent_type == "self":
+            # Self-play: use frozen model
+            action_mask = self._env.action_masks()
+            if self.opponent_model is not None:
+                action, _ = self.opponent_model.predict(obs, action_masks=action_mask, deterministic=False)
+            else:
+                valid_actions = np.where(action_mask)[0]
+                action = np.random.choice(valid_actions)
+            return action
         else:
-            valid_actions = np.where(action_mask)[0]
-            action = np.random.choice(valid_actions)
-        
-        return action
+            # Bot opponent: use play_tick() which returns the action
+            # Note: play_tick() both selects AND executes the action
+            # So we return -1 as a sentinel that action was already executed
+            if self._bot_game is not None:
+                self._bot_game.play_tick()
+            return -1  # Sentinel: action already executed via play_tick()
     
     def _get_turn_count(self) -> int:
         """Get current turn count from game state."""
