@@ -169,7 +169,7 @@ sudo cargo flamegraph --root --dev -- simulate example_decks/venusaur-exeggutor.
 
 ## Reinforcement Learning Agent
 
-The repository includes a deep reinforcement learning agent trained using PPO (Proximal Policy Optimization) with self-play.
+The repository includes a deep reinforcement learning agent trained using PPO (Proximal Policy Optimization) with curriculum learning.
 
 ### Architecture: Attention-Based Observation
 
@@ -177,12 +177,23 @@ The agent uses a **card-level attention mechanism** that processes each card ind
 
 | Feature | Value |
 |---------|-------|
-| Observation size | 4745 dims (25 global + 40 cards × 118 features) |
+| Observation size | 2849 dims (41 global + 24 cards × 117 features) |
 | Architecture | Transformer Encoder (2 layers, 4 heads) |
-| Card encoding | Intrinsic properties + position + visibility |
+| Card encoding | Intrinsic properties + position (no hidden cards) |
 | Permutation invariant | ✅ Order of cards doesn't matter |
 
 See [RL_ARCHITECTURE.md](RL_ARCHITECTURE.md) for detailed architecture documentation.
+
+### Curriculum Training (Default)
+
+Training uses a **progressive curriculum** that starts with easier opponents:
+
+| Stage | Opponent | Win Rate Threshold |
+|-------|----------|-------------------|
+| warmup | e2 (Expectiminimax depth 2) | 65% |
+| meta | e2 with meta decks | 65% |
+| advanced | e3 (Expectiminimax depth 3) | 50% |
+| mastery | Self-play | - |
 
 ### Elo Leaderboard (300 games/baseline)
 
@@ -203,30 +214,24 @@ See [RL_ARCHITECTURE.md](RL_ARCHITECTURE.md) for detailed architecture documenta
 ### Training Commands
 
 ```bash
-# Train with attention (default)
+# Train with curriculum (default - starts with e2)
 python python/scripts/train.py --steps 30000000
-
-# Train without attention (MLP only)
-python python/scripts/train.py --no-attention --steps 30000000
-
-# Custom attention config
-python python/scripts/train.py --attention-dim 256 --attention-heads 8
 
 # Evaluate model
 python python/scripts/evaluate.py eval checkpoints/rl_bot_xxx_steps.zip --games 300
 ```
 
-### Hyperparameters (Attention Config)
+### Hyperparameters
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | `attention_embed_dim` | 128 | Card embedding dimension |
 | `attention_num_heads` | 4 | Attention heads |
 | `attention_num_layers` | 2 | Transformer layers |
-| `learning_rate` | 5e-5 | Lower for larger model |
+| `learning_rate` | 5e-5 → 1e-5 | Linear decay |
 | `ent_coef` | 0.02 | Exploration bonus |
 | `batch_size` | 512 | Minibatch size |
 | `n_steps` | 8192 | Experience per update |
 | `gamma` | 0.98 | Discount factor |
-| `target_kl` | 0.015 | Early stopping threshold |
+
 

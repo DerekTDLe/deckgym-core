@@ -21,9 +21,9 @@ The agent uses a custom feature extractor (`CardAttentionExtractor`) that proces
 | Deck sizes | 2 | Self and opponent (normalized) |
 | Hand sizes | 2 | Self and opponent (normalized) |
 | Discard sizes | 2 | Self and opponent (normalized) |
-| Deck energy types | 16 | 8 energy types × 2 players (multi-hot) |
+| Deck energy types | 32 | 8 energy types × 2 slots (dual type) × 2 players (multi-hot) |
 
-### Card Features (118 dims per card × 40 cards = 4720 dims)
+### Card Features (117 dims per card × 24 cards = 2808 dims)
 
 Each card is encoded with intrinsic properties and position information:
 
@@ -43,15 +43,16 @@ Each card is encoded with intrinsic properties and position information:
 - `retreat_cost` (1) - Normalized retreat cost
 - `attached_tool` (8) - One-hot tool type
 
-#### Position Features (10 dims)
+#### Position Features (9 dims)
 - `zone` (4) - One-hot: board/hand/discard/deck
 - `owner` (1) - 0=self, 1=opponent
 - `slot` (4) - One-hot board position (active + 3 bench)
-- `visibility` (1) - 1.0=visible, 0.0=hidden
 
-### Total Observation Size: 4745 dims (25 + 40×118)
+> Note: `visibility` was removed since all 24 encoded cards are now visible.
 
-## Card Distribution
+### Total Observation Size: 2849 dims (41 + 24×117)
+
+## Card Distribution (Optimized)
 
 | Player | Zone | Cards | Visibility |
 |--------|------|-------|------------|
@@ -60,24 +61,21 @@ Each card is encoded with intrinsic properties and position information:
 | Self | Discard | 0-20 | Full |
 | Self | Deck | 0-20 | Full |
 | Opponent | Board | 0-4 | Full |
-| Opponent | Discard | 0-20 | Full |
-| Opponent | Hand | 0-10 | **Hidden** (visibility=0) |
-| Opponent | Deck | 0-20 | **Hidden** (visibility=0) |
 
-Each player always has exactly 20 cards distributed across zones.
+**Note:** Opponent hand/deck/discard are NOT encoded as cards (only their sizes in global features). This reduces observation from 40 to 24 cards for faster training.
 
 ## Neural Network Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Observation (4745)                        │
+│                    Observation (2849)                        │
 └─────────────────────────────────────────────────────────────┘
                           │
           ┌───────────────┴───────────────┐
           ▼                               ▼
 ┌─────────────────┐             ┌─────────────────────────┐
 │ Global Features │             │   Card Features         │
-│     (25)        │             │   (40 × 118)            │
+│     (25)        │             │   (24 × 118)            │
 └─────────────────┘             └─────────────────────────┘
           │                               │
           ▼                               ▼
@@ -96,7 +94,7 @@ Each player always has exactly 20 cards distributed across zones.
           │                               ▼
           │               ┌─────────────────────────────────┐
           │               │     Mean Pooling (masked)       │
-          │               │     40×128 → 128                │
+          │               │     24×128 → 128                │
           │               └─────────────────────────────────┘
           │                               │
           └───────────────┬───────────────┘
@@ -115,13 +113,31 @@ Each player always has exactly 20 cards distributed across zones.
 └─────────────────┘             └─────────────────┘
 ```
 
+## Curriculum Training
+
+Training uses a **progressive curriculum** that starts with easier opponents:
+
+| Stage | Opponent | Decks | Win Rate Threshold |
+|-------|----------|-------|-------------------|
+| warmup | e2 (Expectiminimax depth 2) | simple | 65% |
+| meta | e2 | meta | 65% |
+| advanced | e3 (Expectiminimax depth 3) | meta | 50% |
+| mastery | self-play | meta | - |
+
+**Key benefits:**
+- **Faster training**: e2 runs at ~720 it/s vs ~490 it/s for self-play
+- **Stable learning**: Gradual difficulty increase prevents catastrophic forgetting
+- **Automatic progression**: Transitions based on win rate, not fixed steps
+
 ## Key Implementation Files
 
 | File | Purpose |
 |------|---------|
-| `src/rl/observation.rs` | Rust observation encoding (4745 dims) |
+| `src/rl/observation.rs` | Rust observation encoding (2857 dims) |
 | `python/deckgym/attention_policy.py` | CardAttentionExtractor & policy |
-| `python/scripts/train.py` | Training with attention architecture |
+| `python/deckgym/curriculum.py` | CurriculumManager for stage transitions |
+| `python/scripts/train.py` | Training with curriculum & attention |
+| `python/scripts/evaluate.py` | Evaluation with quick_eval_vs_bot() |
 
 ## Hyperparameters
 
@@ -135,13 +151,23 @@ Each player always has exactly 20 cards distributed across zones.
 | `batch_size` | 512 | Minibatch size |
 | `n_steps` | 8192 | Experience per update |
 
-## Training Notes
+## Training Speed (RTX 3050, 8 envs)
 
-### Speed vs Old MLP
-- MLP (445 dims): ~1000 it/s
-- Attention (4745 dims): ~350 it/s
-Note : This is for a RTX3050 with 12 envs and only indicative of relative speed.
+| Configuration | Speed | Notes |
+|---------------|-------|-------|
+| Attention + e2 opponent | ~720 it/s | Default curriculum |
+| Attention + self-play | ~490 it/s | Final mastery stage |
+| Old MLP (4745 dims) | ~350 it/s | Deprecated |
 
-### Known Issues
-- `torch.compile()` breaks checkpoint loading
-- SB3 cannot properly reload compiled models for the frozen opponent updates
+## Training Command
+
+```bash
+python python/scripts/train.py --steps 30000000
+```
+
+Training now uses curriculum by default (starts with e2, progresses automatically).
+
+## Known Issues
+
+- `torch.compile()` breaks checkpoint loading - do not use
+- SB3 cannot properly reload compiled models for frozen opponent updates
