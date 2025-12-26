@@ -232,6 +232,79 @@ def _write_temp_decks(deck_a: str, deck_b: str) -> tuple[str, str]:
 
 
 # =============================================================================
+# Quick Evaluation (for training curriculum)
+# =============================================================================
+
+def quick_eval_vs_bot(
+    model,
+    bot_code: str,
+    deck_loader: MetaDeckLoader,
+    n_games: int = 50,
+    verbose: bool = False,
+) -> float:
+    """
+    Quick win rate evaluation against a specific bot.
+    
+    Designed for curriculum training - fast evaluation without Elo calculation.
+    Uses the existing play_match infrastructure.
+    
+    Args:
+        model: Trained RL model (MaskablePPO)
+        bot_code: Bot code to play against ("e2", "e3", "v", etc.)
+        deck_loader: Deck loader for sampling games
+        n_games: Number of games to play (default: 50)
+        verbose: Print progress
+        
+    Returns:
+        Win rate as float (0.0 - 1.0)
+    """
+    wins = 0
+    losses = 0
+    draws = 0
+    
+    # Create player objects
+    rl_player = EloPlayer(name="agent", bot_code="rl", is_rl=True)
+    bot_player = EloPlayer(name=bot_code, bot_code=bot_code)
+    
+    for i in range(n_games):
+        deck_a = deck_loader.sample_deck()
+        deck_b = deck_loader.sample_deck()
+        seed = random.randint(0, 2**32 - 1)
+        
+        # Alternate starting player
+        if i % 2 == 0:
+            winner = play_match(rl_player, bot_player, deck_a, deck_b, 
+                               rl_model=model, seed=seed)
+            if winner is None:
+                draws += 1
+            elif winner.name == "agent":
+                wins += 1
+            else:
+                losses += 1
+        else:
+            winner = play_match(bot_player, rl_player, deck_b, deck_a,
+                               rl_model=model, seed=seed)
+            if winner is None:
+                draws += 1
+            elif winner.name == "agent":
+                wins += 1
+            else:
+                losses += 1
+        
+        if verbose and (i + 1) % 10 == 0:
+            wr = wins / (i + 1)
+            console.print(f"  [{i+1}/{n_games}] vs {bot_code}: {wins}W-{losses}L-{draws}D ({wr:.1%})")
+    
+    total = wins + losses + draws
+    win_rate = wins / total if total > 0 else 0.0
+    
+    if verbose:
+        console.print(f"  Final: {wins}W-{losses}L-{draws}D ({win_rate:.1%} WR)")
+    
+    return win_rate
+
+
+# =============================================================================
 # Baseline Initialization
 # =============================================================================
 
