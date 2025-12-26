@@ -32,6 +32,8 @@ from deckgym.deck_loader import CurriculumDeckLoader, MetaDeckLoader
 from deckgym.attention_policy import CardAttentionExtractor, create_attention_policy_kwargs
 from deckgym.curriculum import CurriculumManager
 
+import warnings
+warnings.filterwarnings("ignore", message=".*nested tensors.*")
 
 # =============================================================================
 # Configuration
