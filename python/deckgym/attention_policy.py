@@ -32,7 +32,7 @@ except ImportError:
     # GLOBAL_FEATURES = 1 (turn) + 2 (points) + 2 (deck_size) + 2 (hand_size) + 2 (discard_size) + 16 (2×8 deck_energy)
     GLOBAL_FEATURES = 25
     FEATURES_PER_CARD = 118  # intrinsic (108) + position (10) features per card
-    MAX_CARDS = 40  # 20 cards per player × 2 players
+    MAX_CARDS = 24  # 20 self + 4 opponent board
     # Total observation size: 25 + 40 × 118 = 4745 dims
 
 

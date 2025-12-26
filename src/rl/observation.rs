@@ -32,10 +32,10 @@ pub const SLOTS_PER_PLAYER: usize = 4;
 /// Number of distinct tool types for one-hot encoding
 pub const NUM_TOOL_TYPES: usize = 8; // none + 7 tools
 
-/// Maximum cards in observation (20 per player × 2 players = 40)
-/// Each player always has exactly 20 cards distributed across zones.
-/// Self cards: full visibility. Opponent cards: board/discard visible, hand/deck hidden (visibility=0).
-pub const MAX_CARDS_IN_GAME: usize = 40;
+/// Maximum cards in observation (20 self + 4 opponent board = 24)
+/// Self cards: full visibility (board, hand, discard, deck).
+/// Opponent cards: only board visible (4 slots max). Hand/deck counts in global features.
+pub const MAX_CARDS_IN_GAME: usize = 24;
 
 // --- Normalization Constants ---
 
@@ -155,23 +155,9 @@ pub fn get_observation_tensor(state: &State, perspective: usize) -> Vec<f32> {
         }
     }
 
-    // Opponent discard (fully visible)
-    for card in &state.discard_piles[opponent] {
-        encode_card(card, None, state, ZONE_DISCARD, 1.0, None, 1.0, &mut obs);
-        card_count += 1;
-    }
-
-    // Opponent hand (hidden - visibility=0, position only)
-    for _ in &state.hands[opponent] {
-        encode_hidden_card(ZONE_HAND, 1.0, &mut obs);
-        card_count += 1;
-    }
-
-    // Opponent deck (hidden - visibility=0, position only)
-    for _ in &state.decks[opponent].cards {
-        encode_hidden_card(ZONE_DECK, 1.0, &mut obs);
-        card_count += 1;
-    }
+    // NOTE: Opponent discard, hand, and deck are NOT encoded as cards.
+    // Their sizes are available in global features (lines 215-216).
+    // This reduces observation from 40 to 24 cards for faster training.
 
     // === Pad remaining slots with zeros ===
     while card_count < MAX_CARDS_IN_GAME {
@@ -268,9 +254,9 @@ fn encode_in_play_pokemon(
     obs.push(ko_points as f32 / MAX_POINTS);
 
     // Energy attached
-    let energy_counts = count_energy(&pokemon.attached_energy);
-    for energy in all_energy_types() {
-        obs.push((*energy_counts.get(&energy).unwrap_or(&0) as f32 / MAX_ENERGY_ATTACHED).clamp(0.0, 1.0));
+    let energy_counts = count_energy_array(&pokemon.attached_energy);
+    for (idx, _energy) in all_energy_types().iter().enumerate() {
+        obs.push((energy_counts[idx] / MAX_ENERGY_ATTACHED).clamp(0.0, 1.0));
     }
 
     // Attacks
@@ -442,17 +428,6 @@ fn encode_card(
     encode_position(zone, owner, slot, visibility, obs);
 }
 
-/// Encode a hidden card (opponent's hand/deck)
-fn encode_hidden_card(zone: usize, owner: f32, obs: &mut Vec<f32>) {
-    // All intrinsic features are zeros for hidden cards
-    for _ in 0..CARD_INTRINSIC_FEATURES {
-        obs.push(0.0);
-    }
-
-    // Position features (visibility = 0)
-    encode_position(zone, owner, None, 0.0, obs);
-}
-
 /// Encode an empty slot (padding)
 fn encode_empty_slot(obs: &mut Vec<f32>) {
     for _ in 0..FEATURES_PER_CARD {
@@ -548,12 +523,30 @@ fn deck_energy_types() -> [EnergyType; NUM_ENERGY_TYPES_DECK] {
     ]
 }
 
-fn count_energy(energies: &[EnergyType]) -> std::collections::HashMap<EnergyType, usize> {
-    let mut counts = std::collections::HashMap::new();
+/// Count energy by type using a fixed-size array (faster than HashMap)
+fn count_energy_array(energies: &[EnergyType]) -> [f32; NUM_ENERGY_TYPES] {
+    let mut counts = [0.0f32; NUM_ENERGY_TYPES];
     for e in energies {
-        *counts.entry(*e).or_insert(0) += 1;
+        let idx = energy_to_index(*e);
+        counts[idx] += 1.0;
     }
     counts
+}
+
+/// Map energy type to array index
+fn energy_to_index(e: EnergyType) -> usize {
+    match e {
+        EnergyType::Grass => 0,
+        EnergyType::Fire => 1,
+        EnergyType::Water => 2,
+        EnergyType::Lightning => 3,
+        EnergyType::Psychic => 4,
+        EnergyType::Fighting => 5,
+        EnergyType::Darkness => 6,
+        EnergyType::Metal => 7,
+        EnergyType::Dragon => 8,
+        EnergyType::Colorless => 9,
+    }
 }
 
 // =============================================================================
