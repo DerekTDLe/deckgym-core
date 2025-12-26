@@ -29,11 +29,11 @@ try:
     MAX_CARDS = deckgym.Game.max_cards_in_game()
 except ImportError:
     # Fallback for development - must match observation.rs constants
-    # GLOBAL_FEATURES = 1 (turn) + 2 (points) + 2 (deck_size) + 2 (hand_size) + 2 (discard_size) + 16 (2×8 deck_energy)
-    GLOBAL_FEATURES = 25
-    FEATURES_PER_CARD = 118  # intrinsic (108) + position (10) features per card
+    # GLOBAL_FEATURES = 1 (turn) + 2 (points) + 2 (deck_size) + 2 (hand_size) + 2 (discard_size) + 32 (2×2×8 deck_energy with dual type)
+    GLOBAL_FEATURES = 41
+    FEATURES_PER_CARD = 117  # intrinsic (108) + position (9, no visibility) features per card
     MAX_CARDS = 24  # 20 self + 4 opponent board
-    # Total observation size: 25 + 40 × 118 = 4745 dims
+    # Total observation size: 41 + 24 × 117 = 2849 dims
 
 
 class CardAttentionExtractor(BaseFeaturesExtractor):

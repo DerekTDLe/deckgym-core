@@ -85,8 +85,8 @@ pub const CARD_INTRINSIC_FEATURES: usize = 1  // is_pokemon (0=trainer, 1=pokemo
 /// Position features (where the card is)
 pub const CARD_POSITION_FEATURES: usize = NUM_ZONES  // zone one-hot (board/hand/discard/deck)
     + 1                                              // owner (0=self, 1=opponent)
-    + NUM_BOARD_SLOTS                                // slot one-hot (if on board)
-    + 1;                                             // visibility (1=full, 0=hidden)
+    + NUM_BOARD_SLOTS;                               // slot one-hot (if on board)
+    // NOTE: visibility removed - all encoded cards are now visible (24 cards only)
 
 /// Total features per card slot
 pub const FEATURES_PER_CARD: usize = CARD_INTRINSIC_FEATURES + CARD_POSITION_FEATURES;
@@ -97,7 +97,7 @@ pub const GLOBAL_FEATURES: usize = 1   // turn count
     + 2                                 // deck sizes (self, opponent)
     + 2                                 // hand sizes (self, opponent)
     + 2                                 // discard sizes (self, opponent)
-    + 2 * NUM_ENERGY_TYPES_DECK;        // deck energy composition (self + opponent)
+    + 2 * 2 * NUM_ENERGY_TYPES_DECK;    // deck energy composition (2 players × 2 types max × 8 energies)
 
 /// Total observation size
 pub const OBSERVATION_SIZE: usize = GLOBAL_FEATURES + (MAX_CARDS_IN_GAME * FEATURES_PER_CARD);
@@ -122,26 +122,26 @@ pub fn get_observation_tensor(state: &State, perspective: usize) -> Vec<f32> {
     // Self board (Active + Bench)
     for slot in 0..SLOTS_PER_PLAYER {
         if let Some(pokemon) = &state.in_play_pokemon[perspective][slot] {
-            encode_in_play_pokemon(pokemon, state, ZONE_BOARD, 0.0, slot, 1.0, &mut obs);
+            encode_in_play_pokemon(pokemon, state, ZONE_BOARD, 0.0, slot, &mut obs);
             card_count += 1;
         }
     }
 
     // Self hand
     for card in &state.hands[perspective] {
-        encode_card(card, None, state, ZONE_HAND, 0.0, None, 1.0, &mut obs);
+        encode_card(card, None, state, ZONE_HAND, 0.0, None, &mut obs);
         card_count += 1;
     }
 
     // Self discard
     for card in &state.discard_piles[perspective] {
-        encode_card(card, None, state, ZONE_DISCARD, 0.0, None, 1.0, &mut obs);
+        encode_card(card, None, state, ZONE_DISCARD, 0.0, None, &mut obs);
         card_count += 1;
     }
 
     // Self deck (visible to self, composition known but not order)
     for card in &state.decks[perspective].cards {
-        encode_card(card, None, state, ZONE_DECK, 0.0, None, 1.0, &mut obs);
+        encode_card(card, None, state, ZONE_DECK, 0.0, None, &mut obs);
         card_count += 1;
     }
 
@@ -150,7 +150,7 @@ pub fn get_observation_tensor(state: &State, perspective: usize) -> Vec<f32> {
     // Opponent board (fully visible)
     for slot in 0..SLOTS_PER_PLAYER {
         if let Some(pokemon) = &state.in_play_pokemon[opponent][slot] {
-            encode_in_play_pokemon(pokemon, state, ZONE_BOARD, 1.0, slot, 1.0, &mut obs);
+            encode_in_play_pokemon(pokemon, state, ZONE_BOARD, 1.0, slot, &mut obs);
             card_count += 1;
         }
     }
@@ -201,11 +201,15 @@ fn encode_global_features(state: &State, perspective: usize, obs: &mut Vec<f32>)
     obs.push((state.discard_piles[perspective].len() as f32 / MAX_DISCARD_SIZE).clamp(0.0, 1.0));
     obs.push((state.discard_piles[opponent].len() as f32 / MAX_DISCARD_SIZE).clamp(0.0, 1.0));
 
-    // Deck energy composition (self and opponent - visible info)
+    // Deck energy composition (self and opponent - visible info, supports dual type)
     for player in [perspective, opponent] {
         let deck_energies = &state.decks[player].energy_types;
-        for energy in deck_energy_types() {
-            obs.push(if deck_energies.contains(&energy) { 1.0 } else { 0.0 });
+        // Encode up to 2 energy types per deck (dual type support)
+        for slot in 0..2 {
+            for energy in deck_energy_types() {
+                let has_energy = deck_energies.get(slot).map_or(false, |e| *e == energy);
+                obs.push(if has_energy { 1.0 } else { 0.0 });
+            }
         }
     }
 }
@@ -217,7 +221,6 @@ fn encode_in_play_pokemon(
     zone: usize,
     owner: f32,
     slot: usize,
-    visibility: f32,
     obs: &mut Vec<f32>,
 ) {
     // --- Intrinsic Features ---
@@ -294,7 +297,7 @@ fn encode_in_play_pokemon(
     encode_tool(&pokemon.attached_tool, obs);
 
     // --- Position Features ---
-    encode_position(zone, owner, Some(slot), visibility, obs);
+    encode_position(zone, owner, Some(slot), obs);
 }
 
 /// Encode a Card (in hand/discard/deck)
@@ -305,7 +308,6 @@ fn encode_card(
     zone: usize,
     owner: f32,
     slot: Option<usize>,
-    visibility: f32,
     obs: &mut Vec<f32>,
 ) {
     match card {
@@ -425,7 +427,7 @@ fn encode_card(
     }
 
     // --- Position Features ---
-    encode_position(zone, owner, slot, visibility, obs);
+    encode_position(zone, owner, slot, obs);
 }
 
 /// Encode an empty slot (padding)
@@ -435,8 +437,8 @@ fn encode_empty_slot(obs: &mut Vec<f32>) {
     }
 }
 
-/// Encode position features
-fn encode_position(zone: usize, owner: f32, slot: Option<usize>, visibility: f32, obs: &mut Vec<f32>) {
+/// Encode position features (without visibility - all cards are visible now)
+fn encode_position(zone: usize, owner: f32, slot: Option<usize>, obs: &mut Vec<f32>) {
     // Zone one-hot
     for i in 0..NUM_ZONES {
         obs.push(if i == zone { 1.0 } else { 0.0 });
@@ -449,9 +451,6 @@ fn encode_position(zone: usize, owner: f32, slot: Option<usize>, visibility: f32
     for i in 0..NUM_BOARD_SLOTS {
         obs.push(if slot == Some(i) { 1.0 } else { 0.0 });
     }
-
-    // Visibility
-    obs.push(visibility);
 }
 
 /// Encode an attack

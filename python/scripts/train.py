@@ -103,34 +103,16 @@ class TrainingConfig:
     
     def get_learning_rate_schedule(self):
         """
-        Create cyclical learning rate schedule for self-play.
+        Simple linear decay from base_lr to min_lr.
         
-        LR boosts slightly after each frozen opponent update to help 
-        the agent adapt to the new opponent, then decays during the cycle.
-        Global decay also applied over training progress.
+        Standard approach that works well for both curriculum and self-play.
         """
         base_lr = self.base_learning_rate
         min_lr = self.min_learning_rate
-        frozen_freq = self.frozen_opponent_update_freq
-        total_steps = self.total_timesteps
         
         def lr_schedule(progress_remaining: float) -> float:
-            # progress_remaining goes from 1.0 to 0.0
-            progress = 1.0 - progress_remaining
-            current_step = progress * total_steps
-            
-            # Global decay: 100% -> 50% over training
-            global_decay = 0.5 + 0.5 * progress_remaining
-            
-            # Cycle progress within frozen opponent window
-            cycle_progress = (current_step % frozen_freq) / frozen_freq
-            
-            # Boost at start of cycle (after frozen update), decay during cycle
-            # Boost: +30% at cycle start, decays to 0% at cycle end
-            cycle_boost = 1.0 + 0.3 * (1.0 - cycle_progress)
-            
-            lr = base_lr * global_decay * cycle_boost
-            return max(min_lr, lr)
+            # Linear decay: base_lr at start, min_lr at end
+            return min_lr + (base_lr - min_lr) * progress_remaining
         
         return lr_schedule
 
