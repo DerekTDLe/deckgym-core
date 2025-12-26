@@ -34,6 +34,7 @@ from deckgym.curriculum import CurriculumManager
 
 import warnings
 warnings.filterwarnings("ignore", message=".*nested tensors.*")
+warnings.filterwarnings("ignore", message=".*np.object.*")
 
 # =============================================================================
 # Configuration
