@@ -73,9 +73,9 @@ class TrainingConfig:
     policy_layers: tuple = (512, 512, 256, 128)   # Deeper policy network (MLP only)
     value_layers: tuple = (512, 512, 256)         # Match policy depth for better value estimation (MLP only)
     use_attention: bool = True                    # Default to attention-based policy
-    attention_embed_dim: int = 128                # Balance speed/quality
-    attention_num_heads: int = 4                  # Balance speed/quality
-    attention_num_layers: int = 2                 # Keep 2 layers for capacity
+    attention_embed_dim: int = 256                # Larger embedding for better card representations
+    attention_num_heads: int = 8                  # More heads for diverse attention patterns
+    attention_num_layers: int = 3                 # Deeper transformer for complex reasoning
     use_silu: bool = True                         # Use SiLU activation (better than ReLU)
     
     # Self-play
@@ -800,9 +800,9 @@ if __name__ == "__main__":
     
     # Attention policy (enabled by default now)
     parser.add_argument("--no-attention", action="store_true", help="Disable attention, use MLP instead")
-    parser.add_argument("--attention-dim", type=int, default=128, help="Attention embedding dimension")
-    parser.add_argument("--attention-heads", type=int, default=4, help="Number of attention heads")
-    parser.add_argument("--attention-layers", type=int, default=2, help="Number of transformer layers")
+    parser.add_argument("--attention-dim", type=int, default=256, help="Attention embedding dimension")
+    parser.add_argument("--attention-heads", type=int, default=8, help="Number of attention heads")
+    parser.add_argument("--attention-layers", type=int, default=3, help="Number of transformer layers")
     
     # Device
     parser.add_argument("--device", default="auto", choices=["cpu", "cuda", "auto"])
