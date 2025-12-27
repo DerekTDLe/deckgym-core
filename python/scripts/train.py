@@ -83,8 +83,8 @@ class TrainingConfig:
     adaptive_frozen_opponent: bool = True         # Enable adaptive opponent updates
     target_win_rate: float = 0.55                 # Target win rate for adaptive updates
     
-    # Curriculum learning
-    curriculum_warmup_ratio: float = 0.10         # Phase 1 = 10% of total steps (simple decks)
+    # Curriculum learning (now controlled by CurriculumManager, not fixed ratio)
+    # Deck sources are automatically managed by stage transitions
     
     # Game limits
     max_turns: int = 99              # Official Pokemon TCG Pocket limit
@@ -99,8 +99,8 @@ class TrainingConfig:
     
     @property
     def curriculum_warmup_steps(self) -> int:
-        """Compute warmup steps from ratio."""
-        return int(self.total_timesteps * self.curriculum_warmup_ratio)
+        """Deprecated - curriculum is now win-rate based via CurriculumManager."""
+        return 0
     
     def get_learning_rate_schedule(self):
         """
@@ -372,35 +372,8 @@ class SelfPlayEnv(gym.Env):
 # Training Callbacks
 # =============================================================================
 
-class CurriculumCallback(BaseCallback):
-    """
-    Progressively increases deck difficulty during training.
-    
-    Difficulty ramps from 0 (simple decks only) to 1 (meta decks only)
-    after a warmup period.
-    """
-    
-    def __init__(
-        self,
-        deck_loader: CurriculumDeckLoader,
-        total_timesteps: int,
-        warmup_steps: int,
-        verbose: int = 0,
-    ):
-        super().__init__(verbose)
-        self.deck_loader = deck_loader
-        self.total_timesteps = total_timesteps
-        self.warmup_steps = warmup_steps
-    
-    def _on_step(self) -> bool:
-        if self.warmup_steps >= self.total_timesteps:
-            difficulty = 1.0
-        else:
-            progress = (self.num_timesteps - self.warmup_steps) / (self.total_timesteps - self.warmup_steps)
-            difficulty = max(0.0, min(1.0, progress))
-        
-        self.deck_loader.set_difficulty(difficulty)
-        return True
+# NOTE: CurriculumCallback (deck difficulty) was removed.
+# Deck sources are now controlled by CurriculumManager stage transitions.
 
 
 class FrozenOpponentCallback(BaseCallback):
@@ -725,11 +698,6 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     
     # Setup callbacks
     callbacks = [
-        CurriculumCallback(
-            deck_loader,
-            config.total_timesteps,
-            config.curriculum_warmup_steps,
-        ),
         CheckpointCallback(
             save_freq=config.checkpoint_freq,
             save_path=config.checkpoint_dir,
@@ -823,7 +791,6 @@ if __name__ == "__main__":
     
     # Self-play
     parser.add_argument("--opponent-update-freq", type=int, default=75_000, help="Frozen opponent update frequency")
-    parser.add_argument("--warmup-ratio", type=float, default=0.10, help="Curriculum warmup ratio (0-1)")
     
     # Parallelization
     parser.add_argument("--n-envs", type=int, default=8, help="Number of parallel environments (DummyVecEnv)")
@@ -857,7 +824,6 @@ if __name__ == "__main__":
         n_epochs=args.n_epochs,
         ent_coef=args.ent_coef,
         frozen_opponent_update_freq=args.opponent_update_freq,
-        curriculum_warmup_ratio=args.warmup_ratio,
         n_envs=args.n_envs,
         use_attention=not args.no_attention,
         attention_embed_dim=args.attention_dim,
