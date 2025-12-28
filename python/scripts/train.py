@@ -475,7 +475,6 @@ class CurriculumEvalCallback(BaseCallback):
         self,
         env,
         curriculum,  # CurriculumManager instance
-        deck_loader: MetaDeckLoader,
         n_envs: int = 1,
         eval_freq: int = 100_000,
         verbose: int = 1,
@@ -483,7 +482,6 @@ class CurriculumEvalCallback(BaseCallback):
         super().__init__(verbose)
         self.env = env
         self.curriculum = curriculum
-        self.deck_loader = deck_loader
         self.n_envs = n_envs
         self.eval_freq = eval_freq
         self.last_eval = 0
@@ -501,9 +499,11 @@ class CurriculumEvalCallback(BaseCallback):
                 print(f"[Step {self.num_timesteps:,}] In self-play stage, skipping eval")
             return True
         
-        # Run quick evaluation
+        # Run quick evaluation - use the SAME deck source as training!
+        deck_loader = self.curriculum.get_deck_loader()
+        deck_source = self.curriculum.current_stage.deck_source
         if self.verbose > 0:
-            print(f"[Step {self.num_timesteps:,}] Evaluating vs {stage.opponent} ({stage.eval_games} games)...")
+            print(f"[Step {self.num_timesteps:,}] Evaluating vs {stage.opponent} on {deck_source} decks ({stage.eval_games} games)...")
         
         # Import here to avoid circular imports
         import sys
@@ -513,7 +513,7 @@ class CurriculumEvalCallback(BaseCallback):
         win_rate = quick_eval_vs_bot(
             self.model,
             stage.opponent,
-            self.deck_loader,
+            deck_loader,  # Uses curriculum's deck loader (simple or meta based on stage)
             n_games=stage.eval_games,
             verbose=False,
         )
@@ -706,7 +706,6 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         CurriculumEvalCallback(
             env,
             curriculum=curriculum,
-            deck_loader=meta_loader,
             n_envs=config.n_envs,
             eval_freq=100_000,  # Evaluate every 100k steps
             verbose=1,
