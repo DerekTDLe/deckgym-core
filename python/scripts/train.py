@@ -61,7 +61,7 @@ class TrainingConfig:
     base_learning_rate: float = 5e-5      # Lower LR for attention model (was 1e-4)
     min_learning_rate: float = 1e-5       # Lower floor LR (was 3e-5)
     n_steps: int = 8192                   # More experience per update
-    batch_size: int = 512                 # Minibatch size for optimization
+    batch_size: int = 2048                # Larger batch for better GPU utilization (was 512)
     n_epochs: int = 8                     # Reduced to compensate for larger n_steps
     gamma: float = 0.98                   # Reduced for shorter episodes (was 0.99)
     gae_lambda: float = 0.95              # GAE lambda
