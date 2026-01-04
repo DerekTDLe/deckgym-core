@@ -23,7 +23,8 @@ pub mod stadiums;
 pub mod state;
 pub mod temp_deck;
 pub mod test_helpers; // TODO: Compile/Expose only in test mode?
-pub mod tools;
+pub mod tool_ids;
+pub mod vec_game;
 
 pub use ability_ids::AbilityId;
 pub use attack_ids::AttackId;
