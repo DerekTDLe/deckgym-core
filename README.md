@@ -199,12 +199,14 @@ Training uses a **progressive curriculum** that starts with easier opponents:
 
 | Stage | Opponent | Win Rate Threshold |
 |-------|----------|-------------------|
-| warmup | e2 (Expectiminimax depth 2) | 65% |
-| meta | e2 with meta decks | 65% |
+| warmup | e2 (Expectiminimax depth 2) | 55% |
+| meta | e2 with meta decks | 55% |
 | advanced | e3 (Expectiminimax depth 3) | 50% |
 | mastery | Self-play | - |
 
 ### Elo Leaderboard (300 games/baseline)
+
+*Note : Newest and current model architecture did not finish training yet, this serves as a temporary demonstration of the agent level of play*
 
 | Rank | Player | Elo | Win Rate |
 |------|--------|-----|----------|
@@ -235,15 +237,5 @@ python python/scripts/evaluate.py eval checkpoints/rl_bot_xxx_steps.zip --games 
 
 ### Hyperparameters
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `attention_embed_dim` | 128 | Card embedding dimension |
-| `attention_num_heads` | 4 | Attention heads |
-| `attention_num_layers` | 2 | Transformer layers |
-| `learning_rate` | 5e-5 → 1e-5 | Linear decay |
-| `ent_coef` | 0.02 | Exploration bonus |
-| `batch_size` | 512 | Minibatch size |
-| `n_steps` | 8192 | Experience per update |
-| `gamma` | 0.98 | Discount factor |
-
+See [RL_ARCHITECTURE.md](RL_ARCHITECTURE.md) for detailed hyperparameters information.
 
