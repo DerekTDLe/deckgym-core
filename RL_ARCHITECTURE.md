@@ -119,8 +119,8 @@ Training uses a **progressive curriculum** that starts with easier opponents:
 
 | Stage | Opponent | Decks | Win Rate Threshold |
 |-------|----------|-------|-------------------|
-| warmup | e2 (Expectiminimax depth 2) | simple | 65% |
-| meta | e2 | meta | 65% |
+| warmup | e2 (Expectiminimax depth 2) | simple | 55% |
+| meta | e2 | meta | 55% |
 | advanced | e3 (Expectiminimax depth 3) | meta | 50% |
 | mastery | self-play | meta | - |
 
