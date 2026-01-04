@@ -28,6 +28,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.monitor import Monitor
 
 from deckgym.env import DeckGymEnv
+from deckgym.batched_env import BatchedDeckGymEnv
 from deckgym.deck_loader import CurriculumDeckLoader, MetaDeckLoader
 from deckgym.attention_policy import CardAttentionExtractor, create_attention_policy_kwargs
 from deckgym.curriculum import CurriculumManager
@@ -91,8 +92,9 @@ class TrainingConfig:
     max_actions_per_turn: int = 50   # Prevents single-turn infinite loops
     max_total_actions: int = 500     # Prevents runaway episodes
     
-    # Parallel environments (DummyVecEnv - no IPC overhead)
+    # Parallel environments
     n_envs: int = 8                  # 8 parallel environments for diversity
+    use_batched_env: bool = True     # Use Rust-side batched env (faster, ~7000 steps/sec)
     
     # Device
     device: str = "auto"
@@ -457,6 +459,9 @@ class FrozenOpponentCallback(BaseCallback):
             # Single env: unwrap Monitor -> ActionMasker to get SelfPlayEnv
             inner_env = self.env.env.env if hasattr(self.env.env, 'env') else self.env.env
             inner_env.set_opponent_model(frozen_model)
+        elif isinstance(self.env, BatchedDeckGymEnv):
+            # BatchedDeckGymEnv doesn't support self-play yet
+            print("[WARNING] Self-play not supported with BatchedDeckGymEnv, skipping opponent update")
         else:
             # DummyVecEnv: update all environments (Monitor -> ActionMasker -> SelfPlayEnv)
             for i in range(self.n_envs):
@@ -533,7 +538,11 @@ class CurriculumEvalCallback(BaseCallback):
         if self.n_envs == 1:
             inner_env = self.env.env.env if hasattr(self.env.env, 'env') else self.env.env
             inner_env.set_opponent_type(opponent_type)
+        elif isinstance(self.env, BatchedDeckGymEnv):
+            # BatchedDeckGymEnv handles this directly
+            self.env.set_opponent_type(opponent_type)
         else:
+            # DummyVecEnv with SelfPlayEnv wrappers
             for i in range(self.n_envs):
                 self.env.envs[i].env.env.set_opponent_type(opponent_type)
         
@@ -619,8 +628,17 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         single_env = SelfPlayEnv(deck_loader, opponent_type=initial_opponent, config=config)
         env = ActionMasker(single_env, mask_fn)
         env = Monitor(env)  # Track ep_len, ep_rew for TensorBoard
+    elif config.use_batched_env:
+        # High-performance Rust-side batched environment
+        print(f"      Using BatchedDeckGymEnv (Rust-side batching)")
+        env = BatchedDeckGymEnv(
+            n_envs=config.n_envs,
+            deck_loader=deck_loader,
+            opponent_type=initial_opponent,
+        )
+        single_env = None
     else:
-        # Multiple environments with DummyVecEnv (no IPC overhead)
+        # Legacy: Multiple environments with DummyVecEnv
         env = DummyVecEnv([make_env(deck_loader, config, initial_opponent) for _ in range(config.n_envs)])
         single_env = None  # Will be set after model init
     
@@ -735,6 +753,10 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         
         if config.n_envs == 1:
             env.env.env.set_opponent_model(initial_frozen)
+        elif isinstance(env, BatchedDeckGymEnv):
+            # BatchedDeckGymEnv doesn't support self-play yet
+            print("      [WARNING] Self-play not supported with BatchedDeckGymEnv")
+            print("                Falling back to bot opponents. Set use_batched_env=False for self-play.")
         else:
             for i in range(config.n_envs):
                 env.envs[i].env.env.set_opponent_model(initial_frozen)

@@ -169,8 +169,20 @@ class BatchedDeckGymEnv(VecEnv):
         raise NotImplementedError("set_attr is not supported for BatchedDeckGymEnv")
     
     def env_method(self, method_name: str, *method_args, indices=None, **method_kwargs) -> List[Any]:
-        """Call method on environments (not supported)."""
-        raise NotImplementedError("env_method is not supported for BatchedDeckGymEnv")
+        """Call method on environments.
+        
+        Supports action_masks which is required by MaskablePPO.
+        """
+        if indices is None:
+            indices = range(self.n_envs)
+        
+        if method_name == "action_masks":
+            # Return action masks for each env as a list
+            all_masks = self.action_masks()
+            return [all_masks[i] for i in indices]
+        else:
+            # Return None for unsupported methods
+            return [None] * len(list(indices))
     
     def env_is_wrapped(self, wrapper_class, indices=None) -> List[bool]:
         """Check if environments are wrapped."""
