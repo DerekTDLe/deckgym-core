@@ -35,7 +35,7 @@ from deckgym.curriculum import CurriculumManager
 
 import warnings
 warnings.filterwarnings("ignore", message=".*nested tensors.*")
-warnings.filterwarnings("ignore", message=".*np.object.*")
+warnings.filterwarnings("ignore", message=".*np.object.*", category=FutureWarning)
 
 # =============================================================================
 # Configuration
@@ -84,9 +84,6 @@ class TrainingConfig:
     adaptive_frozen_opponent: bool = True         # Enable adaptive opponent updates
     target_win_rate: float = 0.55                 # Target win rate for adaptive updates
     
-    # Curriculum learning (now controlled by CurriculumManager, not fixed ratio)
-    # Deck sources are automatically managed by stage transitions
-    
     # Game limits
     max_turns: int = 99              # Official Pokemon TCG Pocket limit
     max_actions_per_turn: int = 50   # Prevents single-turn infinite loops
@@ -98,11 +95,6 @@ class TrainingConfig:
     
     # Device
     device: str = "auto"
-    
-    @property
-    def curriculum_warmup_steps(self) -> int:
-        """Deprecated - curriculum is now win-rate based via CurriculumManager."""
-        return 0
     
     def get_learning_rate_schedule(self):
         """
@@ -818,7 +810,6 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     # Train
     print("[4/4] Starting training...")
     print(f"      Checkpoints: every {config.checkpoint_freq:,} steps")
-    print(f"      Curriculum eval: every 100,000 steps")
     if initial_opponent == "self":
         print(f"      Opponent updates: every {config.frozen_opponent_update_freq:,} steps")
     
