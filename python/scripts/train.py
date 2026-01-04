@@ -329,23 +329,23 @@ class SelfPlayEnv(gym.Env):
         return obs, info, final_reward, done
     
     def _select_opponent_action(self, obs) -> int:
-        """Select action for the opponent based on opponent_type."""
-        if self.opponent_type == "self":
-            # Self-play: use frozen model
-            action_mask = self._env.action_masks()
-            if self.opponent_model is not None:
-                action, _ = self.opponent_model.predict(obs, action_masks=action_mask, deterministic=False)
-            else:
-                valid_actions = np.where(action_mask)[0]
-                action = np.random.choice(valid_actions)
-            return action
+        """Select action for the opponent (self-play only).
+        
+        Note: Bot opponents are handled directly via play_tick() in _play_opponent_turns(),
+        so this method is only used for self-play with frozen model.
+        """
+        if self.opponent_type != "self":
+            # Bot opponent: action is handled by play_tick() in _play_opponent_turns()
+            return -1  # Sentinel: not used for bots
+        
+        # Self-play: use frozen model
+        action_mask = self._env.action_masks()
+        if self.opponent_model is not None:
+            action, _ = self.opponent_model.predict(obs, action_masks=action_mask, deterministic=False)
         else:
-            # Bot opponent: use play_tick() which returns the action
-            # Note: play_tick() both selects AND executes the action
-            # So we return -1 as a sentinel that action was already executed
-            if self._bot_game is not None:
-                self._bot_game.play_tick()
-            return -1  # Sentinel: action already executed via play_tick()
+            valid_actions = np.where(action_mask)[0]
+            action = np.random.choice(valid_actions)
+        return action
     
     def _get_turn_count(self) -> int:
         """Get current turn count from game state."""
@@ -384,11 +384,27 @@ class EpisodeMetricsCallback(BaseCallback):
     
     Tracks metrics from BatchedDeckGymEnv's episode info dict:
     - actions_per_turn: Average actions taken between EndTurn calls
+    
+    Also shows training phase indicators (Collecting vs Optimizing).
     """
     
     def __init__(self, verbose: int = 0):
         super().__init__(verbose)
         self._actions_per_turn_buffer = []
+    
+    def _on_rollout_start(self) -> None:
+        """Called when rollout collection starts."""
+        print("\r[Phase: Collecting rollouts...]", end="", flush=True)
+    
+    def _on_rollout_end(self) -> None:
+        """Called when rollout collection ends, optimization starts."""
+        print("\r[Phase: PPO Optimization...]   ", end="", flush=True)
+        
+        # Log buffered metrics
+        if self._actions_per_turn_buffer and self.logger:
+            mean_apt = np.mean(self._actions_per_turn_buffer)
+            self.logger.record("rollout/actions_per_turn_mean", mean_apt)
+            self._actions_per_turn_buffer.clear()
     
     def _on_step(self) -> bool:
         # Check for finished episodes in infos
@@ -399,13 +415,6 @@ class EpisodeMetricsCallback(BaseCallback):
                     self._actions_per_turn_buffer.append(episode_info["actions_per_turn"])
         
         return True
-    
-    def _on_rollout_end(self) -> None:
-        """Log buffered metrics at end of rollout."""
-        if self._actions_per_turn_buffer and self.logger:
-            mean_apt = np.mean(self._actions_per_turn_buffer)
-            self.logger.record("rollout/actions_per_turn_mean", mean_apt)
-            self._actions_per_turn_buffer.clear()
 
 
 class FrozenOpponentCallback(BaseCallback):
