@@ -8,6 +8,12 @@ learning that progressively increases deck difficulty from simple to meta.
 Starting player alternates randomly each game (controlled by game seed).
 """
 
+# Suppress warnings BEFORE importing anything else
+import warnings
+warnings.filterwarnings("ignore", message=".*nested tensors.*")
+warnings.filterwarnings("ignore", message=".*np.object.*", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 import os
 import tempfile
 from dataclasses import dataclass
@@ -32,10 +38,6 @@ from deckgym.batched_env import BatchedDeckGymEnv
 from deckgym.deck_loader import CurriculumDeckLoader, MetaDeckLoader
 from deckgym.attention_policy import CardAttentionExtractor, create_attention_policy_kwargs
 from deckgym.curriculum import CurriculumManager
-
-import warnings
-warnings.filterwarnings("ignore", message=".*nested tensors.*")
-warnings.filterwarnings("ignore", message=".*np.object.*", category=FutureWarning)
 
 # =============================================================================
 # Configuration
