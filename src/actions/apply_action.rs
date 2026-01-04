@@ -8,7 +8,10 @@ use crate::{
         apply_abilities_action::forecast_ability,
         apply_action_helpers::{apply_common_mutation, Mutation},
     },
-    hooks::{get_retreat_cost, on_attach_energy, on_attach_tool, on_evolve, to_playable_card},
+    hooks::{
+        get_retreat_cost, on_attach_energy, on_attach_tool, on_evolve, on_play_to_bench,
+        to_playable_card,
+    },
     models::{Card, EnergyType},
     state::State,
     tool_ids::ToolId,
@@ -45,7 +48,7 @@ pub fn forecast_action(state: &State, action: &Action) -> (Probabilities, Mutati
         | SimpleAction::Attach { .. }
         | SimpleAction::MoveEnergy { .. }
         | SimpleAction::AttachTool { .. }
-        | SimpleAction::Evolve(_, _)
+        | SimpleAction::Evolve { .. }
         | SimpleAction::Activate { .. }
         | SimpleAction::Retreat(_)
         | SimpleAction::ApplyDamage { .. }
@@ -117,16 +120,22 @@ fn apply_deterministic_action(state: &mut State, action: &Action) {
         SimpleAction::MoveEnergy {
             from_in_play_idx,
             to_in_play_idx,
-            energy,
+            energy_type,
+            amount,
         } => apply_move_energy(
             state,
             action.actor,
             *from_in_play_idx,
             *to_in_play_idx,
-            *energy,
+            *energy_type,
+            *amount,
         ),
         SimpleAction::Place(card, index) => apply_place_card(state, action.actor, card, *index),
-        SimpleAction::Evolve(card, position) => apply_evolve(action.actor, state, card, *position),
+        SimpleAction::Evolve {
+            evolution,
+            in_play_idx,
+            from_deck,
+        } => apply_evolve(action.actor, state, evolution, *in_play_idx, *from_deck),
         SimpleAction::Activate {
             player,
             in_play_idx,
@@ -193,22 +202,35 @@ fn apply_move_energy(
     actor: usize,
     from_idx: usize,
     to_idx: usize,
-    energy: EnergyType,
+    energy_type: EnergyType,
+    amount: u32,
 ) {
     let actor_board = &mut state.in_play_pokemon[actor];
-    let mut removed = false;
+    let mut removed_energies = Vec::new();
+
+    // Remove the specified amount of energy from source
     if let Some(from_card) = actor_board[from_idx].as_mut() {
-        if let Some(pos) = from_card.attached_energy.iter().position(|e| e == &energy) {
-            from_card.attached_energy.swap_remove(pos);
-            removed = true;
+        for _ in 0..amount {
+            if let Some(pos) = from_card
+                .attached_energy
+                .iter()
+                .position(|e| e == &energy_type)
+            {
+                from_card.attached_energy.swap_remove(pos);
+                removed_energies.push(energy_type);
+            } else {
+                break; // No more energy of this type to remove
+            }
         }
     }
-    if removed {
+
+    // Add removed energies to destination
+    if !removed_energies.is_empty() {
         if let Some(to_card) = actor_board[to_idx].as_mut() {
-            to_card.attached_energy.push(energy);
+            to_card.attached_energy.extend(removed_energies);
         } else if let Some(from_card) = actor_board[from_idx].as_mut() {
-            // Put energy back if destination vanished (should not normally happen)
-            from_card.attached_energy.push(energy);
+            // Put energies back if destination vanished (should not normally happen)
+            from_card.attached_energy.extend(removed_energies);
         }
     }
 }
@@ -217,6 +239,7 @@ fn apply_place_card(state: &mut State, actor: usize, card: &Card, index: usize) 
     let played_card = to_playable_card(card, true);
     state.in_play_pokemon[actor][index] = Some(played_card);
     state.remove_card_from_hand(actor, card);
+    on_play_to_bench(actor, state, card, index);
 }
 
 fn apply_discard_fossil(acting_player: usize, state: &mut State, in_play_idx: usize) {
@@ -329,6 +352,7 @@ pub(crate) fn apply_evolve(
     state: &mut State,
     to_card: &Card,
     position: usize,
+    from_deck: bool,
 ) {
     // This removes status conditions
     let mut played_card = to_playable_card(to_card, true);
@@ -351,7 +375,13 @@ pub(crate) fn apply_evolve(
     } else {
         panic!("Only Pokemon cards can be evolved");
     }
-    state.remove_card_from_hand(acting_player, to_card);
+
+    // Remove the evolution card from either hand or deck depending on the source
+    if from_deck {
+        state.remove_card_from_deck(acting_player, to_card);
+    } else {
+        state.remove_card_from_hand(acting_player, to_card);
+    }
 
     // Run special logic hooks on evolution
     on_evolve(acting_player, state, to_card)
@@ -583,7 +613,7 @@ mod tests {
         state.hands[0] = vec![primeape.clone(), primeape.clone()];
 
         // Evolve Active
-        apply_evolve(0, &mut state, &primeape, 0);
+        apply_evolve(0, &mut state, &primeape, 0, false);
         assert_eq!(
             state.in_play_pokemon[0][0],
             Some(PlayedCard::new(
@@ -597,7 +627,7 @@ mod tests {
         );
 
         // Evolve Bench
-        apply_evolve(0, &mut state, &primeape, 2);
+        apply_evolve(0, &mut state, &primeape, 2, false);
         assert_eq!(
             state.in_play_pokemon[0][0],
             Some(PlayedCard::new(

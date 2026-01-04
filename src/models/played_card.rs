@@ -170,6 +170,10 @@ impl PlayedCard {
             .collect()
     }
 
+    pub(crate) fn get_effects(&self) -> &Vec<(CardEffect, u8)> {
+        &self.effects
+    }
+
     pub(crate) fn clear_status_and_effects(&mut self) {
         self.poisoned = false;
         self.paralyzed = false;
