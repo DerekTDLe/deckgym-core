@@ -110,6 +110,9 @@ pub fn get_ability_effect_categories(ability_id: AbilityId) -> &'static [Ability
         // === EVOLUTION ===
         AbilityId::A3b056EeveeExVeeveeVolve => &[Evolution, Passive],
         AbilityId::B1184EeveeBoostedEvolution => &[Evolution, Passive],
+
+        // === INFO (no useful effect for agent) ===
+        AbilityId::A4a032MisdreavusInfiltratingInspection => &[Activated, OncePerTurn],
     }
 }
 

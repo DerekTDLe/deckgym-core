@@ -132,6 +132,11 @@ pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffe
         Mechanic::MegaBlazikenExMegaBurningAttack => &[EnergyManip, StatusInflict],
         Mechanic::HoOhExPhoenixTurbo => &[EnergyManip],
         Mechanic::HealBenchedBasic { .. } => &[Heal],
+
+        // === NEW MECHANICS ===
+        Mechanic::SearchToHandSupporterCard => &[CardAdvantage],
+        Mechanic::MoveAllEnergyTypeToBench { .. } => &[EnergyManip],
+        Mechanic::ExtraDamagePerRetreatCost { .. } => &[ConditionalDamage],
     }
 }
 

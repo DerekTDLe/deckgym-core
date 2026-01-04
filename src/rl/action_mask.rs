@@ -211,8 +211,8 @@ fn action_to_index(action: &SimpleAction, maps: &HandMaps) -> Option<usize> {
         }
 
         // Evolve Pokemon
-        SimpleAction::Evolve(card, in_play_idx) => {
-            if let Some(&idx) = maps.card_index.get(&card.get_id()) {
+        SimpleAction::Evolve { evolution, in_play_idx, .. } => {
+            if let Some(&idx) = maps.card_index.get(&evolution.get_id()) {
                 if idx < 20 && *in_play_idx <= 3 {
                     // 0 = Play/Evolve
                     Some(30 + (idx * 5) + 0)
