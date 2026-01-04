@@ -524,12 +524,12 @@ class FrozenOpponentCallback(BaseCallback):
                 self.env.envs[i].env.env.set_opponent_model(self._frozen_model)
 
 
-class CurriculumEvalCallback(BaseCallback):
+class CurriculumCallback(BaseCallback):
     """
-    Periodically evaluates the agent and manages curriculum stage transitions.
+    Manages curriculum stage transitions using continuous win rate tracking.
     
-    Uses quick_eval_vs_bot() for fast evaluation against the current stage opponent.
-    Automatically advances stages when win rate threshold is reached.
+    Tracks wins/losses from training episodes (no separate evaluation runs).
+    Checks for stage advancement at each rollout end.
     """
     
     def __init__(
@@ -537,57 +537,45 @@ class CurriculumEvalCallback(BaseCallback):
         env,
         curriculum,  # CurriculumManager instance
         n_envs: int = 1,
-        eval_freq: int = 100_000,
         verbose: int = 1,
     ):
         super().__init__(verbose)
         self.env = env
         self.curriculum = curriculum
         self.n_envs = n_envs
-        self.eval_freq = eval_freq
-        self.last_eval = 0
+        self._last_log_step = 0
     
     def _on_step(self) -> bool:
-        if self.num_timesteps - self.last_eval < self.eval_freq:
-            return True
-        
-        self.last_eval = self.num_timesteps
+        """Track episode outcomes from training."""
+        for info in self.locals.get("infos", []):
+            if "episode" in info:
+                reward = info["episode"].get("r", 0)
+                self.curriculum.record_episode(won=(reward > 0))
+        return True
+    
+    def _on_rollout_end(self) -> None:
+        """Check for stage advancement at end of each rollout."""
         stage = self.curriculum.current_stage
         
-        # Skip evaluation for self-play stage
-        if stage.opponent == "self":
-            if self.verbose > 0:
-                print(f"[Step {self.num_timesteps:,}] In self-play stage, skipping eval")
-            return True
-        
-        # Run quick evaluation - use the SAME deck source as training!
-        deck_loader = self.curriculum.get_deck_loader()
-        deck_source = self.curriculum.current_stage.deck_source
-        if self.verbose > 0:
-            print(f"[Step {self.num_timesteps:,}] Evaluating vs {stage.opponent} on {deck_source} decks ({stage.eval_games} games)...")
-        
-        # Import here to avoid circular imports
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent))
-        from evaluate import quick_eval_vs_bot
-        
-        win_rate = quick_eval_vs_bot(
-            self.model,
-            stage.opponent,
-            deck_loader,  # Uses curriculum's deck loader (simple or meta based on stage)
-            n_games=stage.eval_games,
-            verbose=False,
-        )
-        
-        if self.verbose > 0:
-            print(f"[Step {self.num_timesteps:,}] WR vs {stage.opponent}: {win_rate:.1%} (threshold: {stage.win_rate_threshold:.0%})")
+        # Log progress periodically (every ~50k steps)
+        if self.verbose > 0 and self.num_timesteps - self._last_log_step >= 50_000:
+            self._last_log_step = self.num_timesteps
+            wr = self.curriculum.win_rate
+            count = self.curriculum.episode_count
+            threshold = stage.win_rate_threshold
+            threshold_str = f"{threshold:.0%}" if threshold else "∞"
+            print(f"[Step {self.num_timesteps:,}] Stage: {stage.name}, WR: {wr:.1%} ({count} eps), threshold: {threshold_str}")
+            
+            # Log to TensorBoard if available
+            if self.logger:
+                self.logger.record("curriculum/win_rate", wr)
+                self.logger.record("curriculum/stage_idx", self.curriculum.current_stage_idx)
+                self.logger.record("curriculum/episode_count", count)
         
         # Check for stage advancement
-        if self.curriculum.check_advancement(win_rate):
+        if self.curriculum.check_advancement():
             new_stage = self.curriculum.current_stage
             self._update_opponent_type(new_stage.opponent)
-        
-        return True
     
     def _update_opponent_type(self, opponent_type: str):
         """Update all environments to use the new opponent type."""
@@ -787,11 +775,10 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
             save_path=config.checkpoint_dir,
             name_prefix="rl_bot",
         ),
-        CurriculumEvalCallback(
+        CurriculumCallback(
             env,
             curriculum=curriculum,
             n_envs=config.n_envs,
-            eval_freq=100_000,  # Evaluate every 100k steps
             verbose=1,
         ),
         EpisodeMetricsCallback(verbose=0),  # Log actions_per_turn_mean
