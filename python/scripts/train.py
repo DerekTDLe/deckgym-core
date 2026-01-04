@@ -496,23 +496,32 @@ class FrozenOpponentCallback(BaseCallback):
     
     def _update_frozen_opponent(self):
         """Save current model and load as frozen opponent on CPU."""
+        import gc
+        
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "frozen_model")
             self.model.save(path)
             # Load on CPU to avoid GPU contention with policy training
-            frozen_model = MaskablePPO.load(path, device="cpu")
+            new_frozen = MaskablePPO.load(path, device="cpu")
+        
+        # Clean up old frozen model to prevent memory leak
+        if hasattr(self, '_frozen_model') and self._frozen_model is not None:
+            del self._frozen_model
+            gc.collect()
+        
+        self._frozen_model = new_frozen
         
         if self.n_envs == 1:
             # Single env: unwrap Monitor -> ActionMasker to get SelfPlayEnv
             inner_env = self.env.env.env if hasattr(self.env.env, 'env') else self.env.env
-            inner_env.set_opponent_model(frozen_model)
+            inner_env.set_opponent_model(self._frozen_model)
         elif isinstance(self.env, BatchedDeckGymEnv):
             # BatchedDeckGymEnv doesn't support self-play yet
             print("[WARNING] Self-play not supported with BatchedDeckGymEnv, skipping opponent update")
         else:
             # DummyVecEnv: update all environments (Monitor -> ActionMasker -> SelfPlayEnv)
             for i in range(self.n_envs):
-                self.env.envs[i].env.env.set_opponent_model(frozen_model)
+                self.env.envs[i].env.env.set_opponent_model(self._frozen_model)
 
 
 class CurriculumEvalCallback(BaseCallback):
