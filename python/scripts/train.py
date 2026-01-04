@@ -231,7 +231,7 @@ class SelfPlayEnv(gym.Env):
         
         Returns:
             obs: Game state from agent's perspective
-            reward: +1 win, -1 loss, 0 otherwise
+            reward: +1 win, -1 loss, 0 otherwise, plus bonus or penalty based on game score
             terminated: True if game ended normally
             truncated: True if game ended due to limits
             info: Additional information
@@ -860,41 +860,44 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     
+    # Create default config for default values
+    _defaults = TrainingConfig()
+    
     # Paths
-    parser.add_argument("--simple", default="simple_deck.json", help="Simple deck definitions")
-    parser.add_argument("--meta", default="meta_deck.json", help="Meta deck definitions")
-    parser.add_argument("--save", default="models/rl_bot", help="Model save path")
+    parser.add_argument("--simple", default=_defaults.simple_deck_path, help="Simple deck definitions")
+    parser.add_argument("--meta", default=_defaults.meta_deck_path, help="Meta deck definitions")
+    parser.add_argument("--save", default=_defaults.save_path, help="Model save path")
     
     # Training
-    parser.add_argument("--steps", type=int, default=30_000_000, help="Total training steps")
-    parser.add_argument("--checkpoint-freq", type=int, default=100_000, help="Checkpoint frequency")
+    parser.add_argument("--steps", type=int, default=_defaults.total_timesteps, help="Total training steps")
+    parser.add_argument("--checkpoint-freq", type=int, default=_defaults.checkpoint_freq, help="Checkpoint frequency")
     
     # PPO hyperparameters
-    parser.add_argument("--lr", type=float, default=5e-5, help="Base learning rate (cyclical)")
-    parser.add_argument("--min-lr", type=float, default=1e-5, help="Minimum learning rate floor")
-    parser.add_argument("--target-kl", type=float, default=0.015, help="Target KL for early stopping")
-    parser.add_argument("--batch-size", type=int, default=512, help="Batch size")
-    parser.add_argument("--n-epochs", type=int, default=8, help="PPO epochs per update")
-    parser.add_argument("--ent-coef", type=float, default=0.02, help="Entropy coefficient")
+    parser.add_argument("--lr", type=float, default=_defaults.base_learning_rate, help="Base learning rate (linear decay)")
+    parser.add_argument("--min-lr", type=float, default=_defaults.min_learning_rate, help="Minimum learning rate floor")
+    parser.add_argument("--target-kl", type=float, default=_defaults.target_kl, help="Target KL for early stopping")
+    parser.add_argument("--batch-size", type=int, default=_defaults.batch_size, help="Batch size")
+    parser.add_argument("--n-epochs", type=int, default=_defaults.n_epochs, help="PPO epochs per update")
+    parser.add_argument("--ent-coef", type=float, default=_defaults.ent_coef, help="Entropy coefficient")
     
     # Self-play
-    parser.add_argument("--opponent-update-freq", type=int, default=75_000, help="Frozen opponent update frequency")
+    parser.add_argument("--opponent-update-freq", type=int, default=_defaults.frozen_opponent_update_freq, help="Frozen opponent update frequency")
     
     # Parallelization
-    parser.add_argument("--n-envs", type=int, default=8, help="Number of parallel environments")
-    parser.add_argument("--no-batched-env", action="store_true", help="Disable Rust-side batching (use DummyVecEnv instead)")
+    parser.add_argument("--n-envs", type=int, default=_defaults.n_envs, help="Number of parallel environments")
+    parser.add_argument("--no-batched-env", action="store_true", help="Disable Rust-side batching (use DummyVecEnv instead) [Not recommanded]")
     
     # Resume
-    parser.add_argument("--resume", default=None, help="Path to checkpoint to resume training from")
+    parser.add_argument("--resume", default=_defaults.resume_path, help="Path to checkpoint to resume training from")
     
     # Attention policy (enabled by default now)
     parser.add_argument("--no-attention", action="store_true", help="Disable attention, use MLP instead")
-    parser.add_argument("--attention-dim", type=int, default=256, help="Attention embedding dimension")
-    parser.add_argument("--attention-heads", type=int, default=8, help="Number of attention heads")
-    parser.add_argument("--attention-layers", type=int, default=3, help="Number of transformer layers")
+    parser.add_argument("--attention-dim", type=int, default=_defaults.attention_embed_dim, help="Attention embedding dimension")
+    parser.add_argument("--attention-heads", type=int, default=_defaults.attention_num_heads, help="Number of attention heads")
+    parser.add_argument("--attention-layers", type=int, default=_defaults.attention_num_layers, help="Number of transformer layers")
     
     # Device
-    parser.add_argument("--device", default="auto", choices=["cpu", "cuda", "auto"])
+    parser.add_argument("--device", default=_defaults.device, choices=["cpu", "cuda", "auto"])
     
     args = parser.parse_args()
     
