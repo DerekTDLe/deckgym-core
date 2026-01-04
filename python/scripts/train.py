@@ -93,7 +93,7 @@ class TrainingConfig:
     max_total_actions: int = 500     # Prevents runaway episodes
     
     # Parallel environments
-    n_envs: int = 8                  # 8 parallel environments for diversity
+    n_envs: int = 32                  # 32 parallel environments for faster training
     use_batched_env: bool = True     # Use Rust-side batched env (faster, ~7000 steps/sec)
     
     # Device
