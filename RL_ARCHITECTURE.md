@@ -167,7 +167,7 @@ Training uses a **progressive curriculum** that starts with easier opponents:
 | DummyVecEnv + e2 | ~720 it/s | Legacy (use --no-batched-env) |
 | DummyVecEnv + self-play | ~490 it/s | Final mastery stage |
 
-Note : with the current and legacy implementations, the number of envs has greatly diminishing returns in terms of performance. 4x envs only provides ~1.3x speedup.
+*Note: Scaling the number of environments yields diminishing returns; 4× envs provides only ~1.3× speedup.*
 
 ## Training Command
 
