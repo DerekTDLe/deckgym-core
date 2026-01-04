@@ -146,15 +146,19 @@ Training uses a **progressive curriculum** that starts with easier opponents:
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `attention_embed_dim` | 128 | Embedding dimension after card projection |
-| `attention_num_heads` | 4 | Multi-head attention heads |
-| `attention_num_layers` | 2 | Transformer encoder layers |
-| `learning_rate` | 5e-5 | Lower LR for larger model |
+| `attention_embed_dim` | 256 | Embedding dimension after card projection |
+| `attention_num_heads` | 8 | Multi-head attention heads |
+| `attention_num_layers` | 3 | Transformer encoder layers |
+| `learning_rate` | 5e-5 → 1e-5 | Linear decay from base to min LR |
 | `ent_coef` | 0.02 | Higher entropy for exploration |
-| `batch_size` | 512 | Minibatch size |
+| `batch_size` | 2048 | Larger batch for better GPU utilization |
 | `n_steps` | 8192 | Experience per update |
+| `n_epochs` | 8 | PPO epochs per update |
+| `gamma` | 0.98 | Reduced for shorter episodes |
+| `target_kl` | 0.015 | Early stop if KL divergence too high |
+| `frozen_opponent_update_freq` | 75,000 | Steps between opponent updates |
 
-## Training Speed (RTX 3050, 8 envs)
+## Training Speed (RTX 3050, 8-32 envs)
 
 | Configuration | Speed | Notes |
 |---------------|-------|-------|
@@ -162,6 +166,8 @@ Training uses a **progressive curriculum** that starts with easier opponents:
 | BatchedDeckGymEnv (no bot) | ~7000 it/s | Pure env stepping |
 | DummyVecEnv + e2 | ~720 it/s | Legacy (use --no-batched-env) |
 | DummyVecEnv + self-play | ~490 it/s | Final mastery stage |
+
+Note : with the current and legacy implementations, the number of envs has greatly diminishing returns in terms of performance. 4x envs only provides ~1.3x speedup.
 
 ## Training Command
 
