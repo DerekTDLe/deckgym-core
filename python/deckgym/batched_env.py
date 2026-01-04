@@ -79,6 +79,13 @@ class BatchedDeckGymEnv(VecEnv):
         
         # Async step state
         self._pending_actions: Optional[np.ndarray] = None
+        
+        # Episode tracking for SB3 logging (ep_rew_mean, ep_len_mean)
+        self._episode_rewards = np.zeros(n_envs, dtype=np.float32)
+        self._episode_lengths = np.zeros(n_envs, dtype=np.int32)
+        self._episode_actions_since_end_turn = np.zeros(n_envs, dtype=np.int32)
+        self._episode_turn_count = np.zeros(n_envs, dtype=np.int32)
+        self._episode_total_actions_per_turn = np.zeros(n_envs, dtype=np.float32)
     
     def _sample_deck_pair(self) -> Tuple[str, str]:
         """Sample a deck pair from the loader.
@@ -105,6 +112,13 @@ class BatchedDeckGymEnv(VecEnv):
         # Update cached action masks
         self._update_action_masks()
         
+        # Reset episode tracking
+        self._episode_rewards[:] = 0
+        self._episode_lengths[:] = 0
+        self._episode_actions_since_end_turn[:] = 0
+        self._episode_turn_count[:] = 0
+        self._episode_total_actions_per_turn[:] = 0
+        
         return obs
     
     def step_async(self, actions: np.ndarray) -> None:
@@ -119,29 +133,60 @@ class BatchedDeckGymEnv(VecEnv):
         actions = self._pending_actions.tolist()
         self._pending_actions = None
         
+        # Track actions per turn (action 0 = EndTurn)
+        for i, action in enumerate(actions):
+            self._episode_actions_since_end_turn[i] += 1
+            if action == 0:  # EndTurn action
+                self._episode_turn_count[i] += 1
+                self._episode_total_actions_per_turn[i] += self._episode_actions_since_end_turn[i]
+                self._episode_actions_since_end_turn[i] = 0
+        
         # Single FFI call steps all environments!
         obs_flat, rewards, dones, masks_flat, terminal_obs = self.vec_game.step_batch(actions)
         
         # Reshape outputs
         obs = np.array(obs_flat, dtype=np.float32).reshape(self.n_envs, -1)
-        rewards = np.array(rewards, dtype=np.float32)
+        rewards_arr = np.array(rewards, dtype=np.float32)
         dones = np.array(dones, dtype=bool)
+        
+        # Update episode tracking
+        self._episode_rewards += rewards_arr
+        self._episode_lengths += 1
         
         # Cache action masks
         self._action_masks = np.array(masks_flat, dtype=bool).reshape(self.n_envs, -1)
         
-        # Build infos with terminal observations for SB3
+        # Build infos with terminal observations and episode stats for SB3
         infos: List[dict] = [{} for _ in range(self.n_envs)]
         for env_idx, term_obs in terminal_obs:
             infos[env_idx]["terminal_observation"] = np.array(term_obs, dtype=np.float32)
         
-        # Sample new deck pairs for environments that finished
+        # Add episode info for finished episodes (SB3 looks for this)
         for i, done in enumerate(dones):
             if done:
+                # Calculate actions per turn
+                avg_actions_per_turn = (
+                    self._episode_total_actions_per_turn[i] / max(1, self._episode_turn_count[i])
+                )
+                
+                infos[i]["episode"] = {
+                    "r": self._episode_rewards[i],
+                    "l": self._episode_lengths[i],
+                    "actions_per_turn": avg_actions_per_turn,
+                }
+                
+                # Reset episode tracking for this env
+                self._episode_rewards[i] = 0
+                self._episode_lengths[i] = 0
+                self._episode_actions_since_end_turn[i] = 0
+                self._episode_turn_count[i] = 0
+                self._episode_total_actions_per_turn[i] = 0
+                
+                # Sample new decks
                 deck_a, deck_b = self._sample_deck_pair()
                 self.vec_game.reset_single(i, deck_a, deck_b)
         
-        return obs, rewards, dones, infos
+        return obs, rewards_arr, dones, infos
     
     def close(self) -> None:
         """Clean up resources."""
