@@ -13,10 +13,55 @@ Stages:
 """
 
 import random
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional, Callable, List
 
 from deckgym.deck_loader import MetaDeckLoader
+
+
+class WinRateTracker:
+    """
+    Sliding window tracker for continuous win rate monitoring.
+    
+    Uses a fixed-size deque to maintain the last N episode results,
+    providing a smoothed win rate estimate without separate evaluation runs.
+    """
+    
+    def __init__(self, window_size: int = 200):
+        """
+        Initialize tracker with given window size.
+        
+        Args:
+            window_size: Number of episodes to track (default 200 for ~±7% CI at 95%)
+        """
+        self.window_size = window_size
+        self.results = deque(maxlen=window_size)
+    
+    def record(self, won: bool) -> None:
+        """Record an episode result (True = win, False = loss)."""
+        self.results.append(1 if won else 0)
+    
+    @property
+    def win_rate(self) -> float:
+        """Get current win rate (0.5 if no data yet)."""
+        if not self.results:
+            return 0.5
+        return sum(self.results) / len(self.results)
+    
+    @property
+    def count(self) -> int:
+        """Number of episodes recorded in current window."""
+        return len(self.results)
+    
+    @property
+    def is_reliable(self) -> bool:
+        """True if we have enough data for reliable estimates (>= 50 episodes)."""
+        return len(self.results) >= 50
+    
+    def reset(self) -> None:
+        """Clear all recorded results (use on stage transition)."""
+        self.results.clear()
 
 
 @dataclass
@@ -46,16 +91,18 @@ class CurriculumManager:
     """
     Manages training curriculum with automatic stage transitions.
     
+    Uses continuous win rate tracking from training episodes instead of
+    separate evaluation runs. Stage advancement is checked at each rollout end.
+    
     Usage:
         curriculum = CurriculumManager(simple_loader, meta_loader)
         
-        # In training loop:
-        deck_a, deck_b = curriculum.sample_pair()
-        opponent_code = curriculum.current_stage.opponent
+        # After each episode:
+        curriculum.record_episode(won=(reward > 0))
         
-        # After evaluation:
-        if curriculum.check_advancement(win_rate):
-            print(f"Advanced to {curriculum.current_stage.name}!")
+        # At rollout end:
+        if curriculum.check_advancement():
+            update_opponent_type(curriculum.current_stage.opponent)
     """
     
     def __init__(
@@ -80,8 +127,8 @@ class CurriculumManager:
         self.on_stage_change = on_stage_change
         
         self._current_stage_idx = 0
-        self._win_history: List[float] = []
-        self._stage_stats = {s.name: {"evals": 0, "best_wr": 0.0} for s in self.stages}
+        self._tracker = WinRateTracker(window_size=200)
+        self._stage_stats = {s.name: {"checks": 0, "best_wr": 0.0} for s in self.stages}
     
     @property
     def current_stage(self) -> CurriculumStage:
@@ -118,27 +165,53 @@ class CurriculumManager:
         loader = self.get_deck_loader()
         return loader.sample_deck(), loader.sample_deck()
     
-    def check_advancement(self, win_rate: float) -> bool:
+    def record_episode(self, won: bool) -> None:
         """
-        Check if agent should advance to next stage based on win rate.
+        Record a training episode result for continuous win rate tracking.
+        
+        Call this after each episode ends during training.
         
         Args:
-            win_rate: Current win rate against stage opponent (0.0-1.0)
-            
+            won: True if agent won, False if lost
+        """
+        self._tracker.record(won)
+    
+    @property
+    def win_rate(self) -> float:
+        """Current tracked win rate."""
+        return self._tracker.win_rate
+    
+    @property
+    def episode_count(self) -> int:
+        """Number of episodes tracked in current window."""
+        return self._tracker.count
+    
+    def check_advancement(self) -> bool:
+        """
+        Check if agent should advance to next stage based on tracked win rate.
+        
+        Uses the continuous win rate from training episodes.
+        Requires at least 50 episodes for reliable estimates.
+        
         Returns:
             True if advanced to next stage, False otherwise
         """
         stage = self.current_stage
         
+        # Need enough data for reliable estimate
+        if not self._tracker.is_reliable:
+            return False
+        
+        win_rate = self._tracker.win_rate
+        
         # Track stats
-        self._win_history.append(win_rate)
         stats = self._stage_stats[stage.name]
-        stats["evals"] += 1
+        stats["checks"] += 1
         stats["best_wr"] = max(stats["best_wr"], win_rate)
         
-        # Check threshold
+        # Check threshold (None = final stage)
         if stage.win_rate_threshold is None:
-            return False  # Final stage, no advancement
+            return False
         
         if win_rate >= stage.win_rate_threshold:
             return self._advance_stage()
@@ -153,6 +226,9 @@ class CurriculumManager:
         old_stage = self.current_stage
         self._current_stage_idx += 1
         new_stage = self.current_stage
+        
+        # Reset tracker for fresh statistics against new opponent
+        self._tracker.reset()
         
         print(f"\n{'='*60}")
         print(f"[CURRICULUM] Stage transition: {old_stage.name} → {new_stage.name}")
