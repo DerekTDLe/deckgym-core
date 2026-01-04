@@ -57,7 +57,7 @@ class TrainingConfig:
     
     # Training duration
     total_timesteps: int = 30_000_000
-    checkpoint_freq: int = 100_000
+    checkpoint_freq: int = 100_000        # Per env (actual = this × n_envs)
     
     # PPO hyperparameters
     base_learning_rate: float = 5e-5      # Lower LR for attention model (was 1e-4)
