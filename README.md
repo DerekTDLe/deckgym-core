@@ -223,8 +223,11 @@ Training uses a **progressive curriculum** that starts with easier opponents:
 ### Training Commands
 
 ```bash
-# Train with curriculum (default - starts with e2)
+# Train with curriculum (default - uses Rust-side batching)
 python python/scripts/train.py --steps 30000000
+
+# Train with legacy DummyVecEnv (required for self-play stage)
+python python/scripts/train.py --no-batched-env --steps 30000000
 
 # Evaluate model
 python python/scripts/evaluate.py eval checkpoints/rl_bot_xxx_steps.zip --games 300

@@ -125,7 +125,8 @@ Training uses a **progressive curriculum** that starts with easier opponents:
 | mastery | self-play | meta | - |
 
 **Key benefits:**
-- **Faster training**: e2 runs at ~720 it/s vs ~490 it/s for self-play
+- **Faster training**: BatchedDeckGymEnv runs at ~1078 it/s vs ~720 with DummyVecEnv
+- **Score-based rewards**: +1.5 for 3-0 victory, -1.5 for 0-3 loss (encourages dominant play)
 - **Stable learning**: Gradual difficulty increase prevents catastrophic forgetting
 - **Automatic progression**: Transitions based on win rate, not fixed steps
 
@@ -134,6 +135,8 @@ Training uses a **progressive curriculum** that starts with easier opponents:
 | File | Purpose |
 |------|---------|
 | `src/rl/observation.rs` | Rust observation encoding (2857 dims) |
+| `src/vec_game.rs` | Rust-side batched VecEnv for fast training |
+| `python/deckgym/batched_env.py` | SB3-compatible BatchedDeckGymEnv wrapper |
 | `python/deckgym/attention_policy.py` | CardAttentionExtractor & policy |
 | `python/deckgym/curriculum.py` | CurriculumManager for stage transitions |
 | `python/scripts/train.py` | Training with curriculum & attention |
@@ -155,9 +158,10 @@ Training uses a **progressive curriculum** that starts with easier opponents:
 
 | Configuration | Speed | Notes |
 |---------------|-------|-------|
-| Attention + e2 opponent | ~720 it/s | Default curriculum |
-| Attention + self-play | ~490 it/s | Final mastery stage |
-| Old MLP (4745 dims) | ~350 it/s | Deprecated |
+| BatchedDeckGymEnv + e2 | ~1078 it/s | **Default** (Rust-side batching) |
+| BatchedDeckGymEnv (no bot) | ~7000 it/s | Pure env stepping |
+| DummyVecEnv + e2 | ~720 it/s | Legacy (use --no-batched-env) |
+| DummyVecEnv + self-play | ~490 it/s | Final mastery stage |
 
 ## Training Command
 

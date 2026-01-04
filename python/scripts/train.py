@@ -378,6 +378,36 @@ class SelfPlayEnv(gym.Env):
 # Deck sources are now controlled by CurriculumManager stage transitions.
 
 
+class EpisodeMetricsCallback(BaseCallback):
+    """
+    Logs custom episode metrics to TensorBoard.
+    
+    Tracks metrics from BatchedDeckGymEnv's episode info dict:
+    - actions_per_turn: Average actions taken between EndTurn calls
+    """
+    
+    def __init__(self, verbose: int = 0):
+        super().__init__(verbose)
+        self._actions_per_turn_buffer = []
+    
+    def _on_step(self) -> bool:
+        # Check for finished episodes in infos
+        for info in self.locals.get("infos", []):
+            if "episode" in info:
+                episode_info = info["episode"]
+                if "actions_per_turn" in episode_info:
+                    self._actions_per_turn_buffer.append(episode_info["actions_per_turn"])
+        
+        return True
+    
+    def _on_rollout_end(self) -> None:
+        """Log buffered metrics at end of rollout."""
+        if self._actions_per_turn_buffer and self.logger:
+            mean_apt = np.mean(self._actions_per_turn_buffer)
+            self.logger.record("rollout/actions_per_turn_mean", mean_apt)
+            self._actions_per_turn_buffer.clear()
+
+
 class FrozenOpponentCallback(BaseCallback):
     """
     Periodically updates the frozen opponent with current agent weights.
@@ -728,6 +758,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
             eval_freq=100_000,  # Evaluate every 100k steps
             verbose=1,
         ),
+        EpisodeMetricsCallback(verbose=0),  # Log actions_per_turn_mean
     ]
     
     # FrozenOpponentCallback only needed for self-play stage
@@ -814,7 +845,8 @@ if __name__ == "__main__":
     parser.add_argument("--opponent-update-freq", type=int, default=75_000, help="Frozen opponent update frequency")
     
     # Parallelization
-    parser.add_argument("--n-envs", type=int, default=8, help="Number of parallel environments (DummyVecEnv)")
+    parser.add_argument("--n-envs", type=int, default=8, help="Number of parallel environments")
+    parser.add_argument("--no-batched-env", action="store_true", help="Disable Rust-side batching (use DummyVecEnv instead)")
     
     # Resume
     parser.add_argument("--resume", default=None, help="Path to checkpoint to resume training from")
@@ -846,6 +878,7 @@ if __name__ == "__main__":
         ent_coef=args.ent_coef,
         frozen_opponent_update_freq=args.opponent_update_freq,
         n_envs=args.n_envs,
+        use_batched_env=not args.no_batched_env,
         use_attention=not args.no_attention,
         attention_embed_dim=args.attention_dim,
         attention_num_heads=args.attention_heads,
