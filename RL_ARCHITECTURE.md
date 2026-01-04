@@ -134,7 +134,7 @@ Training uses a **progressive curriculum** that starts with easier opponents:
 
 | File | Purpose |
 |------|---------|
-| `src/rl/observation.rs` | Rust observation encoding (2857 dims) |
+| `src/rl/observation.rs` | Rust observation encoding (2849 dims) |
 | `src/vec_game.rs` | Rust-side batched VecEnv for fast training |
 | `python/deckgym/batched_env.py` | SB3-compatible BatchedDeckGymEnv wrapper |
 | `python/deckgym/attention_policy.py` | CardAttentionExtractor & policy |

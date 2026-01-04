@@ -311,14 +311,22 @@ class SelfPlayEnv(gym.Env):
                     obs = np.array(self._env.game.get_obs(), dtype=np.float32)
                     done = self._env.game.is_game_over()
                     if done:
-                        # Determine reward from winner
+                        # Determine score-based reward
                         state = self._env.game.get_state()
-                        if state.winner and state.winner.winner == 0:
-                            final_reward = 1.0  # Agent won
-                        elif state.winner and state.winner.winner == 1:
-                            final_reward = -1.0  # Opponent won
+                        if state.winner and not state.winner.is_tie:
+                            winner = state.winner.winner
+                            my_points = float(state.points[0])
+                            opp_points = float(state.points[1])
+                            point_diff = my_points - opp_points
+                            
+                            if winner == 0:
+                                # Agent won: 1.0 base + bonus
+                                final_reward = 1.0 + (point_diff / 6.0)
+                            else:
+                                # Opponent won: -1.0 base + penalty
+                                final_reward = -1.0 + (point_diff / 6.0)
                         else:
-                            final_reward = 0.0  # Draw
+                            final_reward = 0.0  # Tie
                 
                 if done:
                     break
@@ -680,6 +688,16 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         # Legacy: Multiple environments with DummyVecEnv
         env = DummyVecEnv([make_env(deck_loader, config, initial_opponent) for _ in range(config.n_envs)])
         single_env = None  # Will be set after model init
+    
+    # Verify observation space
+    expected_obs_size = 2849
+    if env.observation_space.shape[0] != expected_obs_size:
+        raise ValueError(
+            f"Observation size mismatch! Expected {expected_obs_size}, "
+            f"but environment returned {env.observation_space.shape[0]}. "
+            "Check observation.rs and attention_policy.py constants."
+        )
+    print(f"      Observation space verified: {env.observation_space.shape}")
     
     # Setup model
     print("[3/4] Initializing model...")

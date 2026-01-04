@@ -269,17 +269,19 @@ class BatchedDeckGymEnv(VecEnv):
         """Update opponent type.
         
         Note: This requires creating a new VecGame instance.
-        Call reset() after changing opponent type.
+        Automatically calls reset() after changing opponent type.
         """
         if opponent_type != self.opponent_type:
             self.opponent_type = opponent_type
-            # Recreate with new opponent type
+            # Recreate VecGame instance with new opponent type
             import deckgym
             deck_pairs = [self._sample_deck_pair() for _ in range(self.n_envs)]
             self.vec_game = deckgym.VecGame(
                 deck_pairs,
-                opponent_type=opponent_type,
+                opponent_type=opponent_type
             )
+            # Automatically reset since the internal state in Rust is now fresh
+            self.reset()
     
     def get_turn_counts(self) -> List[int]:
         """Get current turn counts for all environments (for debugging)."""

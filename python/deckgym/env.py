@@ -15,33 +15,16 @@ class DeckGymEnv(gym.Env):
     Gymnasium environment to play Pokémon TCG Pocket.
 
     Observation space:
-        Box(755,) - Flattened game state tensor including:
-        - Global info (17): turn, points, deck/hand/discard sizes, energy types
-        - Board state (704): 8 slots × 88 features (HP, energy, attacks, status, abilities)
-        - Hand features (34): Pokemon counts, trainer categories, can-evolve flags
+        Box(2849,) - Flattened game state tensor including:
+        - Global info (41): turn, points, deck/hand/discard sizes, energy types
+        - Card features (24 cards × 117 features = 2808): HP, energy, attacks, status, abilities, position
 
     Action space:
         Discrete(175) - Canonical action indices covering all SimpleAction variants:
-        - 0: EndTurn
-        - 1-2: Attack (index 0, 1)
-        - 3-5: Retreat to bench position (1, 2, 3)
-        - 6-9: UseAbility (position 0-3)
-        - 10-13: Attach Energy (Turn) (Slot 0-3)
-        - 14-16: Activate bench Pokémon (1-3)
-        - 17-20: DiscardFossil (Slot 0-3)
-        - 21-24: Heal (Slot 0-3)
-        - 25-28: AttachFromDiscard (Slot 0-3)
-        - 30-129: Hand Actions (Play/Place/Evolve)
-                 Logic: 30 + (HandIdx * 5) + InteractionType
-                 InteractionType: 0=NoTarget, 1=Active, 2=Bench1, 3=Bench2, 4=Bench3
-        - 130-133: ApplyDamage Targets 0-3
-        - 140-159: SelectHandCard Resolution (Hand 0-19)
-        - 160: DrawCard
-        - 161: Noop
-        - 162-175: Special/Misc (EeveeBag, MoveEnergy, etc.)
+        ... (rest of action space doc)
 
     Reward:
-        +1.0 for winning, -1.0 for losing, 0.0 otherwise.
+        Score-based reward: 1.0 + (point_diff / 6.0) for wins, -1.0 + (point_diff / 6.0) for losses.
     """
 
     def __init__(self, deck_a_str: str, deck_b_str: str, seed: int = None):
