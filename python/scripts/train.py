@@ -70,7 +70,7 @@ class TrainingConfig:
     ent_coef: float = 0.02                # Higher entropy for larger model (was 0.01)
     vf_coef: float = 0.5                  # Value function coefficient (default)
     clip_range: float = 0.2               # PPO clipping range
-    target_kl: float = 0.015              # Stop epoch early if KL > target (stabilizes training)
+    target_kl: float = 0.025              # Stop epoch early if KL > target (higher for e3 phase)
     
     # Network architecture
     policy_layers: tuple = (512, 512, 256, 128)   # Deeper policy network (MLP only)

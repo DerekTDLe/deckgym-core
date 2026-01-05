@@ -7,6 +7,8 @@ Features:
 - Evaluate a new agent against baselines and compute its Elo
 - Store Elo in model metadata for RL checkpoints
 """
+import warnings
+warnings.filterwarnings("ignore", message=".*nested tensors.*")
 
 import argparse
 import itertools
