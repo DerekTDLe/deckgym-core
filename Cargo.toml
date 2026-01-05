@@ -27,12 +27,15 @@ strum = "0.27"
 strum_macros = "0.27"
 ratatui = { version = "0.28", optional = true }
 crossterm = { version = "0.28", optional = true }
+ort = { version = "2.0.0-rc.10", optional = true }  # ONNX Runtime for neural network inference
+ndarray = { version = "0.16", optional = true }  # Tensor operations for ONNX
 
 [features]
 default = []
 python = ["pyo3"]
 tui = ["ratatui", "crossterm"]
 csv-export = ["csv"]
+onnx = ["ort", "ndarray"]  # Enable ONNX model support for self-play
 
 [lib]
 name = "deckgym"
