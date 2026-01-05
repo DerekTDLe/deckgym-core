@@ -24,10 +24,17 @@ from typing import Tuple, Dict, Any, Optional, List
 # Import constants from the Rust side (via deckgym)
 try:
     import deckgym
-    GLOBAL_FEATURES = deckgym.Game.global_features_size()
-    FEATURES_PER_CARD = deckgym.Game.features_per_card()
-    MAX_CARDS = deckgym.Game.max_cards_in_game()
-except ImportError:
+    # Use PyGame class which is exposed by the Rust bindings
+    game_cls = getattr(deckgym, "PyGame", None) or getattr(deckgym, "Game", None)
+    if game_cls is None:
+        raise ImportError("Could not find Game or PyGame class in deckgym")
+        
+    GLOBAL_FEATURES = game_cls.global_features_size()
+    FEATURES_PER_CARD = game_cls.features_per_card()
+    # Calculate MAX_CARDS from total observation size
+    # obs_size = global + max_cards * features
+    MAX_CARDS = (game_cls.observation_size() - GLOBAL_FEATURES) // FEATURES_PER_CARD
+except (ImportError, AttributeError):
     # Fallback for development - must match observation.rs constants
     # GLOBAL_FEATURES = 1 (turn) + 2 (points) + 2 (deck_size) + 2 (hand_size) + 2 (discard_size) + 32 (2×2×8 deck_energy with dual type)
     GLOBAL_FEATURES = 41
@@ -120,7 +127,8 @@ class AttentionPooling(nn.Module):
         self.scale = self.head_dim ** -0.5
         
         # Learned query vector (like a [CLS] token but as a parameter)
-        self.query = nn.Parameter(torch.randn(1, 1, embed_dim))
+        self.query = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        nn.init.normal_(self.query, std=0.02)
         
         # Projections for cross-attention
         self.q_proj = nn.Linear(embed_dim, embed_dim)
