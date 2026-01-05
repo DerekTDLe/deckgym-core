@@ -3,7 +3,7 @@
 # Goal: Break through 47% plateau, reach 55%+ to progress curriculum
 
 model:
-  attention_embed_dim: 512
+  attention_embed_dim: 384
   attention_num_heads: 8
   attention_num_layers: 3
   use_attention: true
