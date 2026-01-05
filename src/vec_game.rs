@@ -97,7 +97,8 @@ impl EnvInstance {
     }
     
     fn get_observation(&self) -> Vec<f32> {
-        get_observation_tensor(&self.state, self.state.current_player)
+        // Agent is always player 0 - always return observation from agent's perspective
+        get_observation_tensor(&self.state, 0)
     }
     
     #[allow(dead_code)]
