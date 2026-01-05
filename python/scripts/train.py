@@ -77,8 +77,8 @@ class TrainingConfig:
     value_layers: tuple = (512, 512, 256)         # Match policy depth for better value estimation (MLP only)
     use_attention: bool = True                    # Default to attention-based policy
     attention_embed_dim: int = 256                # Larger embedding for better card representations
-    attention_num_heads: int = 8                  # More heads for diverse attention patterns
-    attention_num_layers: int = 3                 # Deeper transformer for complex reasoning
+    attention_num_heads: int = 4                  # More heads for diverse attention patterns
+    attention_num_layers: int = 2                 # Deeper transformer for complex reasoning
     use_silu: bool = True                         # Use SiLU activation (better than ReLU)
     
     # Self-play
