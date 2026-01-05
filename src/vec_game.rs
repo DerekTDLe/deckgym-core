@@ -197,6 +197,7 @@ pub struct VecGame {
     #[cfg(feature = "onnx")]
     onnx_opponent: Option<BatchedOnnxInference>,
     /// RNG for ONNX opponent sampling
+    #[cfg(feature = "onnx")]
     onnx_rng: StdRng,
 }
 
@@ -227,6 +228,7 @@ impl VecGame {
             seed_counter: base_seed + n_envs as u64,
             #[cfg(feature = "onnx")]
             onnx_opponent: None,
+            #[cfg(feature = "onnx")]
             onnx_rng: StdRng::seed_from_u64(base_seed.wrapping_add(999)),
         }
     }
@@ -352,7 +354,7 @@ impl VecGame {
         let mut terminal_observations = Vec::new();
         
         // First pass: step agent actions
-        for (i, (env, &action)) in self.envs.iter_mut().zip(actions.iter()).enumerate() {
+        for (_i, (env, &action)) in self.envs.iter_mut().zip(actions.iter()).enumerate() {
             // Step the agent's action
             let (mut reward, mut done) = env.step(action);
             
