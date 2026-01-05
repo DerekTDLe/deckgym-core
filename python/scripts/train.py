@@ -510,8 +510,24 @@ class FrozenOpponentCallback(BaseCallback):
             inner_env = self.env.env.env if hasattr(self.env.env, 'env') else self.env.env
             inner_env.set_opponent_model(self._frozen_model)
         elif isinstance(self.env, BatchedDeckGymEnv):
-            # BatchedDeckGymEnv doesn't support self-play yet
-            print("[WARNING] Self-play not supported with BatchedDeckGymEnv, skipping opponent update")
+            # BatchedDeckGymEnv: export to ONNX and set as opponent
+            try:
+                from deckgym.onnx_export import export_policy_to_onnx
+                
+                # Export current policy to ONNX file
+                onnx_path = os.path.join(tempfile.gettempdir(), "frozen_opponent.onnx")
+                export_policy_to_onnx(self.model, onnx_path, validate=False)
+                
+                # Set the ONNX model as opponent in VecGame
+                self.env.vec_game.set_onnx_opponent(onnx_path, deterministic=False)
+                
+                if self.verbose > 0:
+                    print(f"[ONNX] Set frozen opponent from {onnx_path}")
+            except AttributeError as e:
+                # set_onnx_opponent may not exist if compiled without onnx feature
+                print(f"[WARNING] ONNX opponent not available (compile with 'onnx' feature): {e}")
+            except Exception as e:
+                print(f"[WARNING] Failed to set ONNX opponent: {e}")
         else:
             # DummyVecEnv: update all environments (Monitor -> ActionMasker -> SelfPlayEnv)
             for i in range(self.n_envs):
