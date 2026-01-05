@@ -12,9 +12,8 @@ Stages:
     4. mastery:  self-play → emergent strategies and refinement
 """
 
-import random
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, Callable, List
 
 from deckgym.deck_loader import MetaDeckLoader
@@ -71,7 +70,6 @@ class CurriculumStage:
     opponent: str           # "e2", "e3", "self"
     deck_source: str        # "simple", "meta"
     win_rate_threshold: Optional[float]  # None = final stage
-    eval_games: int = 50    # Games for win rate evaluation
     
     def __repr__(self) -> str:
         threshold = f"{self.win_rate_threshold:.0%}" if self.win_rate_threshold else "∞"
@@ -80,10 +78,10 @@ class CurriculumStage:
 
 # Default curriculum stages
 DEFAULT_STAGES = [
-    CurriculumStage("warmup",   "e2", "simple", 0.55, 50),  # Lower threshold for faster transition
-    CurriculumStage("meta",     "e2", "meta",   0.55, 50),
-    CurriculumStage("advanced", "e3", "meta",   0.50, 30),
-    CurriculumStage("mastery",  "self", "meta", None, 0),
+    CurriculumStage("warmup",   "e2", "simple", 0.55),
+    CurriculumStage("meta",     "e2", "meta",   0.60),
+    CurriculumStage("advanced", "e3", "meta",   0.50),
+    CurriculumStage("mastery",  "self", "meta", None),
 ]
 
 
@@ -287,9 +285,13 @@ if __name__ == "__main__":
     print(f"Current stage: {curriculum.current_stage}")
     print(f"Sample deck: {curriculum.sample_deck()}")
     
-    # Simulate progression
-    for wr in [0.50, 0.60, 0.65, 0.70]:  # Should advance at 0.65
-        advanced = curriculum.check_advancement(wr)
-        print(f"WR={wr:.0%} → Advanced: {advanced}, Stage: {curriculum.current_stage.name}")
+    # Simulate progression with continuous tracking
+    import random
+    random.seed(42)
+    for episode in range(100):
+        curriculum.record_episode(won=(random.random() < 0.60))  # 60% win rate
+    
+    advanced = curriculum.check_advancement()
+    print(f"After 100 eps, WR={curriculum.win_rate:.1%} → Advanced: {advanced}")
     
     print("\n✓ CurriculumManager works!")
