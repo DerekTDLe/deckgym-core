@@ -651,17 +651,106 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     print("=" * 60)
     print("Pokemon TCG Pocket RL Training")
     print("=" * 60)
-    print(f"\nConfiguration:")
-    print(f"  Total timesteps:    {config.total_timesteps:,}")
-    print(f"  Learning rate:      {config.base_learning_rate} (cyclical, min={config.min_learning_rate})")
-    print(f"  Target KL:          {config.target_kl}")
-    print(f"  Batch size:         {config.batch_size}")
-    print(f"  Entropy coef:       {config.ent_coef}")
-    print(f"  Policy network:     {config.policy_layers}")
-    print(f"  N environments:     {config.n_envs}")
-    print(f"  Device:             {config.device}")
+    
+    # Build config dict for logging/saving
+    config_dict = {
+        # Paths
+        "simple_deck_path": config.simple_deck_path,
+        "meta_deck_path": config.meta_deck_path,
+        "save_path": config.save_path,
+        "checkpoint_dir": config.checkpoint_dir,
+        "tensorboard_dir": config.tensorboard_dir,
+        "resume_path": config.resume_path,
+        # Training duration
+        "total_timesteps": config.total_timesteps,
+        "checkpoint_freq": config.checkpoint_freq,
+        # PPO hyperparameters
+        "base_learning_rate": config.base_learning_rate,
+        "min_learning_rate": config.min_learning_rate,
+        "n_steps": config.n_steps,
+        "batch_size": config.batch_size,
+        "n_epochs": config.n_epochs,
+        "gamma": config.gamma,
+        "gae_lambda": config.gae_lambda,
+        "ent_coef": config.ent_coef,
+        "vf_coef": config.vf_coef,
+        "clip_range": config.clip_range,
+        "target_kl": config.target_kl,
+        # Network architecture
+        "use_attention": config.use_attention,
+        "attention_embed_dim": config.attention_embed_dim,
+        "attention_num_heads": config.attention_num_heads,
+        "attention_num_layers": config.attention_num_layers,
+        "policy_layers": list(config.policy_layers),
+        "value_layers": list(config.value_layers),
+        "use_silu": config.use_silu,
+        # Self-play
+        "frozen_opponent_update_freq": config.frozen_opponent_update_freq,
+        "adaptive_frozen_opponent": config.adaptive_frozen_opponent,
+        "target_win_rate": config.target_win_rate,
+        # Game limits
+        "max_turns": config.max_turns,
+        "max_actions_per_turn": config.max_actions_per_turn,
+        "max_total_actions": config.max_total_actions,
+        # Environment
+        "n_envs": config.n_envs,
+        "use_batched_env": config.use_batched_env,
+        "device": config.device,
+    }
+    
+    print(f"\n{'─' * 60}")
+    print("  TRAINING CONFIGURATION")
+    print(f"{'─' * 60}")
+    
+    print("\n  [▸] Paths:")
+    print(f"     Save path:         {config.save_path}")
+    print(f"     Checkpoint dir:    {config.checkpoint_dir}")
+    print(f"     TensorBoard dir:   {config.tensorboard_dir}")
     if config.resume_path:
-        print(f"  Resume from:        {config.resume_path}")
+        print(f"     Resume from:       {config.resume_path}")
+    
+    print("\n  [◷] Training Duration:")
+    print(f"     Total timesteps:   {config.total_timesteps:,}")
+    print(f"     Checkpoint freq:   {config.checkpoint_freq:,} (per env)")
+    
+    print("\n  [⬢] PPO Hyperparameters:")
+    print(f"     Learning rate:     {config.base_learning_rate} → {config.min_learning_rate} (linear decay)")
+    print(f"     Batch size:        {config.batch_size:,}")
+    print(f"     N steps:           {config.n_steps:,} (buffer = {config.n_steps * config.n_envs:,})")
+    print(f"     N epochs:          {config.n_epochs}")
+    print(f"     Gamma:             {config.gamma}")
+    print(f"     GAE lambda:        {config.gae_lambda}")
+    print(f"     Entropy coef:      {config.ent_coef}")
+    print(f"     Value coef:        {config.vf_coef}")
+    print(f"     Clip range:        {config.clip_range}")
+    print(f"     Target KL:         {config.target_kl}")
+    
+    print("\n  [△] Network Architecture:")
+    if config.use_attention:
+        print(f"     Type:              Attention-based (CardAttentionExtractor)")
+        print(f"     Embed dim:         {config.attention_embed_dim}")
+        print(f"     Num heads:         {config.attention_num_heads}")
+        print(f"     Num layers:        {config.attention_num_layers}")
+        print(f"     Policy head:       [256, 128]")
+        print(f"     Value head:        [256, 128]")
+    else:
+        print(f"     Type:              MLP")
+        print(f"     Policy layers:     {config.policy_layers}")
+        print(f"     Value layers:      {config.value_layers}")
+    print(f"     Activation:        {'SiLU' if config.use_silu else 'ReLU'}")
+    
+    print("\n  [↻] Self-Play:")
+    print(f"     Opponent update:   every {config.frozen_opponent_update_freq:,} steps")
+    print(f"     Adaptive:          {config.adaptive_frozen_opponent}")
+    print(f"     Target win rate:   {config.target_win_rate:.0%}")
+    
+    print("\n  [⬟] Environment:")
+    print(f"     N envs:            {config.n_envs}")
+    print(f"     Batched (Rust):    {config.use_batched_env}")
+    print(f"     Device:            {config.device}")
+    print(f"     Max turns:         {config.max_turns}")
+    
+    print(f"{'─' * 60}\n")
     
     # Setup environment(s)
     print("\n[1/4] Loading decks...")
@@ -777,6 +866,24 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     # NOTE: torch.compile() is intentionally NOT used because it breaks model saving/loading.
     # The compiled model saves weights with "_orig_mod." prefix which SB3 cannot properly reload.
     # This results in models loading with random weights instead of trained weights.
+    
+    # Save training configuration metadata
+    os.makedirs(config.checkpoint_dir, exist_ok=True)
+    
+    config_path = os.path.join(config.checkpoint_dir, "training_config.json")
+    with open(config_path, "w") as f:
+        import json
+        json.dump(config_dict, f, indent=2)
+    print(f"      Config saved to {config_path}")
+    
+    # Also save to the TensorBoard run folder (MaskablePPO_*)
+    if hasattr(model, 'logger') and model.logger is not None:
+        tb_log_dir = model.logger.dir
+        if tb_log_dir:
+            config_tb_path = os.path.join(tb_log_dir, "training_config.json")
+            with open(config_tb_path, "w") as f:
+                json.dump(config_dict, f, indent=2)
+            print(f"      Config saved to {config_tb_path}")
     
     # Setup callbacks
     callbacks = [
