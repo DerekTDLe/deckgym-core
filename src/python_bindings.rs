@@ -1111,6 +1111,26 @@ impl PyVecGame {
         self.inner.get_turn_counts()
     }
     
+    /// Set ONNX model as opponent for self-play (requires 'onnx' feature)
+    /// 
+    /// Once set, all environments will use the ONNX model as player 1 (opponent).
+    /// The model is shared across all environments and runs batched inference.
+    /// 
+    /// Args:
+    ///     model_path: Path to the .onnx model file
+    ///     deterministic: If True, always pick best action; if False, sample from distribution
+    #[cfg(feature = "onnx")]
+    fn set_onnx_opponent(&mut self, model_path: &str, deterministic: bool) -> PyResult<()> {
+        self.inner.set_onnx_opponent(model_path, deterministic)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))
+    }
+    
+    /// Clear ONNX opponent (revert to no opponent / normal bot mode)
+    #[cfg(feature = "onnx")]
+    fn clear_onnx_opponent(&mut self) {
+        self.inner.clear_onnx_opponent();
+    }
+    
     fn __repr__(&self) -> String {
         format!(
             "PyVecGame(n_envs={}, obs_size={}, action_size={})",
