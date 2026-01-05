@@ -36,6 +36,140 @@ except ImportError:
     # Total observation size: 41 + 24 × 117 = 2849 dims
 
 
+class OnnxSafeAttention(nn.Module):
+    """
+    ONNX-compatible multi-head self-attention.
+    
+    Uses only basic linear layers and tensor ops that ONNX supports.
+    PyTorch's nn.MultiheadAttention uses _native_multi_head_attention which isn't supported.
+    """
+    
+    def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.1):
+        super().__init__()
+        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
+        
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.scale = self.head_dim ** -0.5
+        
+        # Q, K, V projections 
+        self.q_proj = nn.Linear(embed_dim, embed_dim)
+        self.k_proj = nn.Linear(embed_dim, embed_dim)
+        self.v_proj = nn.Linear(embed_dim, embed_dim)
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
+        
+        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Args:
+            x: [batch, seq_len, embed_dim]
+            key_padding_mask: [batch, seq_len] where True = masked (ignored)
+        
+        Returns:
+            [batch, seq_len, embed_dim]
+        """
+        batch_size, seq_len, _ = x.shape
+        
+        # Project to Q, K, V
+        q = self.q_proj(x)  # [batch, seq_len, embed_dim]
+        k = self.k_proj(x)
+        v = self.v_proj(x)
+        
+        # Reshape for multi-head attention: [batch, num_heads, seq_len, head_dim]
+        q = q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        
+        # Attention scores: [batch, num_heads, seq_len, seq_len]
+        attn_scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+        
+        # Apply mask if provided
+        if key_padding_mask is not None:
+            # Expand mask: [batch, 1, 1, seq_len]
+            mask = key_padding_mask.unsqueeze(1).unsqueeze(2)
+            attn_scores = attn_scores.masked_fill(mask, float('-inf'))
+        
+        # Softmax and dropout
+        attn_probs = F.softmax(attn_scores, dim=-1)
+        attn_probs = self.dropout(attn_probs)
+        
+        # Apply attention to values
+        attn_output = torch.matmul(attn_probs, v)  # [batch, num_heads, seq_len, head_dim]
+        
+        # Reshape back: [batch, seq_len, embed_dim]
+        attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
+        
+        # Output projection
+        return self.out_proj(attn_output)
+
+class AttentionPooling(nn.Module):
+    """
+    Attention-based pooling using a learned query vector.
+    
+    Instead of mean-pooling, we learn a query that attends to all cards
+    and produces a weighted combination based on relevance.
+    """
+    
+    def __init__(self, embed_dim: int, num_heads: int = 4):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.scale = self.head_dim ** -0.5
+        
+        # Learned query vector (like a [CLS] token but as a parameter)
+        self.query = nn.Parameter(torch.randn(1, 1, embed_dim))
+        
+        # Projections for cross-attention
+        self.q_proj = nn.Linear(embed_dim, embed_dim)
+        self.k_proj = nn.Linear(embed_dim, embed_dim)
+        self.v_proj = nn.Linear(embed_dim, embed_dim)
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
+    
+    def forward(self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Args:
+            x: [batch, seq_len, embed_dim] - card embeddings after self-attention
+            key_padding_mask: [batch, seq_len] where True = masked (empty card slot)
+        
+        Returns:
+            [batch, embed_dim] - single pooled representation
+        """
+        batch_size, seq_len, _ = x.shape
+        
+        # Expand learned query for batch: [batch, 1, embed_dim]
+        query = self.query.expand(batch_size, -1, -1)
+        
+        # Project query, keys, values
+        q = self.q_proj(query)  # [batch, 1, embed_dim]
+        k = self.k_proj(x)      # [batch, seq_len, embed_dim]
+        v = self.v_proj(x)      # [batch, seq_len, embed_dim]
+        
+        # Reshape for multi-head: [batch, num_heads, seq_len, head_dim]
+        q = q.view(batch_size, 1, self.num_heads, self.head_dim).transpose(1, 2)
+        k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        
+        # Attention scores: [batch, num_heads, 1, seq_len]
+        attn_scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+        
+        # Apply mask for empty card slots
+        if key_padding_mask is not None:
+            mask = key_padding_mask.unsqueeze(1).unsqueeze(2)  # [batch, 1, 1, seq_len]
+            attn_scores = attn_scores.masked_fill(mask, float('-inf'))
+        
+        attn_probs = F.softmax(attn_scores, dim=-1)
+        
+        # Weighted combination: [batch, num_heads, 1, head_dim]
+        pooled = torch.matmul(attn_probs, v)
+        
+        # Reshape: [batch, embed_dim]
+        pooled = pooled.transpose(1, 2).contiguous().view(batch_size, self.embed_dim)
+        
+        return self.out_proj(pooled)
+
 class CardAttentionExtractor(BaseFeaturesExtractor):
     """
     Feature extractor that uses self-attention over card features.
@@ -81,16 +215,26 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         # Positional encoding (learnable, for card order within zones if needed)
         # We don't use this for permutation invariance, but keeping for potential future use
         
-        # Self-attention layers
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=embed_dim,
-            nhead=num_heads,
-            dim_feedforward=embed_dim * 2,
-            dropout=0.1,
-            activation='relu',
-            batch_first=True,
-        )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        # Manual attention blocks for ONNX compatibility
+        # Uses OnnxSafeAttention instead of PyTorch's MultiheadAttention
+        self.attention_layers = nn.ModuleList([
+            OnnxSafeAttention(embed_dim, num_heads, dropout=0.1)
+            for _ in range(num_layers)
+        ])
+        self.ff_layers = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(embed_dim, embed_dim * 2),
+                nn.ReLU(),
+                nn.Linear(embed_dim * 2, embed_dim),
+            )
+            for _ in range(num_layers)
+        ])
+        self.layer_norms = nn.ModuleList([
+            nn.LayerNorm(embed_dim) for _ in range(num_layers * 2)
+        ])
+        self.num_layers = num_layers
+        
+        self.attention_pool = AttentionPooling(embed_dim, num_heads)
         
         # Final projection after pooling
         self.output_proj = nn.Sequential(
@@ -110,7 +254,6 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         
         # Create mask for empty card slots (all zeros = padding)
         # A card is considered "present" if it has any non-zero features
-        # (visibility was removed, so we check if the card has any content)
         card_sum = card_feats.abs().sum(dim=-1)  # [batch, max_cards]
         card_mask = card_sum < 1e-6  # True = masked (empty slot)
         
@@ -118,16 +261,20 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         global_out = self.global_proj(global_feats)
         
         # Embed cards
-        card_embeds = self.card_embed(card_feats)  # [batch, max_cards, embed_dim]
+        x = self.card_embed(card_feats)  # [batch, max_cards, embed_dim]
         
-        # Apply self-attention with mask
-        # Note: Transformer expects mask where True = ignore
-        attended = self.transformer(card_embeds, src_key_padding_mask=card_mask)
+        # Apply manual attention layers (ONNX compatible)
+        for i in range(self.num_layers):
+            # Self-attention with residual (OnnxSafeAttention returns just output)
+            attn_out = self.attention_layers[i](x, key_padding_mask=card_mask)
+            x = self.layer_norms[i * 2](x + attn_out)
+            
+            # Feed-forward with residual
+            ff_out = self.ff_layers[i](x)
+            x = self.layer_norms[i * 2 + 1](x + ff_out)
         
-        # Mean pooling over non-masked cards
-        mask_expanded = (~card_mask).unsqueeze(-1).float()  # [batch, max_cards, 1]
-        num_cards = mask_expanded.sum(dim=1).clamp(min=1.0)  # [batch, 1]
-        pooled = (attended * mask_expanded).sum(dim=1) / num_cards  # [batch, embed_dim]
+        # Attention-based pooling (learned query attends to cards)
+        pooled = self.attention_pool(x, key_padding_mask=card_mask)  # [batch, embed_dim]
         
         # Final projection
         cards_out = self.output_proj(pooled)
