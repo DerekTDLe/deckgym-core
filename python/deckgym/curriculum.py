@@ -80,7 +80,7 @@ class CurriculumStage:
 DEFAULT_STAGES = [
     CurriculumStage("warmup",   "e2", "simple", 0.55),
     CurriculumStage("meta",     "e2", "meta",   0.60),
-    CurriculumStage("advanced", "e3", "meta",   0.50),
+    CurriculumStage("advanced", "e3", "meta",   0.55),
     CurriculumStage("mastery",  "self", "meta", None),
 ]
 
