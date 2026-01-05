@@ -27,12 +27,12 @@ class WinRateTracker:
     providing a smoothed win rate estimate without separate evaluation runs.
     """
     
-    def __init__(self, window_size: int = 200):
+    def __init__(self, window_size: int = 270):
         """
         Initialize tracker with given window size.
         
         Args:
-            window_size: Number of episodes to track (default 200 for ~±7% CI at 95%)
+            window_size: Number of episodes to track
         """
         self.window_size = window_size
         self.results = deque(maxlen=window_size)
@@ -79,7 +79,7 @@ class CurriculumStage:
 # Default curriculum stages
 DEFAULT_STAGES = [
     CurriculumStage("warmup",   "e2", "simple", 0.55),
-    CurriculumStage("meta",     "e2", "meta",   0.60),
+    CurriculumStage("meta",     "e2", "meta",   0.55),
     CurriculumStage("advanced", "e3", "meta",   0.55),
     CurriculumStage("mastery",  "self", "meta", None),
 ]
@@ -125,7 +125,7 @@ class CurriculumManager:
         self.on_stage_change = on_stage_change
         
         self._current_stage_idx = 0
-        self._tracker = WinRateTracker(window_size=200)
+        self._tracker = WinRateTracker(window_size=270) # Agent WR%>=55% with ~95% Confidence level 
         self._stage_stats = {s.name: {"checks": 0, "best_wr": 0.0} for s in self.stages}
     
     @property
