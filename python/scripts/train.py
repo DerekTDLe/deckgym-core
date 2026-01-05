@@ -23,6 +23,7 @@ from typing import Optional
 import numpy as np
 import gymnasium as gym
 import torch
+import yaml
 
 # Enable TensorFloat32 for faster matmul on Ampere+ GPUs
 torch.set_float32_matmul_precision('high')
@@ -116,6 +117,73 @@ class TrainingConfig:
 
 # Default configuration
 DEFAULT_CONFIG = TrainingConfig()
+
+
+def load_config_from_yaml(yaml_path: str) -> TrainingConfig:
+    """
+    Load training configuration from YAML file.
+    
+    Args:
+        yaml_path: Path to YAML config file
+    
+    Returns:
+        TrainingConfig instance with values from YAML
+    """
+    with open(yaml_path, 'r') as f:
+        config_dict = yaml.safe_load(f)
+    
+    # Flatten nested structure
+    flat_config = {}
+    
+    # Model params
+    if 'model' in config_dict:
+        flat_config['attention_embed_dim'] = config_dict['model'].get('attention_embed_dim', 256)
+        flat_config['attention_num_heads'] = config_dict['model'].get('attention_num_heads', 4)
+        flat_config['attention_num_layers'] = config_dict['model'].get('attention_num_layers', 2)
+        flat_config['use_attention'] = config_dict['model'].get('use_attention', True)
+        flat_config['use_silu'] = config_dict['model'].get('use_silu', True)
+    
+    # PPO params
+    if 'ppo' in config_dict:
+        flat_config['base_learning_rate'] = config_dict['ppo'].get('learning_rate', 5e-5)
+        flat_config['min_learning_rate'] = config_dict['ppo'].get('min_learning_rate', 1e-5)
+        flat_config['batch_size'] = config_dict['ppo'].get('batch_size', 2048)
+        flat_config['n_steps'] = config_dict['ppo'].get('n_steps', 8192)
+        flat_config['n_epochs'] = config_dict['ppo'].get('n_epochs', 8)
+        flat_config['gamma'] = config_dict['ppo'].get('gamma', 0.98)
+        flat_config['gae_lambda'] = config_dict['ppo'].get('gae_lambda', 0.95)
+        flat_config['ent_coef'] = config_dict['ppo'].get('ent_coef', 0.02)
+        flat_config['vf_coef'] = config_dict['ppo'].get('vf_coef', 0.5)
+        flat_config['clip_range'] = config_dict['ppo'].get('clip_range', 0.2)
+        flat_config['target_kl'] = config_dict['ppo'].get('target_kl', 0.025)
+    
+    # Training params
+    if 'training' in config_dict:
+        flat_config['total_timesteps'] = config_dict['training'].get('total_timesteps', 30_000_000)
+        flat_config['checkpoint_freq'] = config_dict['training'].get('checkpoint_freq', 100_000)
+        flat_config['n_envs'] = config_dict['training'].get('n_envs', 32)
+        flat_config['use_batched_env'] = config_dict['training'].get('use_batched_env', True)
+        flat_config['device'] = config_dict['training'].get('device', 'auto')
+        flat_config['frozen_opponent_update_freq'] = config_dict['training'].get('frozen_opponent_update_freq', 75_000)
+        flat_config['adaptive_frozen_opponent'] = config_dict['training'].get('adaptive_frozen_opponent', True)
+        flat_config['target_win_rate'] = config_dict['training'].get('target_win_rate', 0.55)
+    
+    # Environment params
+    if 'environment' in config_dict:
+        flat_config['max_turns'] = config_dict['environment'].get('max_turns', 99)
+        flat_config['max_actions_per_turn'] = config_dict['environment'].get('max_actions_per_turn', 50)
+        flat_config['max_total_actions'] = config_dict['environment'].get('max_total_actions', 500)
+    
+    # Paths
+    if 'paths' in config_dict:
+        flat_config['simple_deck_path'] = config_dict['paths'].get('simple_deck_path', 'simple_deck.json')
+        flat_config['meta_deck_path'] = config_dict['paths'].get('meta_deck_path', 'meta_deck.json')
+        flat_config['save_path'] = config_dict['paths'].get('save_path', 'models/rl_bot')
+        flat_config['checkpoint_dir'] = config_dict['paths'].get('checkpoint_dir', './checkpoints/')
+        flat_config['tensorboard_dir'] = config_dict['paths'].get('tensorboard_dir', './logs/')
+        flat_config['resume_path'] = config_dict['paths'].get('resume_path', None)
+    
+    return TrainingConfig(**flat_config)
 
 
 # =============================================================================
@@ -966,6 +1034,9 @@ if __name__ == "__main__":
     # Create default config for default values
     _defaults = TrainingConfig()
     
+    # Config file (YAML) - load entire config from file
+    parser.add_argument("--config", type=str, default=None, help="Path to YAML config file (e.g., configs/large_model.yaml)")
+    
     # Paths
     parser.add_argument("--simple", default=_defaults.simple_deck_path, help="Simple deck definitions")
     parser.add_argument("--meta", default=_defaults.meta_deck_path, help="Meta deck definitions")
@@ -995,38 +1066,64 @@ if __name__ == "__main__":
     
     # Attention policy (enabled by default now)
     parser.add_argument("--no-attention", action="store_true", help="Disable attention, use MLP instead")
-    parser.add_argument("--attention-dim", type=int, default=_defaults.attention_embed_dim, help="Attention embedding dimension")
-    parser.add_argument("--attention-heads", type=int, default=_defaults.attention_num_heads, help="Number of attention heads")
-    parser.add_argument("--attention-layers", type=int, default=_defaults.attention_num_layers, help="Number of transformer layers")
+    parser.add_argument("--attention-dim", type=int, default=None, help="Attention embedding dimension (overrides config)")
+    parser.add_argument("--attention-heads", type=int, default=None, help="Number of attention heads (overrides config)")
+    parser.add_argument("--attention-layers", type=int, default=None, help="Number of transformer layers (overrides config)")
     
     # Device
     parser.add_argument("--device", default=_defaults.device, choices=["cpu", "cuda", "auto"])
     
     args = parser.parse_args()
     
-    # Build config from args
-    config = TrainingConfig(
-        simple_deck_path=args.simple,
-        meta_deck_path=args.meta,
-        save_path=args.save,
-        resume_path=args.resume,
-        total_timesteps=args.steps,
-        checkpoint_freq=args.checkpoint_freq,
-        base_learning_rate=args.lr,
-        min_learning_rate=args.min_lr,
-        target_kl=args.target_kl,
-        batch_size=args.batch_size,
-        n_epochs=args.n_epochs,
-        ent_coef=args.ent_coef,
-        frozen_opponent_update_freq=args.opponent_update_freq,
-        n_envs=args.n_envs,
-        use_batched_env=not args.no_batched_env,
-        use_attention=not args.no_attention,
-        attention_embed_dim=args.attention_dim,
-        attention_num_heads=args.attention_heads,
-        attention_num_layers=args.attention_layers,
-        device=args.device,
-    )
+    # Load config from YAML if provided, otherwise use defaults
+    if args.config:
+        print(f"Loading configuration from {args.config}...")
+        config = load_config_from_yaml(args.config)
+        print(f"  Loaded config: {Path(args.config).stem}")
+    else:
+        config = TrainingConfig()
+    
+    # Override config with CLI arguments (CLI takes precedence)
+    if args.simple != _defaults.simple_deck_path:
+        config.simple_deck_path = args.simple
+    if args.meta != _defaults.meta_deck_path:
+        config.meta_deck_path = args.meta
+    if args.save != _defaults.save_path:
+        config.save_path = args.save
+    if args.resume is not None:
+        config.resume_path = args.resume
+    if args.steps != _defaults.total_timesteps:
+        config.total_timesteps = args.steps
+    if args.checkpoint_freq != _defaults.checkpoint_freq:
+        config.checkpoint_freq = args.checkpoint_freq
+    if args.lr != _defaults.base_learning_rate:
+        config.base_learning_rate = args.lr
+    if args.min_lr != _defaults.min_learning_rate:
+        config.min_learning_rate = args.min_lr
+    if args.target_kl != _defaults.target_kl:
+        config.target_kl = args.target_kl
+    if args.batch_size != _defaults.batch_size:
+        config.batch_size = args.batch_size
+    if args.n_epochs != _defaults.n_epochs:
+        config.n_epochs = args.n_epochs
+    if args.ent_coef != _defaults.ent_coef:
+        config.ent_coef = args.ent_coef
+    if args.opponent_update_freq != _defaults.frozen_opponent_update_freq:
+        config.frozen_opponent_update_freq = args.opponent_update_freq
+    if args.n_envs != _defaults.n_envs:
+        config.n_envs = args.n_envs
+    if args.no_batched_env:
+        config.use_batched_env = False
+    if args.no_attention:
+        config.use_attention = False
+    if args.attention_dim is not None:
+        config.attention_embed_dim = args.attention_dim
+    if args.attention_heads is not None:
+        config.attention_num_heads = args.attention_heads
+    if args.attention_layers is not None:
+        config.attention_num_layers = args.attention_layers
+    if args.device != _defaults.device:
+        config.device = args.device
     
     train(config)
 
