@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 MetaDeckLoader - Load competitive decks from JSON for RL training.
 
@@ -8,7 +7,7 @@ Supports two JSON formats:
 
 Sampling strategy for generalization:
 - Hierarchical: First pick archetype, then deck (ensures archetype diversity)
-- Stratified: Divide decks into strength tiers (10% weak, 35% mid, 55% strong)
+- Weighted: Sample weighted by deck strength
 
 Meta deck data sourced from:
   https://github.com/chase-manning/pokemon-tcg-pocket-tier-list
@@ -58,12 +57,8 @@ class MetaDeckLoader:
     Sampling modes:
     - uniform: Random deck (may oversample popular archetypes)
     - hierarchical: Random archetype, then random deck (archetype diversity)
-    - stratified: Random tier (weak/mid/strong), then random deck
+    - weighted: Weighted by strength
     """
-    
-    # Strength tier boundaries
-    TIER_WEAK = 0.45      # Bottom tier: strength < 0.4
-    TIER_STRONG = 0.6    # Top tier: strength >= 0.6
     
     def __init__(self, json_path: str, max_archetypes: int = None, max_decks_per_archetype: int = None):
         """
@@ -80,16 +75,7 @@ class MetaDeckLoader:
         self.decks: list[DeckInfo] = []
         self.archetypes: dict[str, ArchetypeInfo] = {}
         
-        # Stratified tiers
-        self.tier_weak: list[DeckInfo] = []
-        self.tier_mid: list[DeckInfo] = []
-        self.tier_strong: list[DeckInfo] = []
-        
         self._load_decks(max_archetypes, max_decks_per_archetype)
-        self._build_tiers()
-        
-        print(f"Loaded {len(self.decks)} decks from {len(self.archetypes)} archetypes")
-        print(f"  Tiers: {len(self.tier_weak)} weak, {len(self.tier_mid)} mid, {len(self.tier_strong)} strong")
     
     def _load_decks(self, max_archetypes: int = None, max_decks_per_archetype: int = None):
         """Parse all decks from the JSON data."""
@@ -162,16 +148,7 @@ class MetaDeckLoader:
                 self.decks.append(deck_info)
                 self.archetypes[archetype_name].decks.append(deck_info)
     
-    def _build_tiers(self):
-        """Partition decks into strength tiers."""
-        for deck in self.decks:
-            if deck.strength < self.TIER_WEAK:
-                self.tier_weak.append(deck)
-            elif deck.strength >= self.TIER_STRONG:
-                self.tier_strong.append(deck)
-            else:
-                self.tier_mid.append(deck)
-    
+
     def _cards_to_string_simple(self, cards: list[dict], energy: str = "") -> str:
         """Convert simple format cards to deck string."""
         lines = []
@@ -219,15 +196,12 @@ class MetaDeckLoader:
             mode: Sampling mode
                 - "uniform": Pure random (may oversample popular archetypes)
                 - "hierarchical": Random archetype, then random deck
-                - "stratified": Random tier, then random deck
                 - "weighted": Weighted by strength
         """
         if mode == "uniform":
             return random.choice(self.decks).deck_string
         elif mode == "hierarchical":
             return self._sample_hierarchical()
-        elif mode == "stratified":
-            return self._sample_stratified()
         elif mode == "weighted":
             return self._sample_weighted()
         else:
@@ -239,19 +213,7 @@ class MetaDeckLoader:
         deck = random.choice(archetype.decks)
         return deck.deck_string
     
-    def _sample_stratified(self) -> str:
-        """Sample: random tier (10% weak, 35% mid, 55% strong) → random deck."""
-        tier_choice = random.random()
-        
-        if tier_choice < 0.10 and self.tier_weak:
-            return random.choice(self.tier_weak).deck_string
-        elif tier_choice < 0.45 and self.tier_mid:  # 0.10 + 0.35
-            return random.choice(self.tier_mid).deck_string
-        elif self.tier_strong:
-            return random.choice(self.tier_strong).deck_string
-        else:
-            return random.choice(self.decks).deck_string
-    
+
     def _sample_weighted(self) -> str:
         """Sample weighted by strength."""
         weights = [max(d.strength, 0.01) for d in self.decks]
@@ -262,14 +224,6 @@ class MetaDeckLoader:
         if mode == "hierarchical":
             archetype = random.choice(list(self.archetypes.values()))
             return random.choice(archetype.decks)
-        elif mode == "stratified":
-            tier_choice = random.random()
-            if tier_choice < 0.10 and self.tier_weak:
-                return random.choice(self.tier_weak)
-            elif tier_choice < 0.45 and self.tier_mid:
-                return random.choice(self.tier_mid)
-            elif self.tier_strong:
-                return random.choice(self.tier_strong)
         return random.choice(self.decks)
     
     def get_archetypes(self) -> list[str]:
@@ -318,9 +272,7 @@ class CurriculumDeckLoader:
             max_meta_archetypes: Limit meta archetypes (None = all)
             max_decks_per_archetype: Limit decks per archetype (keeps best)
         """
-        print("Loading simple decks...")
         self.simple_loader = MetaDeckLoader(simple_path)
-        print("Loading meta decks...")
         self.meta_loader = MetaDeckLoader(
             meta_path, 
             max_archetypes=max_meta_archetypes,
@@ -328,14 +280,14 @@ class CurriculumDeckLoader:
         )
         
         self.difficulty = 0.0  # 0 = all simple, 1 = all meta
-        self.sampling_mode = "hierarchical"  # or "stratified"
+        self.sampling_mode = "hierarchical"  # or "weighted"
     
     def set_difficulty(self, difficulty: float):
         """Set curriculum difficulty (0.0 = simple, 1.0 = meta)."""
         self.difficulty = max(0.0, min(1.0, difficulty))
     
     def set_sampling_mode(self, mode: str):
-        """Set sampling mode: 'hierarchical' or 'stratified'."""
+        """Set sampling mode: 'hierarchical' or 'weighted'."""
         self.sampling_mode = mode
     
     def sample_deck(self) -> str:
@@ -361,13 +313,14 @@ if __name__ == "__main__":
         sys.exit(1)
     
     loader = MetaDeckLoader(sys.argv[1])
+    print(f"Loaded {len(loader.decks)} decks from {len(loader.archetypes)} archetypes")
     
     print("\n--- Archetype Statistics ---")
     archetypes = sorted(loader.archetypes.values(), key=lambda a: a.mean_strength, reverse=True)
     for arch in archetypes[:10]:
         print(f"  {arch.name[:40]:40s} | decks={arch.deck_count:3d} | strength={arch.mean_strength:.3f}")
     
-    print("\n--- Sample decks (stratified) ---")
-    for tier in ["weak", "mid", "strong"]:
-        deck = loader.sample_deck_info(mode="stratified")
-        print(f"  {tier}: {deck.archetype[:30]} (strength={deck.strength:.3f})")
+    print("\n--- Sample decks (hierarchical) ---")
+    for _ in range(3):
+        deck = loader.sample_deck_info(mode="hierarchical")
+        print(f"  {deck.archetype[:30]} (strength={deck.strength:.3f})")
