@@ -4,6 +4,8 @@ mod evolution_rusher_player;
 mod expectiminimax_player;
 mod human_player;
 mod mcts_player;
+#[cfg(feature = "onnx")]
+mod onnx_player;
 mod random_player;
 mod value_function_player;
 pub mod value_functions;
@@ -15,6 +17,8 @@ pub use evolution_rusher_player::EvolutionRusherPlayer;
 pub use expectiminimax_player::{ExpectiMiniMaxPlayer, ValueFunction};
 pub use human_player::HumanPlayer;
 pub use mcts_player::MctsPlayer;
+#[cfg(feature = "onnx")]
+pub use onnx_player::{OnnxPlayer, BatchedOnnxInference};
 pub use random_player::RandomPlayer;
 pub use value_function_player::ValueFunctionPlayer;
 pub use value_functions::*;
