@@ -220,9 +220,6 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
             nn.Linear(embed_dim, embed_dim),
         )
         
-        # Positional encoding (learnable, for card order within zones if needed)
-        # We don't use this for permutation invariance, but keeping for potential future use
-        
         # Manual attention blocks for ONNX compatibility
         # Uses OnnxSafeAttention instead of PyTorch's MultiheadAttention
         self.attention_layers = nn.ModuleList([

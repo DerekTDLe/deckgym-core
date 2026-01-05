@@ -1,0 +1,56 @@
+# Large Model Configuration (Run #2)
+# Large attention model: ~8-10M parameters
+# Goal: Break through 47% plateau, reach 55%+ to progress curriculum
+
+model:
+  attention_embed_dim: 512
+  attention_num_heads: 8
+  attention_num_layers: 3
+  use_attention: true
+  use_silu: true
+
+ppo:
+  # Keep same learning rate schedule (worked well in Run #1)
+  learning_rate: 5.0e-5
+  min_learning_rate: 1.0e-5
+  
+  # Keep batch size at 2048 (2.7GB/4GB GPU is fine)
+  batch_size: 2048
+  n_steps: 8192
+  n_epochs: 8
+  
+  # PPO hyperparameters (unchanged from baseline)
+  gamma: 0.98
+  gae_lambda: 0.95
+  ent_coef: 0.02
+  vf_coef: 0.5
+  clip_range: 0.2
+  target_kl: 0.025
+
+training:
+  total_timesteps: 30000000
+  checkpoint_freq: 100000
+  n_envs: 32
+  use_batched_env: true
+  device: "auto"
+  frozen_opponent_update_freq: 75000
+  adaptive_frozen_opponent: true
+  target_win_rate: 0.55
+
+environment:
+  max_turns: 99
+  max_actions_per_turn: 50
+  max_total_actions: 500
+
+paths:
+  simple_deck_path: "simple_deck.json"
+  meta_deck_path: "meta_deck.json"
+  save_path: "models/rl_bot_large"
+  checkpoint_dir: "./checkpoints/large/"
+  tensorboard_dir: "./logs/"
+  resume_path: null  # Set to checkpoint path to resume from Run #1
+
+# Expected outcomes:
+# - Explained variance > 0.7 (vs 0.57 in baseline)
+# - Win rate > 55% (vs 47% plateau in baseline)
+# - Successful curriculum progression to meta/advanced stages
