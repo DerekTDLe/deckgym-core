@@ -15,6 +15,9 @@ use crate::{
     state::{GameOutcome, State},
 };
 
+#[cfg(feature = "onnx")]
+use crate::players::BatchedOnnxInference;
+
 /// Result of a batch step operation
 pub struct BatchStepResult {
     /// Observations for all environments (n_envs × obs_size), flattened
@@ -190,6 +193,11 @@ pub struct VecGame {
     n_envs: usize,
     /// Seed counter for generating unique seeds
     seed_counter: u64,
+    /// ONNX opponent for self-play (optional, requires 'onnx' feature)
+    #[cfg(feature = "onnx")]
+    onnx_opponent: Option<BatchedOnnxInference>,
+    /// RNG for ONNX opponent sampling
+    onnx_rng: StdRng,
 }
 
 impl VecGame {
@@ -217,6 +225,41 @@ impl VecGame {
             envs,
             n_envs,
             seed_counter: base_seed + n_envs as u64,
+            #[cfg(feature = "onnx")]
+            onnx_opponent: None,
+            onnx_rng: StdRng::seed_from_u64(base_seed.wrapping_add(999)),
+        }
+    }
+    
+    /// Set ONNX model as opponent for self-play
+    /// 
+    /// Once set, all environments will use the ONNX model as player 1 (opponent).
+    /// The model is shared across all environments and runs batched inference.
+    /// 
+    /// # Arguments
+    /// * `model_path` - Path to the .onnx model file
+    /// * `deterministic` - If true, always pick best action; if false, sample from distribution
+    #[cfg(feature = "onnx")]
+    pub fn set_onnx_opponent(&mut self, model_path: &str, deterministic: bool) -> Result<(), String> {
+        let inference = BatchedOnnxInference::new(model_path, deterministic)?;
+        self.onnx_opponent = Some(inference);
+        
+        // Clear bot players since we're using ONNX now
+        for env in &mut self.envs {
+            env.opponent_type = Some("onnx".to_string());
+            env.players = None;
+        }
+        
+        Ok(())
+    }
+    
+    /// Clear ONNX opponent and revert to no opponent (self-play mode handled in Python)
+    #[cfg(feature = "onnx")]
+    pub fn clear_onnx_opponent(&mut self) {
+        self.onnx_opponent = None;
+        for env in &mut self.envs {
+            env.opponent_type = None;
+            env.players = None;
         }
     }
     
@@ -308,12 +351,18 @@ impl VecGame {
         let mut dones = Vec::with_capacity(self.n_envs);
         let mut terminal_observations = Vec::new();
         
+        // First pass: step agent actions
         for (i, (env, &action)) in self.envs.iter_mut().zip(actions.iter()).enumerate() {
             // Step the agent's action
             let (mut reward, mut done) = env.step(action);
             
-            // If using bots and game not over, play bot turns
-            if !done && env.opponent_type.is_some() {
+            // If using classical bots (not ONNX) and game not over, play bot turns
+            #[cfg(feature = "onnx")]
+            let is_onnx = self.onnx_opponent.is_some();
+            #[cfg(not(feature = "onnx"))]
+            let is_onnx = false;
+            
+            if !done && env.opponent_type.is_some() && !is_onnx {
                 let (bot_reward, bot_done) = env.play_bot_turns();
                 if bot_done {
                     done = true;
@@ -321,7 +370,27 @@ impl VecGame {
                 }
             }
             
-            if done {
+            rewards.push(reward);
+            dones.push(done);
+        }
+        
+        // ONNX opponent turns (batched) - take onnx temporarily to avoid borrow issues
+        #[cfg(feature = "onnx")]
+        {
+            if let Some(mut onnx) = self.onnx_opponent.take() {
+                self.play_onnx_opponent_turns_internal(&mut onnx, &mut rewards, &mut dones);
+                self.onnx_opponent = Some(onnx);
+            }
+        }
+        
+        // Handle resets and collect observations
+        #[cfg(feature = "onnx")]
+        let has_onnx = self.onnx_opponent.is_some();
+        #[cfg(not(feature = "onnx"))]
+        let has_onnx = false;
+        
+        for (i, env) in self.envs.iter_mut().enumerate() {
+            if dones[i] {
                 // Store terminal observation before auto-reset
                 terminal_observations.push((i, env.get_observation()));
                 
@@ -329,16 +398,23 @@ impl VecGame {
                 self.seed_counter += 1;
                 env.reset(self.seed_counter);
                 
-                // Play bot turns if bot goes first in new game
-                if env.opponent_type.is_some() {
+                // Play bot turns if bot goes first in new game (non-ONNX only)
+                if env.opponent_type.is_some() && !has_onnx {
                     env.play_bot_turns();
                 }
             }
             
             // Get observation (from new episode if reset happened)
             observations.extend(env.get_observation());
-            rewards.push(reward);
-            dones.push(done);
+        }
+        
+        // ONNX opponent initial turns for newly reset envs
+        #[cfg(feature = "onnx")]
+        {
+            if let Some(mut onnx) = self.onnx_opponent.take() {
+                self.play_onnx_initial_turns(&mut onnx, &dones, &mut observations);
+                self.onnx_opponent = Some(onnx);
+            }
         }
         
         // Get action masks for current state (after any resets)
@@ -350,6 +426,128 @@ impl VecGame {
             dones,
             action_masks,
             terminal_observations,
+        }
+    }
+    
+    /// Play ONNX opponent turns for all eligible environments (batched)
+    #[cfg(feature = "onnx")]
+    fn play_onnx_opponent_turns_internal(
+        &mut self,
+        onnx: &mut BatchedOnnxInference,
+        rewards: &mut [f32],
+        dones: &mut [bool],
+    ) {
+        const MAX_OPPONENT_TURNS: usize = 50; // Prevent infinite loops
+        
+        for _ in 0..MAX_OPPONENT_TURNS {
+            // Find envs where it's opponent's turn and game not over
+            let mut needs_onnx: Vec<usize> = Vec::new();
+            for (i, env) in self.envs.iter().enumerate() {
+                if !dones[i] && env.state.current_player == 1 && !env.state.is_game_over() {
+                    needs_onnx.push(i);
+                }
+            }
+            
+            if needs_onnx.is_empty() {
+                break;
+            }
+            
+            // Collect observations and masks for those envs
+            let mut obs_batch: Vec<f32> = Vec::with_capacity(needs_onnx.len() * OBSERVATION_SIZE);
+            let mut mask_batch: Vec<bool> = Vec::with_capacity(needs_onnx.len() * ACTION_SPACE_SIZE);
+            
+            for &i in &needs_onnx {
+                obs_batch.extend(get_observation_tensor(&self.envs[i].state, 1)); // Player 1's view
+                mask_batch.extend(get_action_mask(&self.envs[i].state));
+            }
+            
+            // Run batched ONNX inference
+            let actions = onnx.predict_batch(&obs_batch, &mask_batch, needs_onnx.len(), &mut self.onnx_rng);
+            
+            // Apply actions
+            for (j, &env_idx) in needs_onnx.iter().enumerate() {
+                let action_idx = actions[j];
+                let env = &mut self.envs[env_idx];
+                
+                let indexed_actions = get_indexed_actions(&env.state);
+                if let Some((_, action)) = indexed_actions.iter().find(|(idx, _)| *idx == action_idx) {
+                    apply_action(&mut env.rng, &mut env.state, action);
+                } else if let Some((_, action)) = indexed_actions.first() {
+                    apply_action(&mut env.rng, &mut env.state, action);
+                }
+                
+                if env.state.is_game_over() {
+                    dones[env_idx] = true;
+                    rewards[env_idx] = env.calculate_reward(0); // Agent is player 0
+                }
+            }
+        }
+    }
+    
+    /// Play ONNX initial turns for newly reset envs where opponent goes first
+    #[cfg(feature = "onnx")]
+    fn play_onnx_initial_turns(
+        &mut self,
+        onnx: &mut BatchedOnnxInference,
+        was_done: &[bool],
+        observations: &mut Vec<f32>,
+    ) {
+        // Find reset envs where opponent goes first
+        let mut needs_initial: Vec<usize> = Vec::new();
+        for (i, env) in self.envs.iter().enumerate() {
+            if was_done[i] && env.state.current_player == 1 && !env.state.is_game_over() {
+                needs_initial.push(i);
+            }
+        }
+        
+        if needs_initial.is_empty() {
+            return;
+        }
+        
+        // Play opponent turns until agent's turn
+        const MAX_TURNS: usize = 50;
+        for _ in 0..MAX_TURNS {
+            let mut active: Vec<usize> = Vec::new();
+            for &i in &needs_initial {
+                if self.envs[i].state.current_player == 1 && !self.envs[i].state.is_game_over() {
+                    active.push(i);
+                }
+            }
+            
+            if active.is_empty() {
+                break;
+            }
+            
+            // Batch inference
+            let mut obs_batch: Vec<f32> = Vec::with_capacity(active.len() * OBSERVATION_SIZE);
+            let mut mask_batch: Vec<bool> = Vec::with_capacity(active.len() * ACTION_SPACE_SIZE);
+            
+            for &i in &active {
+                obs_batch.extend(get_observation_tensor(&self.envs[i].state, 1));
+                mask_batch.extend(get_action_mask(&self.envs[i].state));
+            }
+            
+            let actions = onnx.predict_batch(&obs_batch, &mask_batch, active.len(), &mut self.onnx_rng);
+            
+            for (j, &env_idx) in active.iter().enumerate() {
+                let action_idx = actions[j];
+                let env = &mut self.envs[env_idx];
+                
+                let indexed_actions = get_indexed_actions(&env.state);
+                if let Some((_, action)) = indexed_actions.iter().find(|(idx, _)| *idx == action_idx) {
+                    apply_action(&mut env.rng, &mut env.state, action);
+                } else if let Some((_, action)) = indexed_actions.first() {
+                    apply_action(&mut env.rng, &mut env.state, action);
+                }
+            }
+        }
+        
+        // Update observations for reset envs
+        for &i in &needs_initial {
+            let start = i * OBSERVATION_SIZE;
+            let end = start + OBSERVATION_SIZE;
+            let new_obs = self.envs[i].get_observation();
+            observations[start..end].copy_from_slice(&new_obs);
         }
     }
     
