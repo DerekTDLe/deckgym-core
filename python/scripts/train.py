@@ -142,6 +142,12 @@ def load_config_from_yaml(yaml_path: str) -> TrainingConfig:
         flat_config['attention_num_layers'] = config_dict['model'].get('attention_num_layers', 2)
         flat_config['use_attention'] = config_dict['model'].get('use_attention', True)
         flat_config['use_silu'] = config_dict['model'].get('use_silu', True)
+        
+        # Load net_arch for MLP models
+        if 'net_arch' in config_dict['model']:
+            net_arch = config_dict['model']['net_arch']
+            flat_config['policy_layers'] = tuple(net_arch.get('pi', [512, 512, 256, 128]))
+            flat_config['value_layers'] = tuple(net_arch.get('vf', [512, 512, 256]))
     
     # PPO params
     if 'ppo' in config_dict:
