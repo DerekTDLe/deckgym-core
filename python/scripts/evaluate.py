@@ -538,9 +538,9 @@ def evaluate_agent(
     console.print(f"Record: {rl_player.wins}W - {rl_player.losses}L - {rl_player.draws}D")
     console.print(f"Win Rate: {rl_player.win_rate:.1%}")
     
-    # Save Elo to model by renaming/copying
+    # Save Elo and stats to model
     if save_elo_to_model:
-        _save_elo_to_model(model_path, rl_player.elo)
+        _save_elo_to_model(model_path, rl_player)
     
     # Print comparison leaderboard
     all_players = list(baselines.values()) + [rl_player]
@@ -550,12 +550,20 @@ def evaluate_agent(
     return rl_player
 
 
-def _save_elo_to_model(model_path: str, elo: float):
-    """Save Elo rating alongside the model."""
+def _save_elo_to_model(model_path: str, elo_player: EloPlayer):
+    """Save Elo rating and stats alongside the model."""
     elo_path = Path(model_path).with_suffix(".elo")
     with open(elo_path, "w") as f:
-        json.dump({"elo": round(elo, 1), "model": model_path}, f)
-    console.print(f"[green]Saved Elo to {elo_path}[/green]")
+        json.dump({
+            "elo": round(elo_player.elo, 1),
+            "win_rate": round(elo_player.win_rate, 3),
+            "wins": elo_player.wins,
+            "losses": elo_player.losses,
+            "draws": elo_player.draws,
+            "games": elo_player.games,
+            "model": model_path,
+        }, f, indent=2)
+    console.print(f"[green]Saved Elo and stats to {elo_path}[/green]")
 
 
 def load_model_elo(model_path: str) -> Optional[float]:
