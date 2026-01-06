@@ -60,11 +60,13 @@ class OnnxSafeAttention(nn.Module):
         self.head_dim = embed_dim // num_heads
         self.scale = self.head_dim ** -0.5
         
-        # Q, K, V projections 
-        self.q_proj = nn.Linear(embed_dim, embed_dim)
-        self.k_proj = nn.Linear(embed_dim, embed_dim)
-        self.v_proj = nn.Linear(embed_dim, embed_dim)
-        self.out_proj = nn.Linear(embed_dim, embed_dim)
+        # Q, K, V projections (all bias=False for modern Transformer style)
+        # LLaMA/GPT-3 style: no biases in attention projections
+        # This improves gradient flow and reduces parameters
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False)
         
         self.dropout = nn.Dropout(dropout)
     
@@ -130,11 +132,12 @@ class AttentionPooling(nn.Module):
         self.query = nn.Parameter(torch.zeros(1, 1, embed_dim))
         nn.init.normal_(self.query, std=0.02)
         
-        # Projections for cross-attention
-        self.q_proj = nn.Linear(embed_dim, embed_dim)
-        self.k_proj = nn.Linear(embed_dim, embed_dim)
-        self.v_proj = nn.Linear(embed_dim, embed_dim)
-        self.out_proj = nn.Linear(embed_dim, embed_dim)
+        # Projections for cross-attention (all bias=False)
+        # LLaMA/GPT-3 style: no biases in attention projections
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False)
     
     def forward(self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
@@ -205,18 +208,18 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         self.max_cards = max_cards
         self.embed_dim = embed_dim
         
-        # Project global features
+        # Project global features (GELU activation for smoother gradients)
         self.global_proj = nn.Sequential(
             nn.Linear(global_features, 64),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(64, 64),
-            nn.ReLU(),
+            nn.GELU(),
         )
         
-        # Project card features to embedding dimension
+        # Project card features to embedding dimension (GELU activation)
         self.card_embed = nn.Sequential(
             nn.Linear(features_per_card, embed_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(embed_dim, embed_dim),
         )
         
@@ -226,11 +229,17 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
             OnnxSafeAttention(embed_dim, num_heads, dropout=0.1)
             for _ in range(num_layers)
         ])
+        # Feed-forward layers with modern Transformer improvements:
+        # - 4× expansion (standard in GPT/BERT/LLaMA)
+        # - GELU activation (smoother than ReLU)
+        # - Dropout for regularization
         self.ff_layers = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(embed_dim, embed_dim * 2),
-                nn.ReLU(),
-                nn.Linear(embed_dim * 2, embed_dim),
+                nn.Linear(embed_dim, embed_dim * 4),
+                nn.GELU(),
+                nn.Dropout(0.1),
+                nn.Linear(embed_dim * 4, embed_dim),
+                nn.Dropout(0.1),
             )
             for _ in range(num_layers)
         ])
@@ -241,10 +250,10 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         
         self.attention_pool = AttentionPooling(embed_dim, num_heads)
         
-        # Final projection after pooling
+        # Final projection after pooling (GELU activation)
         self.output_proj = nn.Sequential(
             nn.Linear(embed_dim, embed_dim),
-            nn.ReLU(),
+            nn.GELU(),
         )
     
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
