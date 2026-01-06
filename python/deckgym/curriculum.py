@@ -78,9 +78,9 @@ class CurriculumStage:
 
 # Default curriculum stages
 DEFAULT_STAGES = [
-    CurriculumStage("warmup",   "e2", "simple", 0.55),
-    CurriculumStage("meta",     "e2", "meta",   0.55),
-    CurriculumStage("advanced", "e3", "meta",   0.55),
+    CurriculumStage("warmup",   "e2", "simple", 0.40),  # Reduced from 0.55 - faster progression
+    CurriculumStage("meta",     "e2", "meta",   0.55),  # Keep at 0.55 - important milestone
+    CurriculumStage("advanced", "e3", "meta",   0.50),  # Reduced from 0.55 - e3 is harder
     CurriculumStage("mastery",  "self", "meta", None),
 ]
 
