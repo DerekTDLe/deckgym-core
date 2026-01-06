@@ -61,17 +61,19 @@ class TrainingConfig:
     checkpoint_freq: int = 100_000        # Per env (actual = this × n_envs)
     
     # PPO hyperparameters
-    base_learning_rate: float = 5e-5      # Lower LR for attention model (was 1e-4)
-    min_learning_rate: float = 1e-5       # Lower floor LR (was 3e-5)
+    base_learning_rate: float = 1e-4      # Higher LR for attention (was 5e-5)
+    min_learning_rate: float = 1e-5       # Lower floor LR
+    warmup_steps: int = 500              # LR warmup steps (critical for attention stability)
     n_steps: int = 8192                   # More experience per update
-    batch_size: int = 2048                # Larger batch for better GPU utilization (was 512)
+    batch_size: int = 2048                # Larger batch for better GPU utilization
     n_epochs: int = 8                     # Reduced to compensate for larger n_steps
-    gamma: float = 0.98                   # Reduced for shorter episodes (was 0.99)
+    gamma: float = 0.98                   # Reduced for shorter episodes
     gae_lambda: float = 0.95              # GAE lambda
-    ent_coef: float = 0.02                # Higher entropy for larger model (was 0.01)
-    vf_coef: float = 0.5                  # Value function coefficient (default)
+    ent_coef: float = 0.02                # Higher entropy for larger model
+    vf_coef: float = 0.5                  # Value function coefficient
     clip_range: float = 0.2               # PPO clipping range
-    target_kl: float = 0.025              # Stop epoch early if KL > target (higher for e3 phase)
+    max_grad_norm: float = 1.0            # Gradient clipping (was 0.5, higher for attention)
+    target_kl: float = 0.025              # Stop epoch early if KL > target
     
     # Network architecture
     policy_layers: tuple = (512, 512, 256, 128)   # Deeper policy network (MLP only)
@@ -99,20 +101,49 @@ class TrainingConfig:
     # Device
     device: str = "auto"
     
-    def get_learning_rate_schedule(self):
+    def get_learning_rate_schedule(self, total_timesteps: int = None):
         """
-        Simple linear decay from base_lr to min_lr.
+        Learning rate schedule with warmup + cosine annealing.
         
-        Standard approach that works well for both curriculum and self-play.
+        Standard for modern transformers (GPT, BERT, etc.):
+        - Linear warmup: 0 → base_lr
+        - Cosine decay: base_lr → min_lr (smooth curve)
         """
+        import math
+        
         base_lr = self.base_learning_rate
         min_lr = self.min_learning_rate
+        warmup_steps = self.warmup_steps
         
-        def lr_schedule(progress_remaining: float) -> float:
-            # Linear decay: base_lr at start, min_lr at end
-            return min_lr + (base_lr - min_lr) * progress_remaining
-        
-        return lr_schedule
+        if warmup_steps > 0 and total_timesteps:
+            # Calculate total updates
+            total_updates = total_timesteps // self.n_steps
+            
+            def lr_schedule_cosine(progress_remaining: float) -> float:
+                # progress_remaining goes from 1.0 → 0.0
+                current_update = int((1.0 - progress_remaining) * total_updates)
+                
+                if current_update < warmup_steps:
+                    # Warmup phase: linear 0 → base_lr
+                    return (current_update / warmup_steps) * base_lr
+                else:
+                    # Cosine annealing: base_lr → min_lr
+                    progress = (current_update - warmup_steps) / (total_updates - warmup_steps)
+                    cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
+                    return min_lr + (base_lr - min_lr) * cosine_decay
+            
+            return lr_schedule_cosine
+        else:
+            # No warmup: simple cosine decay
+            import math
+            
+            def lr_schedule_simple(progress_remaining: float) -> float:
+                # Cosine annealing from base_lr to min_lr
+                progress = 1.0 - progress_remaining
+                cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
+                return min_lr + (base_lr - min_lr) * cosine_decay
+            
+            return lr_schedule_simple
 
 
 # Default configuration
@@ -903,7 +934,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
             tensorboard_log=config.tensorboard_dir,
         )
         # Update hyperparameters for fine-tuning
-        model.learning_rate = config.get_learning_rate_schedule()
+        model.learning_rate = config.get_learning_rate_schedule(config.total_timesteps)
         model.n_steps = config.n_steps
         model.batch_size = config.batch_size
         model.n_epochs = config.n_epochs
@@ -920,7 +951,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         model = MaskablePPO(
             "MlpPolicy",
             env,
-            learning_rate=config.get_learning_rate_schedule(),  # Cyclical LR
+            learning_rate=config.get_learning_rate_schedule(config.total_timesteps),
             n_steps=config.n_steps,
             batch_size=config.batch_size,
             n_epochs=config.n_epochs,
@@ -928,6 +959,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
             gae_lambda=config.gae_lambda,
             ent_coef=config.ent_coef,
             vf_coef=config.vf_coef,
+            max_grad_norm=config.max_grad_norm,  # Gradient clipping
             clip_range=config.clip_range,
             clip_range_vf=config.clip_range,  # Clip value function updates to reduce spikes
             target_kl=config.target_kl,  # Stop epoch early if KL too high
