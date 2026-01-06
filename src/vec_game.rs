@@ -168,18 +168,27 @@ impl EnvInstance {
         (final_reward, self.state.is_game_over())
     }
     
-    /// Calculate score-based reward from agent's perspective
+    /// Calculate turn-based reward from agent's perspective
     fn calculate_reward(&self, agent_player: usize) -> f32 {
         match self.state.winner {
             Some(GameOutcome::Win(winner)) => {
                 let my_points = self.state.points[agent_player] as f32;
                 let opp_points = self.state.points[1 - agent_player] as f32;
                 let point_diff = my_points - opp_points;
+                let turn_count = self.state.turn_count as f32;
+                
+                // Base reward from point difference
+                let base = 1.0 + (point_diff / 6.0);
+                
+                // Speed factor: 1 + (13 - turns) / 13
+                let speed_factor = 1.0 + ((13.0 - turn_count) / 13.0);
                 
                 if winner == agent_player {
-                    1.0 + (point_diff / 6.0)
+                    // Victory: base * max(1.0, speed_factor)
+                    base * speed_factor.max(1.0)
                 } else {
-                    -1.0 + (point_diff / 6.0)
+                    // Loss: -base * speed_factor
+                    -base * speed_factor
                 }
             }
             Some(GameOutcome::Tie) => 0.0,
