@@ -268,15 +268,19 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         # Embed cards
         x = self.card_embed(card_feats)  # [batch, max_cards, embed_dim]
         
-        # Apply manual attention layers (ONNX compatible)
+        # Apply attention layers with PRE-NORM (modern standard)
+        # Pre-norm: normalize BEFORE attention, then add clean residual
+        # This gives much better gradient flow than post-norm
         for i in range(self.num_layers):
-            # Self-attention with residual (OnnxSafeAttention returns just output)
-            attn_out = self.attention_layers[i](x, key_padding_mask=card_mask)
-            x = self.layer_norms[i * 2](x + attn_out)
+            # Self-attention with pre-norm
+            normed = self.layer_norms[i * 2](x)
+            attn_out = self.attention_layers[i](normed, key_padding_mask=card_mask)
+            x = x + attn_out  # Clean residual connection
             
-            # Feed-forward with residual
-            ff_out = self.ff_layers[i](x)
-            x = self.layer_norms[i * 2 + 1](x + ff_out)
+            # Feed-forward with pre-norm
+            normed = self.layer_norms[i * 2 + 1](x)
+            ff_out = self.ff_layers[i](normed)
+            x = x + ff_out  # Clean residual connection
         
         # Attention-based pooling (learned query attends to cards)
         pooled = self.attention_pool(x, key_padding_mask=card_mask)  # [batch, embed_dim]
