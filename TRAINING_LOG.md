@@ -407,6 +407,37 @@ target_kl = 0.015
 - target_kl too permissive → reduce to 0.01
 - clip_range too large → reduce to 0.15
 
+### Diagnostic Analysis (Checkpoint @ 3.2M)
+
+**Gradient Issues Persist** (despite pre-norm):
+
+1. **K-projection Bias Vanishing** ❌
+   - All layers: `k_proj.bias` gradient = 0.000000
+   - Bias values stuck at zero
+   - **Root cause**: Initialization issue (symmetric at zero)
+   - **Impact**: Attention can't learn which keys to focus on
+
+2. **Severe Gradient Imbalance** ❌
+   - Ratio: **26 billion** (26,686,617,802)
+   - `action_net.weight`: 866 (huge)
+   - `k_proj.bias`: 0.000000 (dead)
+   - **Impact**: Unstable training, high Elo variance
+
+3. **Weights Healthy** ✅
+   - All weight distributions normal
+   - No dead neurons
+   - Attention layers properly initialized
+
+**Conclusion**: Model reaches 1825 Elo despite gradient issues, but variance (±80 Elo) caused by:
+- K-proj bias not learning
+- Action net gradients too large
+- Gradient imbalance
+
+**Potential Fixes** (for future runs):
+1. Initialize K-proj bias to small non-zero values
+2. Layer-wise learning rates (action_net lower)
+3. Or disable bias in attention projections entirely
+
 ### Next Steps → Run #5
 
 **Approach**: Stabilize the excellent performance
@@ -434,19 +465,57 @@ target_kl = 0.015
 ### Configuration Changes from Run #4
 
 ```python
-# Stability improvements
+# Stability improvements (hyperparameters)
 learning_rate: 1e-4 → 1e-5     # 10× lower for stability
 min_learning_rate: 1e-5 → 1e-6 # Lower floor
 clip_range: 0.2 → 0.15         # Tighter clipping
 target_kl: 0.015 → 0.01        # Stricter early stopping
+
+# CRITICAL FIX: K-projection bias disabled
+# In attention_policy.py:
+#   self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+# 
+# This fixes the dead gradient problem from Run #4:
+# - k_proj.bias was stuck at 0.000000 (no learning)
+# - Gradient imbalance: 26 billion ratio
+# - High Elo variance: ±80 Elo
+#
+# Expected improvements:
+# - Healthy gradients for all parameters
+# - Reduced variance: ±30 Elo (vs ±80)
+# - Better convergence stability
+# - Potential to reach 1850-1900+ Elo
+
+# MODERN TRANSFORMER IMPROVEMENTS (GPT/BERT/LLaMA style)
+# 1. GELU activation (replaces ReLU everywhere)
+#    - Smoother gradients, no dead neurons
+#    - Used by: GPT-2/3/4, BERT, LLaMA
+#
+# 2. Bias-free attention projections (Q, K, V, out_proj)
+#    - Better gradient flow
+#    - Fewer parameters: -1,024 per attention layer
+#    - Used by: LLaMA, GPT-3, PaLM
+#
+# 3. Improved FFN (4× expansion + dropout)
+#    - 2× → 4× expansion (standard Transformer size)
+#    - GELU activation
+#    - Dropout(0.1) for regularization
+#    - Used by: All modern Transformers
+#
+# Total parameter changes:
+# - Attention biases removed: -3,072 params (3 layers × 2 modules × 512)
+# - FFN expansion doubled: +~400K params (better capacity)
+# - Net effect: Larger, more capable model with better gradient flow
 ```
 
 ### Objectives
 
 1. Maintain peak performance (~1825 Elo)
-2. Reduce variance (target: ±30 Elo instead of ±80)
+2. **Reduce variance** (target: ±30 Elo instead of ±80)
 3. Beat e2 (1893 Elo) consistently
 4. Approach historical best (1935 Elo)
+5. **Verify gradient health** (no dead parameters)
+6. **Test modern improvements** (GELU, bias-free, 4× FFN)
 
 ### Training Metrics
 
