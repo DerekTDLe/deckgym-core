@@ -833,20 +833,34 @@ impl PyGame {
                 let reward = if done {
                     match new_state.winner {
                         Some(crate::state::GameOutcome::Win(winner)) => {
-                            // Score-based reward: bigger bonus for dominant victories
+                            // Turn-based reward: base * speed_factor
                             // Points range: 0-3 for each player
                             let my_points = new_state.points[state.current_player] as f32;
                             let opp_points = new_state.points[1 - state.current_player] as f32;
                             let point_diff = my_points - opp_points; // Range: -3 to +3
+                            let turn_count = new_state.turn_count as f32;
+                            
+                            // Base reward from point difference
+                            let base = 1.0 + (point_diff / 6.0);
+                            
+                            // Speed factor: (13 - turns) / 13
+                            // Turn 0: 1.0, Turn 13: 0.0, Turn 20: -0.54
+                            let speed_factor = 1.0 + ((13.0 - turn_count) / 13.0);
                             
                             if winner == state.current_player {
-                                // Victory: 1.0 base + up to 0.5 bonus
-                                // 3-0 → 1.5, 3-1 → 1.33, 3-2 → 1.17
-                                1.0 + (point_diff / 6.0)
+                                // Victory: base * max(1.0, speed_factor)
+                                // Fast wins get bonus, slow wins capped at base
+                                // Turn 3, 3-0: 1.5 * 1.77 = 2.65
+                                // Turn 13, 3-0: 1.5 * 1.0 = 1.5
+                                // Turn 20, 3-0: 1.5 * 1.0 = 1.5 (capped)
+                                base * speed_factor.max(1.0)
                             } else {
-                                // Loss: -1.0 base + up to -0.5 penalty
-                                // 0-3 → -1.5, 1-3 → -1.33, 2-3 → -1.17
-                                -1.0 + (point_diff / 6.0)
+                                // Loss: -base * speed_factor
+                                // Fast losses heavily penalized, slow losses less so
+                                // Turn 3, 0-3: -1.5 * 1.77 = -2.65
+                                // Turn 13, 0-3: -1.5 * 1.0 = -1.5
+                                // Turn 20, 2-3: -1.17 * 0.46 = -0.54 (mitigated!)
+                                -base * speed_factor
                             }
                         }
                         Some(crate::state::GameOutcome::Tie) => 0.0,
