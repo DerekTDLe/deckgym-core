@@ -1,8 +1,10 @@
 steps,elo,win_rate,wins,losses,draws,path
-3200000,1569.2,0.358,179,273,48,checkpoints/large/rl_bot_3200000_steps.zip
-6400000,1681.2,0.478,239,232,29,checkpoints/large/rl_bot_6400000_steps.zip
-9600000,1677.8,0.500,250,232,18,checkpoints/large/rl_bot_9600000_steps.zip
-12800000,1698.5,0.546,273,212,15,checkpoints/large/rl_bot_12800000_steps.zip
-16000000,1746.5,0.554,277,207,16,checkpoints/large/rl_bot_16000000_steps.zip
-19200000,1740.1,0.604,302,189,9,checkpoints/large/rl_bot_19200000_steps.zip
-22400000,1713.7,0.566,283,210,7,checkpoints/large/rl_bot_22400000_steps.zip
+1600000,1679.1,0.482,241,220,39,checkpoints/mlp_large/rl_bot_1600000_steps.zip
+3200000,1696.9,0.534,267,212,21,checkpoints/mlp_large/rl_bot_3200000_steps.zip
+4800000,1695.8,0.532,266,225,9,checkpoints/mlp_large/rl_bot_4800000_steps.zip
+6400000,1757.7,0.574,287,201,12,checkpoints/mlp_large/rl_bot_6400000_steps.zip
+8000000,1733.7,0.570,285,201,14,checkpoints/mlp_large/rl_bot_8000000_steps.zip
+9600000,1688.7,0.570,285,205,10,checkpoints/mlp_large/rl_bot_9600000_steps.zip
+11200000,1755.8,0.576,288,202,10,checkpoints/mlp_large/rl_bot_11200000_steps.zip
+12800000,1759.8,0.576,288,206,6,checkpoints/mlp_large/rl_bot_12800000_steps.zip
+14400000,1757.9,0.560,280,208,12,checkpoints/mlp_large/rl_bot_14400000_steps.zip
