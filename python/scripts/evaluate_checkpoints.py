@@ -17,6 +17,7 @@ from typing import Optional
 
 from rich.console import Console
 from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -125,22 +126,39 @@ def evaluate_all_checkpoints(
         # Evaluate against baselines
         rl_player = EloPlayer(name=checkpoint_path.stem, bot_code="rl", is_rl=True)
         
-        for baseline_name, baseline in baselines.items():
-            baseline_copy = EloPlayer.from_dict(baseline.to_dict())
+        total_games = len(baselines) * games_per_baseline
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task(f"  Evaluating", total=total_games)
             
-            for game_idx in range(games_per_baseline):
-                deck_a = deck_loader.sample_deck()
-                deck_b = deck_loader.sample_deck()
-                seed = random.randint(0, 2**32 - 1)
+            for baseline_name, baseline in baselines.items():
+                baseline_copy = EloPlayer.from_dict(baseline.to_dict())
                 
-                if game_idx % 2 == 0:
-                    winner = play_match(rl_player, baseline_copy, deck_a, deck_b, 
-                                       rl_model=model, seed=seed)
-                else:
-                    winner = play_match(baseline_copy, rl_player, deck_b, deck_a,
-                                       rl_model=model, seed=seed)
-                
-                update_elo(rl_player, baseline_copy, winner)
+                for game_idx in range(games_per_baseline):
+                    deck_a = deck_loader.sample_deck()
+                    deck_b = deck_loader.sample_deck()
+                    seed = random.randint(0, 2**32 - 1)
+                    
+                    if game_idx % 2 == 0:
+                        winner = play_match(rl_player, baseline_copy, deck_a, deck_b, 
+                                           rl_model=model, seed=seed)
+                    else:
+                        winner = play_match(baseline_copy, rl_player, deck_b, deck_a,
+                                           rl_model=model, seed=seed)
+                    
+                    update_elo(rl_player, baseline_copy, winner)
+                    
+                    # Update progress with live stats
+                    progress.update(
+                        task,
+                        advance=1,
+                        description=f"  vs {code_to_name.get(baseline_name, baseline_name)}: {rl_player.wins}W-{rl_player.losses}L-{rl_player.draws}D ({rl_player.win_rate:.1%})"
+                    )
         
         # Save result
         result = CheckpointResult(
