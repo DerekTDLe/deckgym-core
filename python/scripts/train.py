@@ -63,7 +63,7 @@ class TrainingConfig:
     # PPO hyperparameters
     base_learning_rate: float = 1e-4      # Higher LR for attention (was 5e-5)
     min_learning_rate: float = 1e-5       # Lower floor LR
-    warmup_steps: int = 500              # LR warmup steps (critical for attention stability)
+    warmup_steps: int = 300              # LR warmup steps (critical for attention stability)
     n_steps: int = 8192                   # More experience per update
     batch_size: int = 2048                # Larger batch for better GPU utilization
     n_epochs: int = 8                     # Reduced to compensate for larger n_steps
@@ -73,7 +73,7 @@ class TrainingConfig:
     vf_coef: float = 0.5                  # Value function coefficient
     clip_range: float = 0.2               # PPO clipping range
     max_grad_norm: float = 1.0            # Gradient clipping (was 0.5, higher for attention)
-    target_kl: float = 0.025              # Stop epoch early if KL > target
+    target_kl: float = 0.015              # Stop epoch early if KL > target
     
     # Network architecture
     policy_layers: tuple = (512, 512, 256, 128)   # Deeper policy network (MLP only)
