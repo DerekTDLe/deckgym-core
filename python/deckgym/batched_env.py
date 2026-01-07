@@ -86,6 +86,9 @@ class BatchedDeckGymEnv(VecEnv):
         self._episode_actions_since_end_turn = np.zeros(n_envs, dtype=np.int32)
         self._episode_turn_count = np.zeros(n_envs, dtype=np.int32)
         self._episode_total_actions_per_turn = np.zeros(n_envs, dtype=np.float32)
+        
+        from deckgym.diagnostic_logger import get_logger
+        self.diagnostic_logger = get_logger()
     
     def _sample_deck_pair(self) -> Tuple[str, str]:
         """Sample a deck pair from the loader.
@@ -140,9 +143,21 @@ class BatchedDeckGymEnv(VecEnv):
                 self._episode_turn_count[i] += 1
                 self._episode_total_actions_per_turn[i] += self._episode_actions_since_end_turn[i]
                 self._episode_actions_since_end_turn[i] = 0
+            self.diagnostic_logger.record_action(i, action)
         
-        # Single FFI call steps all environments!
-        obs_flat, rewards, dones, masks_flat, terminal_obs = self.vec_game.step_batch(actions)
+        # Single FFI call steps all environments with panic protection
+        try:
+            obs_flat, rewards, dones, masks_flat, terminal_obs = self.vec_game.step_batch(actions)
+        except BaseException as e:
+            print(f"CRITICAL: Panic in vec_game.step_batch: {e}")
+            # Try to log states for all envs to help debug the panic
+            for i in range(self.n_envs):
+                try:
+                    state = self.vec_game.get_state(i)
+                    self.diagnostic_logger.log_error("batch_panic", i, state, {"error": str(e), "actions": actions})
+                except:
+                    pass
+            raise e
         
         # Reshape outputs
         obs = np.array(obs_flat, dtype=np.float32).reshape(self.n_envs, -1)
