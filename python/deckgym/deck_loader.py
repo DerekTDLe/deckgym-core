@@ -251,6 +251,10 @@ class MetaDeckLoader:
         max_strength = max_rate / 100.0
         return [d for d in self.decks if min_strength <= d.strength <= max_strength]
     
+    def sample_pair(self, mode: str = "hierarchical") -> tuple[str, str]:
+        """Sample two decks for self-play."""
+        return self.sample_deck(mode), self.sample_deck(mode)
+    
     def __len__(self) -> int:
         return len(self.decks)
 

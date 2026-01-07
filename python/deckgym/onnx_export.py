@@ -89,7 +89,8 @@ def export_policy_to_onnx(
     wrapper = PolicyWrapper(policy)
     wrapper.eval()
     
-    # Move to CPU for export
+    # Save original device and move to CPU for export
+    original_device = next(policy.parameters()).device
     wrapper = wrapper.cpu()
     
     # Create dummy input
@@ -122,6 +123,9 @@ def export_policy_to_onnx(
         )
     
     print(f"[ONNX] Exported policy to {output_path}")
+    
+    # Restore model to original device
+    wrapper = wrapper.to(original_device)
     
     # Validate if requested
     if validate:

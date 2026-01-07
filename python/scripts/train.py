@@ -36,9 +36,8 @@ from stable_baselines3.common.monitor import Monitor
 
 from deckgym.env import DeckGymEnv
 from deckgym.batched_env import BatchedDeckGymEnv
-from deckgym.deck_loader import CurriculumDeckLoader, MetaDeckLoader
+from deckgym.deck_loader import MetaDeckLoader
 from deckgym.attention_policy import CardAttentionExtractor, create_attention_policy_kwargs
-from deckgym.curriculum import CurriculumManager
 
 # =============================================================================
 # Configuration
@@ -49,7 +48,6 @@ class TrainingConfig:
     """All training hyperparameters in one place."""
     
     # Paths
-    simple_deck_path: str = "simple_deck.json"
     meta_deck_path: str = "meta_deck.json"
     save_path: str = "models/rl_bot"
     checkpoint_dir: str = "./checkpoints/"
@@ -58,36 +56,34 @@ class TrainingConfig:
     
     # Training duration
     total_timesteps: int = 30_000_000
-    checkpoint_freq: int = 100_000        # Per env (actual = this × n_envs)
+    checkpoint_freq: int = 10_000         # Checkpoint every 10k steps
     
     # PPO hyperparameters
-    base_learning_rate: float = 1e-4      # Higher LR for attention (was 5e-5)
-    min_learning_rate: float = 1e-5       # Lower floor LR
-    warmup_steps: int = 300              # LR warmup steps (critical for attention stability)
-    n_steps: int = 8192                   # More experience per update
-    batch_size: int = 2048                # Larger batch for better GPU utilization
-    n_epochs: int = 8                     # Reduced to compensate for larger n_steps
-    gamma: float = 0.98                   # Reduced for shorter episodes
+    base_learning_rate: float = 3e-4      # Peak LR after warmup
+    min_learning_rate: float = 1e-4       # Final LR after decay
+    warmup_ratio: float = 0.02            # 2% of total steps for warmup
+    n_steps: int = 256                    # Steps per env per rollout
+    batch_size: int = 1024                # Minibatch size
+    n_epochs: int = 8                     # PPO epochs per update
+    gamma: float = 0.98                   # Discount factor
     gae_lambda: float = 0.95              # GAE lambda
-    ent_coef: float = 0.02                # Higher entropy for larger model
+    ent_coef: float = 0.02                # Entropy coefficient
     vf_coef: float = 0.5                  # Value function coefficient
     clip_range: float = 0.2               # PPO clipping range
-    max_grad_norm: float = 1.0            # Gradient clipping (was 0.5, higher for attention)
+    max_grad_norm: float = 1.0            # Gradient clipping
     target_kl: float = 0.015              # Stop epoch early if KL > target
     
-    # Network architecture
-    policy_layers: tuple = (512, 512, 256, 128)   # Deeper policy network (MLP only)
-    value_layers: tuple = (512, 512, 256)         # Match policy depth for better value estimation (MLP only)
-    use_attention: bool = True                    # Default to attention-based policy
-    attention_embed_dim: int = 256                # Larger embedding for better card representations
-    attention_num_heads: int = 4                  # More heads for diverse attention patterns
-    attention_num_layers: int = 2                 # Deeper transformer for complex reasoning
-    use_silu: bool = True                         # Use SiLU activation (better than ReLU)
+    # Network architecture (Attention)
+    use_attention: bool = True
+    attention_embed_dim: int = 256        # Embedding dimension
+    attention_num_heads: int = 8          # Attention heads
+    attention_num_layers: int = 3         # Transformer layers
+    policy_layers: tuple = (512, 256, 128)  # Policy head after attention
+    value_layers: tuple = (512, 256)        # Value head after attention
+    use_silu: bool = True                   # Use SiLU activation
     
-    # Self-play
-    frozen_opponent_update_freq: int = 75_000     # Slower updates for stability (was 50k)
-    adaptive_frozen_opponent: bool = True         # Enable adaptive opponent updates
-    target_win_rate: float = 0.55                 # Target win rate for adaptive updates
+    # Self-play (frozen opponent updates)
+    frozen_opponent_update_rollouts: int = 8  # Update frozen opponent every N rollouts
     
     # Game limits
     max_turns: int = 99              # Official Pokemon TCG Pocket limit
@@ -95,8 +91,8 @@ class TrainingConfig:
     max_total_actions: int = 500     # Prevents runaway episodes
     
     # Parallel environments
-    n_envs: int = 32                  # 32 parallel environments for faster training
-    use_batched_env: bool = True     # Use Rust-side batched env (faster, ~7000 steps/sec)
+    n_envs: int = 32                  # 32 parallel environments
+    use_batched_env: bool = True     # Use Rust-side batched env
     
     # Device
     device: str = "auto"
@@ -105,45 +101,39 @@ class TrainingConfig:
         """
         Learning rate schedule with warmup + cosine annealing.
         
-        Standard for modern transformers (GPT, BERT, etc.):
-        - Linear warmup: 0 → base_lr
-        - Cosine decay: base_lr → min_lr (smooth curve)
+        - Linear warmup: 0 → base_lr (first warmup_ratio % of training)
+        - Cosine decay: base_lr → min_lr
         """
         import math
         
         base_lr = self.base_learning_rate
         min_lr = self.min_learning_rate
-        warmup_steps = self.warmup_steps
         
-        if warmup_steps > 0 and total_timesteps:
-            # Calculate total updates
+        if total_timesteps:
+            # Calculate warmup steps from ratio
             total_updates = total_timesteps // self.n_steps
+            warmup_updates = int(total_updates * self.warmup_ratio)
             
             def lr_schedule_cosine(progress_remaining: float) -> float:
                 # progress_remaining goes from 1.0 → 0.0
                 current_update = int((1.0 - progress_remaining) * total_updates)
                 
-                if current_update < warmup_steps:
+                if current_update < warmup_updates:
                     # Warmup phase: linear 0 → base_lr
-                    return (current_update / warmup_steps) * base_lr
+                    return (current_update / max(1, warmup_updates)) * base_lr
                 else:
                     # Cosine annealing: base_lr → min_lr
-                    progress = (current_update - warmup_steps) / (total_updates - warmup_steps)
+                    decay_updates = total_updates - warmup_updates
+                    if decay_updates <= 0:
+                        return min_lr
+                    progress = (current_update - warmup_updates) / decay_updates
                     cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
                     return min_lr + (base_lr - min_lr) * cosine_decay
             
             return lr_schedule_cosine
         else:
-            # No warmup: simple cosine decay
-            import math
-            
-            def lr_schedule_simple(progress_remaining: float) -> float:
-                # Cosine annealing from base_lr to min_lr
-                progress = 1.0 - progress_remaining
-                cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
-                return min_lr + (base_lr - min_lr) * cosine_decay
-            
-            return lr_schedule_simple
+            # Fallback: constant LR
+            return lambda _: base_lr
 
 
 # Default configuration
@@ -169,41 +159,40 @@ def load_config_from_yaml(yaml_path: str) -> TrainingConfig:
     # Model params
     if 'model' in config_dict:
         flat_config['attention_embed_dim'] = config_dict['model'].get('attention_embed_dim', 256)
-        flat_config['attention_num_heads'] = config_dict['model'].get('attention_num_heads', 4)
-        flat_config['attention_num_layers'] = config_dict['model'].get('attention_num_layers', 2)
+        flat_config['attention_num_heads'] = config_dict['model'].get('attention_num_heads', 8)
+        flat_config['attention_num_layers'] = config_dict['model'].get('attention_num_layers', 3)
         flat_config['use_attention'] = config_dict['model'].get('use_attention', True)
         flat_config['use_silu'] = config_dict['model'].get('use_silu', True)
         
-        # Load net_arch for MLP models
         if 'net_arch' in config_dict['model']:
             net_arch = config_dict['model']['net_arch']
-            flat_config['policy_layers'] = tuple(net_arch.get('pi', [512, 512, 256, 128]))
-            flat_config['value_layers'] = tuple(net_arch.get('vf', [512, 512, 256]))
+            flat_config['policy_layers'] = tuple(net_arch.get('pi', [512, 256, 128]))
+            flat_config['value_layers'] = tuple(net_arch.get('vf', [512, 256]))
     
     # PPO params
     if 'ppo' in config_dict:
-        flat_config['base_learning_rate'] = config_dict['ppo'].get('learning_rate', 5e-5)
-        flat_config['min_learning_rate'] = config_dict['ppo'].get('min_learning_rate', 1e-5)
-        flat_config['batch_size'] = config_dict['ppo'].get('batch_size', 2048)
-        flat_config['n_steps'] = config_dict['ppo'].get('n_steps', 8192)
+        flat_config['base_learning_rate'] = config_dict['ppo'].get('learning_rate', 3e-4)
+        flat_config['min_learning_rate'] = config_dict['ppo'].get('min_learning_rate', 1e-4)
+        flat_config['warmup_ratio'] = config_dict['ppo'].get('warmup_ratio', 0.02)
+        flat_config['batch_size'] = config_dict['ppo'].get('batch_size', 1024)
+        flat_config['n_steps'] = config_dict['ppo'].get('n_steps', 256)
         flat_config['n_epochs'] = config_dict['ppo'].get('n_epochs', 8)
         flat_config['gamma'] = config_dict['ppo'].get('gamma', 0.98)
         flat_config['gae_lambda'] = config_dict['ppo'].get('gae_lambda', 0.95)
         flat_config['ent_coef'] = config_dict['ppo'].get('ent_coef', 0.02)
         flat_config['vf_coef'] = config_dict['ppo'].get('vf_coef', 0.5)
         flat_config['clip_range'] = config_dict['ppo'].get('clip_range', 0.2)
-        flat_config['target_kl'] = config_dict['ppo'].get('target_kl', 0.025)
+        flat_config['max_grad_norm'] = config_dict['ppo'].get('max_grad_norm', 1.0)
+        flat_config['target_kl'] = config_dict['ppo'].get('target_kl', 0.015)
     
     # Training params
     if 'training' in config_dict:
         flat_config['total_timesteps'] = config_dict['training'].get('total_timesteps', 30_000_000)
-        flat_config['checkpoint_freq'] = config_dict['training'].get('checkpoint_freq', 100_000)
+        flat_config['checkpoint_freq'] = config_dict['training'].get('checkpoint_freq', 10_000)
         flat_config['n_envs'] = config_dict['training'].get('n_envs', 32)
         flat_config['use_batched_env'] = config_dict['training'].get('use_batched_env', True)
         flat_config['device'] = config_dict['training'].get('device', 'auto')
-        flat_config['frozen_opponent_update_freq'] = config_dict['training'].get('frozen_opponent_update_freq', 75_000)
-        flat_config['adaptive_frozen_opponent'] = config_dict['training'].get('adaptive_frozen_opponent', True)
-        flat_config['target_win_rate'] = config_dict['training'].get('target_win_rate', 0.55)
+        flat_config['frozen_opponent_update_rollouts'] = config_dict['training'].get('frozen_opponent_update_rollouts', 8)
     
     # Environment params
     if 'environment' in config_dict:
@@ -213,7 +202,6 @@ def load_config_from_yaml(yaml_path: str) -> TrainingConfig:
     
     # Paths
     if 'paths' in config_dict:
-        flat_config['simple_deck_path'] = config_dict['paths'].get('simple_deck_path', 'simple_deck.json')
         flat_config['meta_deck_path'] = config_dict['paths'].get('meta_deck_path', 'meta_deck.json')
         flat_config['save_path'] = config_dict['paths'].get('save_path', 'models/rl_bot')
         flat_config['checkpoint_dir'] = config_dict['paths'].get('checkpoint_dir', './checkpoints/')
@@ -539,94 +527,45 @@ class FrozenOpponentCallback(BaseCallback):
     """
     Periodically updates the frozen opponent with current agent weights.
     
-    If adaptive=True, adjusts update frequency based on win rate:
-    - Win rate too high → update more often (harder opponent)
-    - Win rate too low → update less often (easier opponent)
-    
-    Supports both single env and DummyVecEnv.
+    Updates happen every N rollouts (not timesteps) for more predictable behavior.
+    Exports policy to ONNX for fast Rust-side inference.
     """
     
     def __init__(
         self,
         env,
         n_envs: int = 1,
-        update_freq: int = 50_000,
-        adaptive: bool = True,
-        target_win_rate: float = 0.55,
-        min_freq: int = 25_000,
-        max_freq: int = 100_000,
-        verbose: int = 0,
+        update_every_n_rollouts: int = 8,
+        verbose: int = 1,
     ):
         super().__init__(verbose)
         self.env = env
         self.n_envs = n_envs
-        self.base_freq = update_freq
-        self.current_freq = update_freq
-        self.adaptive = adaptive
-        self.target_win_rate = target_win_rate
-        self.min_freq = min_freq
-        self.max_freq = max_freq
-        self.last_update = 0
-        self.win_buffer = []  # Track recent episode outcomes
+        self.update_every_n_rollouts = update_every_n_rollouts
+        self.rollout_count = 0
+        self._frozen_model = None
+    
+    def _on_rollout_end(self) -> None:
+        """Called at end of each rollout collection."""
+        self.rollout_count += 1
+        
+        if self.rollout_count % self.update_every_n_rollouts == 0:
+            self._update_frozen_opponent()
     
     def _on_step(self) -> bool:
-        # Track wins/losses from episode info
-        if self.adaptive:
-            infos = self.locals.get('infos', [])
-            for info in infos:
-                if 'episode' in info:
-                    # Episode ended: reward > 0 means win
-                    ep_reward = info['episode'].get('r', 0)
-                    self.win_buffer.append(1 if ep_reward > 0 else 0)
-                    if len(self.win_buffer) > 100:
-                        self.win_buffer.pop(0)
-            
-            # Adjust frequency based on win rate
-            if len(self.win_buffer) >= 20:
-                win_rate = sum(self.win_buffer) / len(self.win_buffer)
-                if win_rate > self.target_win_rate + 0.10:
-                    # Too easy → update more often
-                    self.current_freq = self.min_freq
-                elif win_rate < self.target_win_rate - 0.10:
-                    # Too hard → update less often
-                    self.current_freq = self.max_freq
-                else:
-                    # In target range → use base frequency
-                    self.current_freq = self.base_freq
-        
-        if self.num_timesteps - self.last_update >= self.current_freq:
-            self._update_frozen_opponent()
-            self.last_update = self.num_timesteps
-            
-            if self.verbose > 0:
-                wr = sum(self.win_buffer) / len(self.win_buffer) if self.win_buffer else 0.5
-                print(f"[Step {self.num_timesteps:,}] Updated frozen opponent (WR: {wr:.1%}, freq: {self.current_freq:,})")
-        
         return True
     
     def _update_frozen_opponent(self):
-        """Save current model and load as frozen opponent on CPU."""
+        """Export current model to ONNX and set as opponent."""
         import gc
         
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "frozen_model")
-            self.model.save(path)
-            # Load on CPU to avoid GPU contention with policy training
-            new_frozen = MaskablePPO.load(path, device="cpu")
-        
-        # Clean up old frozen model to prevent memory leak
-        if hasattr(self, '_frozen_model') and self._frozen_model is not None:
+        # Clean up old frozen model
+        if self._frozen_model is not None:
             del self._frozen_model
             gc.collect()
         
-        self._frozen_model = new_frozen
-        
-        if self.n_envs == 1:
-            # Single env: unwrap Monitor -> ActionMasker to get SelfPlayEnv
-            inner_env = self.env.env.env if hasattr(self.env.env, 'env') else self.env.env
-            inner_env.set_opponent_model(self._frozen_model)
-        elif isinstance(self.env, BatchedDeckGymEnv):
-            # BatchedDeckGymEnv: export to ONNX and set as opponent
+        if isinstance(self.env, BatchedDeckGymEnv):
+            # BatchedDeckGymEnv: export to ONNX for Rust-side inference
             try:
                 from deckgym.onnx_export import export_policy_to_onnx
                 
@@ -638,86 +577,28 @@ class FrozenOpponentCallback(BaseCallback):
                 self.env.vec_game.set_onnx_opponent(onnx_path, deterministic=False)
                 
                 if self.verbose > 0:
-                    print(f"[ONNX] Set frozen opponent from {onnx_path}")
+                    print(f"[Rollout {self.rollout_count}] Updated frozen opponent (ONNX)")
             except AttributeError as e:
-                # set_onnx_opponent may not exist if compiled without onnx feature
-                print(f"[WARNING] ONNX opponent not available (compile with 'onnx' feature): {e}")
+                print(f"[WARNING] ONNX opponent not available: {e}")
             except Exception as e:
                 print(f"[WARNING] Failed to set ONNX opponent: {e}")
         else:
-            # DummyVecEnv: update all environments (Monitor -> ActionMasker -> SelfPlayEnv)
-            for i in range(self.n_envs):
-                self.env.envs[i].env.env.set_opponent_model(self._frozen_model)
-
-
-class CurriculumCallback(BaseCallback):
-    """
-    Manages curriculum stage transitions using continuous win rate tracking.
-    
-    Tracks wins/losses from training episodes (no separate evaluation runs).
-    Checks for stage advancement at each rollout end.
-    """
-    
-    def __init__(
-        self,
-        env,
-        curriculum,  # CurriculumManager instance
-        n_envs: int = 1,
-        verbose: int = 1,
-    ):
-        super().__init__(verbose)
-        self.env = env
-        self.curriculum = curriculum
-        self.n_envs = n_envs
-        self._last_log_step = 0
-    
-    def _on_step(self) -> bool:
-        """Track episode outcomes from training."""
-        for info in self.locals.get("infos", []):
-            if "episode" in info:
-                reward = info["episode"].get("r", 0)
-                self.curriculum.record_episode(won=(reward > 0))
-        return True
-    
-    def _on_rollout_end(self) -> None:
-        """Check for stage advancement at end of each rollout."""
-        stage = self.curriculum.current_stage
-        
-        # Log progress periodically (every ~50k steps)
-        if self.verbose > 0 and self.num_timesteps - self._last_log_step >= 50_000:
-            self._last_log_step = self.num_timesteps
-            wr = self.curriculum.win_rate
-            count = self.curriculum.episode_count
-            threshold = stage.win_rate_threshold
-            threshold_str = f"{threshold:.0%}" if threshold else "∞"
-            print(f"[Step {self.num_timesteps:,}] Stage: {stage.name}, WR: {wr:.1%} ({count} eps), threshold: {threshold_str}")
+            # CPU-based frozen model for non-batched envs
+            with tempfile.TemporaryDirectory() as tmpdir:
+                path = os.path.join(tmpdir, "frozen_model")
+                self.model.save(path)
+                self._frozen_model = MaskablePPO.load(path, device="cpu")
             
-            # Log to TensorBoard if available
-            if self.logger:
-                self.logger.record("curriculum/win_rate", wr)
-                self.logger.record("curriculum/stage_idx", self.curriculum.current_stage_idx)
-                self.logger.record("curriculum/episode_count", count)
-        
-        # Check for stage advancement
-        if self.curriculum.check_advancement():
-            new_stage = self.curriculum.current_stage
-            self._update_opponent_type(new_stage.opponent)
-    
-    def _update_opponent_type(self, opponent_type: str):
-        """Update all environments to use the new opponent type."""
-        if self.n_envs == 1:
-            inner_env = self.env.env.env if hasattr(self.env.env, 'env') else self.env.env
-            inner_env.set_opponent_type(opponent_type)
-        elif isinstance(self.env, BatchedDeckGymEnv):
-            # BatchedDeckGymEnv handles this directly
-            self.env.set_opponent_type(opponent_type)
-        else:
-            # DummyVecEnv with SelfPlayEnv wrappers
-            for i in range(self.n_envs):
-                self.env.envs[i].env.env.set_opponent_type(opponent_type)
-        
-        if self.verbose > 0:
-            print(f"[CURRICULUM] Switched all envs to opponent_type='{opponent_type}'")
+            if self.n_envs == 1:
+                inner_env = self.env.env.env if hasattr(self.env.env, 'env') else self.env.env
+                inner_env.set_opponent_model(self._frozen_model)
+            else:
+                for i in range(self.n_envs):
+                    self.env.envs[i].env.env.set_opponent_model(self._frozen_model)
+            
+            if self.verbose > 0:
+                print(f"[Rollout {self.rollout_count}] Updated frozen opponent (CPU)")
+
 
 
 # =============================================================================
@@ -730,9 +611,8 @@ def mask_fn(env: SelfPlayEnv) -> np.ndarray:
 
 
 def make_env(
-    deck_loader: CurriculumDeckLoader,
+    deck_loader: MetaDeckLoader,
     config: TrainingConfig,
-    opponent_type: str = "e2",
 ) -> callable:
     """
     Factory function to create training environments.
@@ -740,15 +620,13 @@ def make_env(
     Args:
         deck_loader: Deck loader for sampling
         config: Training config
-        opponent_type: "e2", "e3", or "self"
     
-    For DummyVecEnv, all envs share the same deck_loader (efficient).
-    Monitor wrapper enables episode stats for TensorBoard.
+    Uses self-play (opponent_type=None) by default.
     """
     def _init() -> gym.Env:
-        env = SelfPlayEnv(deck_loader, opponent_type=opponent_type, config=config)
+        env = SelfPlayEnv(deck_loader, opponent_type=None, config=config)
         env = ActionMasker(env, mask_fn)
-        env = Monitor(env)  # Track ep_len, ep_rew for TensorBoard
+        env = Monitor(env)
         return env
     return _init
 
@@ -771,7 +649,6 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     # Build config dict for logging/saving
     config_dict = {
         # Paths
-        "simple_deck_path": config.simple_deck_path,
         "meta_deck_path": config.meta_deck_path,
         "save_path": config.save_path,
         "checkpoint_dir": config.checkpoint_dir,
@@ -783,6 +660,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         # PPO hyperparameters
         "base_learning_rate": config.base_learning_rate,
         "min_learning_rate": config.min_learning_rate,
+        "warmup_ratio": config.warmup_ratio,
         "n_steps": config.n_steps,
         "batch_size": config.batch_size,
         "n_epochs": config.n_epochs,
@@ -791,6 +669,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         "ent_coef": config.ent_coef,
         "vf_coef": config.vf_coef,
         "clip_range": config.clip_range,
+        "max_grad_norm": config.max_grad_norm,
         "target_kl": config.target_kl,
         # Network architecture
         "use_attention": config.use_attention,
@@ -801,9 +680,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         "value_layers": list(config.value_layers),
         "use_silu": config.use_silu,
         # Self-play
-        "frozen_opponent_update_freq": config.frozen_opponent_update_freq,
-        "adaptive_frozen_opponent": config.adaptive_frozen_opponent,
-        "target_win_rate": config.target_win_rate,
+        "frozen_opponent_update_rollouts": config.frozen_opponent_update_rollouts,
         # Game limits
         "max_turns": config.max_turns,
         "max_actions_per_turn": config.max_actions_per_turn,
@@ -815,94 +692,71 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     }
     
     print(f"\n{'─' * 60}")
-    print("  TRAINING CONFIGURATION")
+    print("  TRAINING CONFIGURATION (Self-Play)")
     print(f"{'─' * 60}")
     
     print("\n  [▸] Paths:")
-    print(f"     Save path:         {config.save_path}")
+    print(f"     Meta decks:        {config.meta_deck_path}")
     print(f"     Checkpoint dir:    {config.checkpoint_dir}")
-    print(f"     TensorBoard dir:   {config.tensorboard_dir}")
     if config.resume_path:
         print(f"     Resume from:       {config.resume_path}")
     
     print("\n  [◷] Training Duration:")
     print(f"     Total timesteps:   {config.total_timesteps:,}")
-    print(f"     Checkpoint freq:   {config.checkpoint_freq:,} (per env)")
+    print(f"     Checkpoint freq:   {config.checkpoint_freq:,}")
     
     print("\n  [⬢] PPO Hyperparameters:")
-    print(f"     Learning rate:     {config.base_learning_rate} → {config.min_learning_rate} (linear decay)")
+    print(f"     Learning rate:     0 → {config.base_learning_rate} → {config.min_learning_rate} (warmup {config.warmup_ratio:.0%})")
     print(f"     Batch size:        {config.batch_size:,}")
-    print(f"     N steps:           {config.n_steps:,} (buffer = {config.n_steps * config.n_envs:,})")
+    print(f"     Rollout buffer:    {config.n_steps * config.n_envs:,} ({config.n_steps} steps × {config.n_envs} envs)")
     print(f"     N epochs:          {config.n_epochs}")
-    print(f"     Gamma:             {config.gamma}")
-    print(f"     GAE lambda:        {config.gae_lambda}")
-    print(f"     Entropy coef:      {config.ent_coef}")
-    print(f"     Value coef:        {config.vf_coef}")
-    print(f"     Clip range:        {config.clip_range}")
-    print(f"     Target KL:         {config.target_kl}")
+    print(f"     Gradient clip:     {config.max_grad_norm}")
     
     print("\n  [△] Network Architecture:")
     if config.use_attention:
-        print(f"     Type:              Attention-based (CardAttentionExtractor)")
+        print(f"     Type:              Attention (CardAttentionExtractor)")
         print(f"     Embed dim:         {config.attention_embed_dim}")
-        print(f"     Num heads:         {config.attention_num_heads}")
-        print(f"     Num layers:        {config.attention_num_layers}")
-        print(f"     Policy head:       [256, 128]")
-        print(f"     Value head:        [256, 128]")
+        print(f"     Heads:             {config.attention_num_heads}")
+        print(f"     Layers:            {config.attention_num_layers}")
+        print(f"     Policy head:       {list(config.policy_layers)}")
+        print(f"     Value head:        {list(config.value_layers)}")
     else:
         print(f"     Type:              MLP")
         print(f"     Policy layers:     {config.policy_layers}")
         print(f"     Value layers:      {config.value_layers}")
-    print(f"     Activation:        {'SiLU' if config.use_silu else 'ReLU'}")
     
     print("\n  [↻] Self-Play:")
-    print(f"     Opponent update:   every {config.frozen_opponent_update_freq:,} steps")
-    print(f"     Adaptive:          {config.adaptive_frozen_opponent}")
-    print(f"     Target win rate:   {config.target_win_rate:.0%}")
-    
-    print("\n  [⬟] Environment:")
-    print(f"     N envs:            {config.n_envs}")
-    print(f"     Batched (Rust):    {config.use_batched_env}")
-    print(f"     Device:            {config.device}")
-    print(f"     Max turns:         {config.max_turns}")
+    print(f"     Opponent update:   every {config.frozen_opponent_update_rollouts} rollouts")
+    print(f"     Mode:              Pure self-play (ONNX frozen opponent)")
     
     print(f"{'─' * 60}\n")
     
     # Setup environment(s)
-    print("\n[1/4] Loading decks...")
-    deck_loader = CurriculumDeckLoader(config.simple_deck_path, config.meta_deck_path)
-    meta_loader = MetaDeckLoader(config.meta_deck_path)  # For evaluation
+    print("[1/4] Loading meta decks...")
+    deck_loader = MetaDeckLoader(config.meta_deck_path)
     
-    # Create curriculum manager for automatic stage transitions
-    curriculum = CurriculumManager(
-        simple_loader=MetaDeckLoader(config.simple_deck_path),
-        meta_loader=meta_loader,
-    )
-    initial_opponent = curriculum.current_stage.opponent
-    print(f"      Curriculum stage: {curriculum.current_stage.name} (vs {initial_opponent})")
-    
-    print(f"[2/4] Creating {config.n_envs} environment(s) with opponent_type='{initial_opponent}'...")
+    print(f"[2/4] Creating {config.n_envs} environment(s) for self-play...")
     if config.n_envs == 1:
         # Single environment (simpler)
-        single_env = SelfPlayEnv(deck_loader, opponent_type=initial_opponent, config=config)
+        single_env = SelfPlayEnv(deck_loader, opponent_type=None, config=config)
         env = ActionMasker(single_env, mask_fn)
-        env = Monitor(env)  # Track ep_len, ep_rew for TensorBoard
+        env = Monitor(env)
     elif config.use_batched_env:
         # High-performance Rust-side batched environment
         print(f"      Using BatchedDeckGymEnv (Rust-side batching)")
         env = BatchedDeckGymEnv(
             n_envs=config.n_envs,
             deck_loader=deck_loader,
-            opponent_type=initial_opponent,
+            opponent_type=None,  # Self-play via ONNX
         )
         single_env = None
     else:
         # Legacy: Multiple environments with DummyVecEnv
-        env = DummyVecEnv([make_env(deck_loader, config, initial_opponent) for _ in range(config.n_envs)])
-        single_env = None  # Will be set after model init
+        env = DummyVecEnv([make_env(deck_loader, config) for _ in range(config.n_envs)])
+        single_env = None
     
     # Verify observation space
-    expected_obs_size = 2873  # 41 global + 24 cards × 118 features
+    expected_obs_size = 2129  # 41 global + 18 cards × 116 features
     if env.observation_space.shape[0] != expected_obs_size:
         raise ValueError(
             f"Observation size mismatch! Expected {expected_obs_size}, "
@@ -922,7 +776,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
             embed_dim=config.attention_embed_dim,
             num_heads=config.attention_num_heads,
             num_layers=config.attention_num_layers,
-            net_arch=dict(pi=[256, 128], vf=[256, 128]),  # Smaller heads after attention
+            net_arch=dict(pi=list(config.policy_layers), vf=list(config.value_layers)),
         )
         policy_kwargs["activation_fn"] = activation_fn
     else:
@@ -1009,31 +863,28 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
             save_path=config.checkpoint_dir,
             name_prefix="rl_bot",
         ),
-        CurriculumCallback(
+        EpisodeMetricsCallback(verbose=0),
+        FrozenOpponentCallback(
             env,
-            curriculum=curriculum,
             n_envs=config.n_envs,
+            update_every_n_rollouts=config.frozen_opponent_update_rollouts,
             verbose=1,
         ),
-        EpisodeMetricsCallback(verbose=0),  # Log actions_per_turn_mean
     ]
     
-    # FrozenOpponentCallback only needed for self-play stage
-    if initial_opponent == "self":
-        callbacks.append(
-            FrozenOpponentCallback(
-                env,
-                n_envs=config.n_envs,
-                update_freq=config.frozen_opponent_update_freq,
-                adaptive=config.adaptive_frozen_opponent,
-                target_win_rate=config.target_win_rate,
-                verbose=1,
-            )
-        )
-    
-    # Initialize frozen opponent only for self-play stage
-    if initial_opponent == "self":
-        print("      Loading frozen opponent on CPU...")
+    # Initialize frozen opponent with initial weights
+    print("      Initializing frozen opponent...")
+    if isinstance(env, BatchedDeckGymEnv):
+        try:
+            from deckgym.onnx_export import export_policy_to_onnx
+            
+            onnx_path = os.path.join(tempfile.gettempdir(), "frozen_opponent.onnx")
+            export_policy_to_onnx(model, onnx_path, validate=False)
+            env.vec_game.set_onnx_opponent(onnx_path, deterministic=False)
+            print(f"      ONNX opponent initialized")
+        except Exception as e:
+            print(f"      [WARNING] Could not initialize ONNX opponent: {e}")
+    else:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "initial_frozen")
             model.save(path)
@@ -1041,19 +892,15 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         
         if config.n_envs == 1:
             env.env.env.set_opponent_model(initial_frozen)
-        elif isinstance(env, BatchedDeckGymEnv):
-            # BatchedDeckGymEnv doesn't support self-play yet
-            print("      [WARNING] Self-play not supported with BatchedDeckGymEnv")
-            print("                Falling back to bot opponents. Set use_batched_env=False for self-play.")
         else:
             for i in range(config.n_envs):
                 env.envs[i].env.env.set_opponent_model(initial_frozen)
+        print(f"      CPU frozen opponent initialized")
     
     # Train
     print("[4/4] Starting training...")
     print(f"      Checkpoints: every {config.checkpoint_freq:,} steps")
-    if initial_opponent == "self":
-        print(f"      Opponent updates: every {config.frozen_opponent_update_freq:,} steps")
+    print(f"      Opponent updates: every {config.frozen_opponent_update_rollouts} rollouts")
     
     model.learn(
         total_timesteps=config.total_timesteps,
@@ -1084,10 +931,9 @@ if __name__ == "__main__":
     _defaults = TrainingConfig()
     
     # Config file (YAML) - load entire config from file
-    parser.add_argument("--config", type=str, default=None, help="Path to YAML config file (e.g., configs/large_model.yaml)")
+    parser.add_argument("--config", type=str, default=None, help="Path to YAML config file")
     
     # Paths
-    parser.add_argument("--simple", default=_defaults.simple_deck_path, help="Simple deck definitions")
     parser.add_argument("--meta", default=_defaults.meta_deck_path, help="Meta deck definitions")
     parser.add_argument("--save", default=_defaults.save_path, help="Model save path")
     
@@ -1096,28 +942,29 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint-freq", type=int, default=_defaults.checkpoint_freq, help="Checkpoint frequency")
     
     # PPO hyperparameters
-    parser.add_argument("--lr", type=float, default=_defaults.base_learning_rate, help="Base learning rate (linear decay)")
-    parser.add_argument("--min-lr", type=float, default=_defaults.min_learning_rate, help="Minimum learning rate floor")
-    parser.add_argument("--target-kl", type=float, default=_defaults.target_kl, help="Target KL for early stopping")
+    parser.add_argument("--lr", type=float, default=_defaults.base_learning_rate, help="Peak learning rate (after warmup)")
+    parser.add_argument("--min-lr", type=float, default=_defaults.min_learning_rate, help="Final learning rate")
     parser.add_argument("--batch-size", type=int, default=_defaults.batch_size, help="Batch size")
+    parser.add_argument("--n-steps", type=int, default=_defaults.n_steps, help="Steps per env per rollout")
     parser.add_argument("--n-epochs", type=int, default=_defaults.n_epochs, help="PPO epochs per update")
     parser.add_argument("--ent-coef", type=float, default=_defaults.ent_coef, help="Entropy coefficient")
     
     # Self-play
-    parser.add_argument("--opponent-update-freq", type=int, default=_defaults.frozen_opponent_update_freq, help="Frozen opponent update frequency")
+    parser.add_argument("--opponent-update-rollouts", type=int, default=_defaults.frozen_opponent_update_rollouts, 
+                        help="Update frozen opponent every N rollouts")
     
     # Parallelization
     parser.add_argument("--n-envs", type=int, default=_defaults.n_envs, help="Number of parallel environments")
-    parser.add_argument("--no-batched-env", action="store_true", help="Disable Rust-side batching (use DummyVecEnv instead) [Not recommanded]")
+    parser.add_argument("--no-batched-env", action="store_true", help="Disable Rust-side batching")
     
     # Resume
-    parser.add_argument("--resume", default=_defaults.resume_path, help="Path to checkpoint to resume training from")
+    parser.add_argument("--resume", default=_defaults.resume_path, help="Path to checkpoint to resume from")
     
-    # Attention policy (enabled by default now)
+    # Attention policy
     parser.add_argument("--no-attention", action="store_true", help="Disable attention, use MLP instead")
-    parser.add_argument("--attention-dim", type=int, default=None, help="Attention embedding dimension (overrides config)")
-    parser.add_argument("--attention-heads", type=int, default=None, help="Number of attention heads (overrides config)")
-    parser.add_argument("--attention-layers", type=int, default=None, help="Number of transformer layers (overrides config)")
+    parser.add_argument("--attention-dim", type=int, default=None, help="Attention embedding dimension")
+    parser.add_argument("--attention-heads", type=int, default=None, help="Number of attention heads")
+    parser.add_argument("--attention-layers", type=int, default=None, help="Number of transformer layers")
     
     # Device
     parser.add_argument("--device", default=_defaults.device, choices=["cpu", "cuda", "auto"])
@@ -1133,8 +980,6 @@ if __name__ == "__main__":
         config = TrainingConfig()
     
     # Override config with CLI arguments (CLI takes precedence)
-    if args.simple != _defaults.simple_deck_path:
-        config.simple_deck_path = args.simple
     if args.meta != _defaults.meta_deck_path:
         config.meta_deck_path = args.meta
     if args.save != _defaults.save_path:
@@ -1149,16 +994,16 @@ if __name__ == "__main__":
         config.base_learning_rate = args.lr
     if args.min_lr != _defaults.min_learning_rate:
         config.min_learning_rate = args.min_lr
-    if args.target_kl != _defaults.target_kl:
-        config.target_kl = args.target_kl
     if args.batch_size != _defaults.batch_size:
         config.batch_size = args.batch_size
+    if args.n_steps != _defaults.n_steps:
+        config.n_steps = args.n_steps
     if args.n_epochs != _defaults.n_epochs:
         config.n_epochs = args.n_epochs
     if args.ent_coef != _defaults.ent_coef:
         config.ent_coef = args.ent_coef
-    if args.opponent_update_freq != _defaults.frozen_opponent_update_freq:
-        config.frozen_opponent_update_freq = args.opponent_update_freq
+    if args.opponent_update_rollouts != _defaults.frozen_opponent_update_rollouts:
+        config.frozen_opponent_update_rollouts = args.opponent_update_rollouts
     if args.n_envs != _defaults.n_envs:
         config.n_envs = args.n_envs
     if args.no_batched_env:
