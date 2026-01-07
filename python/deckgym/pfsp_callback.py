@@ -92,14 +92,39 @@ class PFSPCallback(BaseCallback):
             print(f"[PFSP] Adding to pool every {add_to_pool_every_n_rollouts} rollouts")
             print(f"[PFSP] Selecting opponent every {select_opponent_every_n_rollouts} rollouts")
 
+    def _on_training_start(self) -> None:
+        """Called when training starts - initialize pool with current model."""
+        if self.verbose > 0:
+            print("[PFSP] Training started - adding initial opponent to pool")
+        
+        # Add current (untrained) model to pool as initial opponent
+        self._add_to_pool()
+        
+        # Select it as the first opponent
+        if self.opponent_pool:
+            first_opponent = list(self.opponent_pool.keys())[0]
+            self._set_opponent(first_opponent, self.opponent_pool[first_opponent]["path"])
+            if self.verbose > 0:
+                print(f"[PFSP] Initial opponent set: {first_opponent}")
+
     def _on_rollout_end(self) -> None:
         """Called at end of each rollout collection."""
         self.rollout_count += 1
 
         # Update win rates from recent episodes
         if len(self.episode_results) >= 10:  # Update every 10 episodes minimum
+            if self.verbose > 0:
+                # Count wins/losses per opponent
+                from collections import Counter
+                wins = Counter(name for name, won in self.episode_results if won)
+                losses = Counter(name for name, won in self.episode_results if not won)
+                print(f"[PFSP Debug] Rollout {self.rollout_count}: {len(self.episode_results)} episodes tracked")
+                for name in set(wins.keys()) | set(losses.keys()):
+                    print(f"  {name}: agent won {wins[name]}, agent lost {losses[name]}")
             self._update_winrates()
             self.episode_results.clear()
+        elif self.verbose > 0 and self.rollout_count % 5 == 0:
+            print(f"[PFSP Debug] Rollout {self.rollout_count}: only {len(self.episode_results)} episodes (need 10+)")
 
         # Add current agent to pool periodically
         if self.rollout_count % self.add_to_pool_every_n_rollouts == 0:
@@ -112,38 +137,43 @@ class PFSPCallback(BaseCallback):
     def _on_step(self) -> bool:
         """Called at each env step - track episode outcomes."""
         # Collect episode results from infos
-        if hasattr(self.locals, 'infos'):
-            infos = self.locals.get("infos", [])
-        else:
-            infos = self.locals.get("info", {})
-            if not isinstance(infos, list):
-                infos = [infos]
+        # Note: self.locals is a dict, so we use 'in' not hasattr
+        infos = self.locals.get("infos", [])
+        if not infos:
+            # Fallback for non-vectorized envs
+            info = self.locals.get("info", {})
+            infos = [info] if info else []
 
         for info in infos:
-            if "episode" in info and self.current_opponent_name:
+            if info and "episode" in info and self.current_opponent_name:
                 # Episode ended: check if agent won
                 episode_reward = info["episode"].get("r", 0)
                 agent_won = episode_reward > 0
                 self.episode_results.append((self.current_opponent_name, agent_won))
+                if self.verbose > 1:
+                    print(f"[PFSP] Episode tracked: vs {self.current_opponent_name}, reward={episode_reward:.2f}, agent_won={agent_won}")
 
         return True
 
     def _update_winrates(self):
         """Update opponent win rates based on recent episode results."""
+        # First, accumulate all results
         for opp_name, agent_won in self.episode_results:
             if opp_name in self.opponent_pool:
                 if agent_won:
                     self.opponent_pool[opp_name]["losses"] += 1  # Opponent lost
                 else:
                     self.opponent_pool[opp_name]["wins"] += 1   # Opponent won
-
-                # Keep window limited to recent games
-                total = self.opponent_pool[opp_name]["wins"] + self.opponent_pool[opp_name]["losses"]
-                if total > self.winrate_window:
-                    # Decay old stats (simple approach: scale down proportionally)
-                    scale = self.winrate_window / total
-                    self.opponent_pool[opp_name]["wins"] = int(self.opponent_pool[opp_name]["wins"] * scale)
-                    self.opponent_pool[opp_name]["losses"] = int(self.opponent_pool[opp_name]["losses"] * scale)
+        
+        # Then, apply decay ONCE per opponent (not per episode!)
+        for opp_name in self.opponent_pool:
+            total = self.opponent_pool[opp_name]["wins"] + self.opponent_pool[opp_name]["losses"]
+            if total > self.winrate_window:
+                # Scale down to keep within window
+                scale = self.winrate_window / total
+                # Use round() instead of int() to avoid systematic bias
+                self.opponent_pool[opp_name]["wins"] = max(1, round(self.opponent_pool[opp_name]["wins"] * scale))
+                self.opponent_pool[opp_name]["losses"] = max(1, round(self.opponent_pool[opp_name]["losses"] * scale))
 
     def _add_to_pool(self):
         """Save current model to opponent pool."""
@@ -161,18 +191,24 @@ class PFSPCallback(BaseCallback):
             "added_at_step": self.num_timesteps,
         }
 
-        # Remove oldest if pool full (FIFO)
+        # Remove oldest if pool full (FIFO), but NEVER remove current opponent
         if len(self.opponent_pool) > self.pool_size:
-            oldest_name = min(self.opponent_pool.keys(),
-                            key=lambda k: self.opponent_pool[k]["added_at_step"])
-            oldest_path = Path(self.opponent_pool[oldest_name]["path"])
-            if oldest_path.exists():
-                oldest_path.unlink()  # Delete checkpoint file
-            del self.opponent_pool[oldest_name]
-            gc.collect()
+            # Find oldest that is NOT the current opponent
+            candidates = [
+                (name, data["added_at_step"])
+                for name, data in self.opponent_pool.items()
+                if name != self.current_opponent_name
+            ]
+            if candidates:
+                oldest_name = min(candidates, key=lambda x: x[1])[0]
+                oldest_path = Path(self.opponent_pool[oldest_name]["path"])
+                if oldest_path.exists():
+                    oldest_path.unlink()  # Delete checkpoint file
+                del self.opponent_pool[oldest_name]
+                gc.collect()
 
-            if self.verbose > 0:
-                print(f"[PFSP] Removed oldest opponent: {oldest_name}")
+                if self.verbose > 0:
+                    print(f"[PFSP] Removed oldest opponent: {oldest_name}")
 
         if self.verbose > 0:
             print(f"[PFSP Rollout {self.rollout_count}] Added {checkpoint_name} to pool (size: {len(self.opponent_pool)})")

@@ -28,8 +28,8 @@ model:
 
 ppo:
   # Optimized hyperparameters for attention + short episodes (37 steps)
-  learning_rate: 3e-4               # Standard PPO (6× higher than previous 5e-5)
-  min_learning_rate: 1e-4           # Final LR after decay
+  learning_rate: 1e-4               # Standard PPO (6× higher than previous 5e-5)
+  min_learning_rate: 1e-5           # Final LR after decay
   warmup_ratio: 0.02                # 2% warmup for attention stability
 
   # Critical: n_steps adapted to episode length
