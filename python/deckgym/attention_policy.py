@@ -135,7 +135,7 @@ class MultiHeadAttentionPooling(nn.Module):
         # Multiple learned query vectors (like multiple [CLS] tokens)
         # Each query can specialize in capturing different aspects
         self.queries = nn.Parameter(torch.zeros(num_queries, 1, embed_dim))
-        nn.init.normal_(self.queries, std=0.02)
+        nn.init.xavier_uniform_(self.queries)  # Better gradient flow than normal(0.02)
         
         # Projections for cross-attention
         # Q is separate (from learned queries), but K and V are fused for efficiency
@@ -375,9 +375,20 @@ def create_attention_policy_kwargs(
     num_heads: int = 4,
     num_layers: int = 2,
     net_arch: Optional[List[int]] = None,
+    ortho_init: bool = False,  # Disabled by default - SB3's gain=0.01 is too conservative
 ) -> Dict[str, Any]:
     """
     Create policy_kwargs dict for MaskablePPO.
+    
+    Args:
+        embed_dim: Embedding dimension for attention layers
+        num_heads: Number of attention heads
+        num_layers: Number of transformer layers
+        net_arch: Network architecture for policy/value nets
+        ortho_init: Whether to use orthogonal initialization (default: False)
+                   SB3's ortho_init uses gain=0.01 for action_net, which is 
+                   100× smaller than normal and causes gradient imbalance.
+                   Setting to False uses PyTorch's default Kaiming uniform.
     
     Usage:
         from attention_policy import create_attention_policy_kwargs
@@ -400,6 +411,7 @@ def create_attention_policy_kwargs(
             "num_layers": num_layers,
         },
         "net_arch": net_arch,
+        "ortho_init": ortho_init,  # Disable SB3's conservative init
     }
 
 
