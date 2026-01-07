@@ -177,18 +177,18 @@ impl EnvInstance {
                 let point_diff = my_points - opp_points;
                 let turn_count = self.state.turn_count as f32;
                 
-                // Base reward from point difference
-                let base = 1.0 + (point_diff / 6.0);
-                
                 // Speed factor: 1 + (13 - turns) / 13
                 let speed_factor = 1.0 + ((13.0 - turn_count) / 13.0);
                 
                 if winner == agent_player {
-                    // Victory: base * max(1.0, speed_factor)
+                    // Victory: (1.0 + diff/6) * speed [1.0 to 1.5 * speed]
+                    let base = 1.0 + (point_diff / 6.0);
                     base * speed_factor.max(1.0)
                 } else {
-                    // Loss: -base * speed_factor
-                    -base * speed_factor
+                    // Loss: (-1.0 + diff/6) * speed [-1.5 to -1.0 * speed]
+                    // Remember point_diff is negative here
+                    let base = -1.0 + (point_diff / 6.0);
+                    base * speed_factor
                 }
             }
             Some(GameOutcome::Tie) => 0.0,

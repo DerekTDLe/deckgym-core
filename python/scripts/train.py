@@ -426,11 +426,15 @@ class SelfPlayEnv(gym.Env):
                             speed_factor = 1.0 + ((13.0 - turn_count) / 13.0)
                             
                             if winner == 0:
-                                # Agent won: base * max(1.0, speed_factor)
-                                final_reward = base * max(1.0, speed_factor)
+                                # Agent won: (1.0 + diff/6) * speed
+                                # 3-0: (1 + 3/6) = 1.5 * speed
+                                # 3-2: (1 + 1/6) = 1.16 * speed
+                                final_reward = (1.0 + (point_diff / 6.0)) * max(1.0, speed_factor)
                             else:
-                                # Opponent won: -base * speed_factor
-                                final_reward = -base * speed_factor
+                                # Opponent won: (-1.0 + diff/6) * speed
+                                # 0-3 (diff -3): (-1 + -0.5) = -1.5 * speed (Heavy penalty)
+                                # 2-3 (diff -1): (-1 + -0.16) = -1.16 * speed (Lighter penalty)
+                                final_reward = (-1.0 + (point_diff / 6.0)) * speed_factor
                         else:
                             final_reward = 0.0  # Tie
                 

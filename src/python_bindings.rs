@@ -840,27 +840,19 @@ impl PyGame {
                             let point_diff = my_points - opp_points; // Range: -3 to +3
                             let turn_count = new_state.turn_count as f32;
                             
-                            // Base reward from point difference
-                            let base = 1.0 + (point_diff / 6.0);
-                            
                             // Speed factor: (13 - turns) / 13
-                            // Turn 0: 1.0, Turn 13: 0.0, Turn 20: -0.54
                             let speed_factor = 1.0 + ((13.0 - turn_count) / 13.0);
                             
                             if winner == state.current_player {
-                                // Victory: base * max(1.0, speed_factor)
-                                // Fast wins get bonus, slow wins capped at base
-                                // Turn 3, 3-0: 1.5 * 1.77 = 2.65
-                                // Turn 13, 3-0: 1.5 * 1.0 = 1.5
-                                // Turn 20, 3-0: 1.5 * 1.0 = 1.5 (capped)
+                                // Victory: (1.0 + diff/6) * speed
+                                let base = 1.0 + (point_diff / 6.0);
                                 base * speed_factor.max(1.0)
                             } else {
-                                // Loss: -base * speed_factor
-                                // Fast losses heavily penalized, slow losses less so
-                                // Turn 3, 0-3: -1.5 * 1.77 = -2.65
-                                // Turn 13, 0-3: -1.5 * 1.0 = -1.5
-                                // Turn 20, 2-3: -1.17 * 0.46 = -0.54 (mitigated!)
-                                -base * speed_factor
+                                // Loss: (-1.0 + diff/6) * speed
+                                // 0-3 (diff -3): (-1.5) * speed
+                                // 2-3 (diff -1): (-1.16) * speed
+                                let base = -1.0 + (point_diff / 6.0);
+                                base * speed_factor
                             }
                         }
                         Some(crate::state::GameOutcome::Tie) => 0.0,
