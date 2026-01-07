@@ -708,17 +708,56 @@ The 4 queries can specialize in different aspects:
 
 ---
 
-## Curriculum Progress
+## Run #7: Pure Self-Play Modernization
+**Date**: 2026-01-07 (Launched)  
+**Model**: Multi-Head Attention (Run #6 architecture refined)  
+**Config**: `configs/baseline.yaml`  
+**Status**: [IN PROGRESS] Transitioned to pure self-play
 
-| Stage | Opponent | Deck Source | Threshold | Status |
-|-------|----------|-------------|-----------|--------|
-| Warmup | e2 | Simple | 55% |  In Progress (47% WR) |
-| Meta | e2 | Meta | 55% | [LOCKED] Locked |
-| Advanced | e3 | Meta | 55% | [LOCKED] Locked |
-| Mastery | Self-play | Meta | N/A | [LOCKED] Locked |
+### Key Changes (Major Refactor)
 
-**Current Stage**: Warmup (vs e2, simple decks)  
-**Bottleneck**: Testing if model capacity is limiting performance
+1. **Abandoning Curriculum Training** 🎯
+   - Removed all stages (warmup, meta, advanced).
+   - Switched to **pure self-play** from step 1.
+   - Using `MetaDeckLoader` to sample from 100+ high-quality meta decks immediately.
+   - Rationale: Curriculum was causing catastrophic forgetting and skill local optima.
+
+2. **Observation Space Refinement (V3)** ✅
+   - Total cards: 24 → 18 (10 hand, 4 self board, 4 opponent board).
+   - Hand size capped at 10 (fixed observation size).
+   - Removed deck/discard card encoding (reduced noise).
+   - Final `OBSERVATION_SIZE`: **2129** (41 global + 18 × 116 features).
+
+3. **Architecture Hardening** ✅
+   - Transformer Encoder: 3 layers, 8 heads, 256 dim.
+   - Multi-Head Pooling: 4 learned queries (1024 dim output).
+   - Policy/Value Heads: 3 layers deep (512, 256, 128).
+   - Activation: GELU throughout.
+   - Normalization: PRE-NORM for stability.
+
+4. **Rust Core Stability** 🛡️
+   - Wrapped all environment loops in `catch_unwind`.
+   - Panics in game state (e.g., energy discard errors) now log a warning and force a single-env reset instead of crashing Python.
+
+5. **TrueSkill Calibration** 📊
+   - Shifted center from 25.0 to **1500.0**.
+   - Standard parameters: mu=1500, sigma=500, beta=250.
+
+### Expected Outcomes
+- Higher peak Elo (target: 2000+)
+- Faster adaptation to meta matchups.
+- 100% training uptime (no more crashes).
+
+---
+
+## Strategy Evolution
+
+| Stage | Approach | Result | Conclusion |
+|-------|----------|--------|------------|
+| Run #1-3 | Curriculum vs e2 | 1760 Elo | Local optima, limited by fixed opponent |
+| Run #4-5 | Attention Fixes | 1825 Elo | High variance, architecture bottlenecks |
+| Run #6 | Multi-Head Pool | - | Validated architecture improvements |
+| **Run #7** | **Pure Self-Play** | - | **Current State: Modern RL Regime** |
 
 ---
 

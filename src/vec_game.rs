@@ -307,16 +307,25 @@ impl VecGame {
     pub fn reset_all(&mut self) -> Vec<f32> {
         let mut observations = Vec::with_capacity(self.n_envs * OBSERVATION_SIZE);
 
-        for env in self.envs.iter_mut() {
-            self.seed_counter += 1;
-            env.reset(self.seed_counter);
+        for (i, env) in self.envs.iter_mut().enumerate() {
+            let _ = catch_unwind(AssertUnwindSafe(|| {
+                self.seed_counter += 1;
+                env.reset(self.seed_counter);
 
-            // If using bots, play bot turns first if bot goes first
-            if env.opponent_type.is_some() {
-                env.play_bot_turns();
-            }
+                // If using bots, play bot turns first if bot goes first
+                if env.opponent_type.is_some() {
+                    env.play_bot_turns();
+                }
+            })).map_err(|_| {
+                warn!("Panic caught in environment {} during reset_all! Forcing secondary reset.", i);
+                self.seed_counter += 1;
+                let _ = catch_unwind(AssertUnwindSafe(|| env.reset(self.seed_counter)));
+            });
 
-            observations.extend(env.get_observation());
+            // Get observation (from new episode if reset happened or fallback to zeros)
+            let obs = catch_unwind(AssertUnwindSafe(|| env.get_observation()))
+                .unwrap_or_else(|_| vec![0.0; OBSERVATION_SIZE]);
+            observations.extend(obs);
         }
 
         observations
@@ -324,13 +333,17 @@ impl VecGame {
 
     /// Reset a single environment with new decks
     pub fn reset_single(&mut self, env_idx: usize, deck_a: String, deck_b: String) {
-        self.seed_counter += 1;
-        self.envs[env_idx].reset_with_new_decks(deck_a, deck_b, self.seed_counter);
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            self.seed_counter += 1;
+            self.envs[env_idx].reset_with_new_decks(deck_a, deck_b, self.seed_counter);
 
-        // If using bots, play bot turns first if bot goes first
-        if self.envs[env_idx].opponent_type.is_some() {
-            self.envs[env_idx].play_bot_turns();
-        }
+            // If using bots, play bot turns first if bot goes first
+            if self.envs[env_idx].opponent_type.is_some() {
+                self.envs[env_idx].play_bot_turns();
+            }
+        })).map_err(|_| {
+            warn!("Panic caught in environment {} during reset_single!", env_idx);
+        });
     }
 
     /// Get batched action masks for all environments
@@ -338,8 +351,13 @@ impl VecGame {
     pub fn get_action_masks(&self) -> Vec<bool> {
         let mut masks = Vec::with_capacity(self.n_envs * ACTION_SPACE_SIZE);
 
-        for env in &self.envs {
-            masks.extend(env.get_action_mask());
+        for (i, env) in self.envs.iter().enumerate() {
+            let mask = catch_unwind(AssertUnwindSafe(|| env.get_action_mask()))
+                .unwrap_or_else(|_| {
+                    warn!("Panic caught in environment {} during get_action_mask! Returning safe mask.", i);
+                    vec![false; ACTION_SPACE_SIZE]
+                });
+            masks.extend(mask);
         }
 
         masks
@@ -350,8 +368,13 @@ impl VecGame {
     pub fn get_observations(&self) -> Vec<f32> {
         let mut observations = Vec::with_capacity(self.n_envs * OBSERVATION_SIZE);
 
-        for env in &self.envs {
-            observations.extend(env.get_observation());
+        for (i, env) in self.envs.iter().enumerate() {
+            let obs = catch_unwind(AssertUnwindSafe(|| env.get_observation()))
+                .unwrap_or_else(|_| {
+                    warn!("Panic caught in environment {} during get_observation!", i);
+                    vec![0.0; OBSERVATION_SIZE]
+                });
+            observations.extend(obs);
         }
 
         observations
@@ -523,24 +546,30 @@ impl VecGame {
                 &mut self.onnx_rng,
             );
 
-            // Apply actions
+            // Apply actions with panic protection
             for (j, &env_idx) in needs_onnx.iter().enumerate() {
                 let action_idx = actions[j];
-                let env = &mut self.envs[env_idx];
+                let _ = catch_unwind(AssertUnwindSafe(|| {
+                    let env = &mut self.envs[env_idx];
 
-                let indexed_actions = get_indexed_actions(&env.state);
-                if let Some((_, action)) =
-                    indexed_actions.iter().find(|(idx, _)| *idx == action_idx)
-                {
-                    apply_action(&mut env.rng, &mut env.state, action);
-                } else if let Some((_, action)) = indexed_actions.first() {
-                    apply_action(&mut env.rng, &mut env.state, action);
-                }
+                    let indexed_actions = get_indexed_actions(&env.state);
+                    if let Some((_, action)) =
+                        indexed_actions.iter().find(|(idx, _)| *idx == action_idx)
+                    {
+                        apply_action(&mut env.rng, &mut env.state, action);
+                    } else if let Some((_, action)) = indexed_actions.first() {
+                        apply_action(&mut env.rng, &mut env.state, action);
+                    }
 
-                if env.state.is_game_over() {
+                    if env.state.is_game_over() {
+                        dones[env_idx] = true;
+                        rewards[env_idx] = env.calculate_reward(0); // Agent is player 0
+                    }
+                })).map_err(|_| {
+                    warn!("Panic caught in environment {} during ONNX action! Marking done.", env_idx);
                     dones[env_idx] = true;
-                    rewards[env_idx] = env.calculate_reward(0); // Agent is player 0
-                }
+                    rewards[env_idx] = 0.0;
+                });
             }
         }
     }
@@ -593,16 +622,21 @@ impl VecGame {
 
             for (j, &env_idx) in active.iter().enumerate() {
                 let action_idx = actions[j];
-                let env = &mut self.envs[env_idx];
+                let _ = catch_unwind(AssertUnwindSafe(|| {
+                    let env = &mut self.envs[env_idx];
 
-                let indexed_actions = get_indexed_actions(&env.state);
-                if let Some((_, action)) =
-                    indexed_actions.iter().find(|(idx, _)| *idx == action_idx)
-                {
-                    apply_action(&mut env.rng, &mut env.state, action);
-                } else if let Some((_, action)) = indexed_actions.first() {
-                    apply_action(&mut env.rng, &mut env.state, action);
-                }
+                    let indexed_actions = get_indexed_actions(&env.state);
+                    if let Some((_, action)) =
+                        indexed_actions.iter().find(|(idx, _)| *idx == action_idx)
+                    {
+                        apply_action(&mut env.rng, &mut env.state, action);
+                    } else if let Some((_, action)) = indexed_actions.first() {
+                        apply_action(&mut env.rng, &mut env.state, action);
+                    }
+                })).map_err(|_| {
+                    warn!("Panic caught in environment {} during ONNX initial turn! Forcing end of turns.", env_idx);
+                    // Just let it be, the agent will handle it in the main loop if still cur_player 1
+                });
             }
         }
 

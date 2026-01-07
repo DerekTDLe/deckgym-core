@@ -12,7 +12,7 @@ The agent uses a custom feature extractor (`CardAttentionExtractor`) that proces
 
 ## Observation Structure
 
-### Global Features (25 dims)
+### Global Features (41 dims)
 
 | Feature | Dimensions | Description |
 |---------|------------|-------------|
@@ -23,7 +23,7 @@ The agent uses a custom feature extractor (`CardAttentionExtractor`) that proces
 | Discard sizes | 2 | Self and opponent (normalized) |
 | Deck energy types | 32 | 8 energy types × 2 slots (dual type) × 2 players (multi-hot) |
 
-### Card Features (117 dims per card × 24 cards = 2808 dims)
+### Card Features (116 dims per card × 18 cards = 2088 dims)
 
 Each card is encoded with intrinsic properties and position information:
 
@@ -35,55 +35,52 @@ Each card is encoded with intrinsic properties and position information:
 - `weakness` (10) - One-hot weakness type
 - `ko_points` (1) - Points awarded on KO
 - `energy_attached` (10) - Per-type energy count
-- `attack_1` (4 + 24) - Damage, cost, effect flag, effect categories
-- `attack_2` (4 + 24) - Same as attack_1
+- `attack_1` (4 + 12) - Damage, cost, effect flag, effect categories
+- `attack_2` (4 + 12) - Same as attack_1
 - `status` (4) - Poison, sleep, paralysis, confusion
-- `ability_categories` (8) - Ability effect encoding
-- `supporter_categories` (7) - Supporter effect encoding
+- `ability_categories` (16) - Ability effect encoding (enhanced)
+- `supporter_categories` (12) - Supporter effect encoding (enhanced)
 - `retreat_cost` (1) - Normalized retreat cost
 - `attached_tool` (8) - One-hot tool type
 
-#### Position Features (9 dims)
-- `zone` (4) - One-hot: board/hand/discard/deck
+#### Position Features (8 dims)
+- `zone` (2) - One-hot: hand/board
 - `owner` (1) - 0=self, 1=opponent
+- `is_active` (1) - Active pokemon flag
 - `slot` (4) - One-hot board position (active + 3 bench)
 
-> Note: `visibility` was removed since all 24 encoded cards are now visible.
+### Total Observation Size: 2129 dims (41 + 18×116)
 
-### Total Observation Size: 2849 dims (41 + 24×117)
-
-## Card Distribution (Optimized)
+## Card Distribution (Capped V3)
 
 | Player | Zone | Cards | Visibility |
 |--------|------|-------|------------|
 | Self | Board | 0-4 | Full |
 | Self | Hand | 0-10 | Full |
-| Self | Discard | 0-20 | Full |
-| Self | Deck | 0-20 | Full |
 | Opponent | Board | 0-4 | Full |
 
-**Note:** Opponent hand/deck/discard are NOT encoded as cards (only their sizes in global features). This reduces observation from 40 to 24 cards for faster training.
+**Note:** Capped hand size at 10 and removed deck/discard cards from the explicit card encoding to reduce noise and speed up training (24 -> 18 cards total).
 
-## Neural Network Architecture (Modern Transformer - Run #6)
+## Neural Network Architecture (Multi-Head Pooling - Run #7)
 
 ### Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Observation (2849)                        │
+│                    Observation (2129)                        │
 └─────────────────────────────────────────────────────────────┘
                           │
           ┌───────────────┴───────────────┐
           ▼                               ▼
 ┌─────────────────┐             ┌─────────────────────────┐
 │ Global Features │             │   Card Features         │
-│     (41)        │             │   (24 × 117)            │
+│     (41)        │             │   (18 × 116)            │
 └─────────────────┘             └─────────────────────────┘
           │                               │
           ▼                               ▼
 ┌─────────────────┐             ┌─────────────────────────┐
 │   Global MLP    │             │     Card Embedding      │
-│ 41 → 128 → 128  │             │   117 → 256 → 256       │
+│ 41 → 128 → 128  │             │   116 → 256 → 256       │
 │   (GELU)        │             │   (GELU)                │
 └─────────────────┘             └─────────────────────────┘
           │                               │
@@ -92,7 +89,7 @@ Each card is encoded with intrinsic properties and position information:
           │               │ Transformer Encoder (3 layers)  │
           │               │ - 256 dim, 8 heads              │
           │               │ - Fused QKV projection          │
-          │               │ - Pre-norm architecture         │
+          │               │ - PRE-NORM architecture         │
           │               │ - FFN 4× expansion (256→1024)   │
           │               │ - GELU activation               │
           │               │ - Bias-free attention           │
@@ -102,9 +99,8 @@ Each card is encoded with intrinsic properties and position information:
           │                               ▼
           │               ┌─────────────────────────────────┐
           │               │ Multi-Head Attention Pooling    │
-          │               │ - 4 learned queries             │
-          │               │ - 24×256 → 4×256 = 1024         │
-          │               │ - Compression: 6× (was 24×)     │
+          │               │ - 4 independent queries         │
+          │               │ - 18×256 → 4×256 = 1024         │
           │               └─────────────────────────────────┘
           │                               │
           │                               ▼
@@ -115,17 +111,17 @@ Each card is encoded with intrinsic properties and position information:
           │                               │
           └───────────────┬───────────────┘
                           ▼
-              ┌───────────────────────┐
-              │      Concatenate      │
-              │   128 + 512 = 640     │
-              └───────────────────────┘
+               ┌───────────────────────┐
+               │      Concatenate      │
+               │   128 + 512 = 640     │
+               └───────────────────────┘
                           │
           ┌───────────────┴───────────────┐
           ▼                               ▼
 ┌─────────────────┐             ┌─────────────────┐
 │   Policy Head   │             │   Value Head    │
-│ 640 → 256 → 128 │             │ 640 → 256 → 128 │
-│     → actions   │             │     → value     │
+│ 640 → 512 → 256 │             │ 640 → 512 → 256 │
+│  → 128 → actions│             │  → 128 → value  │
 └─────────────────┘             └─────────────────┘
 ```
 
@@ -159,54 +155,50 @@ Each card is encoded with intrinsic properties and position information:
 - Total: 320 → 640 dims
 - Features/action ratio: 3.66 (optimal for 175 actions)
 
-**6. FFN 4× Expansion**
+**6. Larger FFN and Deep Heads**
 - Standard Transformer size (256 → 1024 → 256)
-- GELU activation
-- Dropout(0.1) for regularization
+- Policy/Value heads increased to 3 layers (512, 256, 128)
+- GELU activation and Dropout(0.15) for regularization
+- Pre-norm architecture for stable training in Run #7
 
-### Parameter Count
+### Parameter Count (Run #7)
 
 | Component | Parameters | % of Total |
 |-----------|------------|------------|
-| Global projection | 21,888 | 0.7% |
-| Card embedding | 96,000 | 2.9% |
-| Attention layers | 786,432 | 24.0% |
-| Feed-forward layers | 1,576,704 | 48.2% |
-| Layer norms | 3,072 | 0.1% |
-| Multi-head pooling | 263,168 | 8.0% |
-| Output projection | 524,800 | 16.0% |
-| **Total** | **3,272,064** | **100%** |
+| Global projection | 21,888 | 0.6% |
+| Card embedding | 30,000 | 0.8% |
+| Attention layers | 786,432 | 22.0% |
+| Feed-forward layers | 1,576,704 | 44.2% |
+| Multi-head pooling | 263,168 | 7.4% |
+| Output projection | 524,800 | 14.7% |
+| Policy & Value Heads| 360,000 | 10.1% |
+| **Total** | **~3,570,000** | **100%** |
 
-**Compression**: 2,849 input dims → 640 output dims (4.5× compression)
+## Pure Self-Play Training
 
-## Curriculum Training
+Starting from **Run #7**, curriculum training was abandoned in favor of **pure self-play** from step 1:
 
-Training uses a **progressive curriculum** that starts with easier opponents:
+1. **Meta Decks From Start**: No warmup with simple decks. Agent faces 100+ meta decks (`meta_deck.json`) immediately.
+2. **Rollout-Based Updates**: Frozen opponent (`FrozenOpponentCallback`) is replaced with the current model every 8 rollouts.
+3. **TrueSkill Scale**: Leaderboard shifted to 1500 base (sigma 500) to match external standards.
+4. **Rust Stability**: Core environment loops are wrapped in `catch_unwind` to gracefully handle game-state panics without crashing training.
 
-| Stage | Opponent | Decks | Win Rate Threshold |
-|-------|----------|-------|-------------------|
-| warmup | e2 (Expectiminimax depth 2) | simple | 55% |
-| meta | e2 | meta | 55% |
-| advanced | e3 (Expectiminimax depth 3) | meta | 50% |
-| mastery | self-play | meta | - |
+### Key Benefits
+- **No biased learning**: Agent doesn't learn "bad habits" from simple decks.
+- **Faster Mastery**: High-quality diverse decks provide a much denser training signal.
+- **Robustness**: Rust hardening ensures 24/7 training stability.
 
-**Key benefits:**
-- **Faster training**: BatchedDeckGymEnv runs at ~1078 it/s vs ~720 with DummyVecEnv
-- **Score-based rewards**: +1.5 for 3-0 victory, -1.5 for 0-3 loss (encourages dominant play)
-- **Stable learning**: Gradual difficulty increase prevents catastrophic forgetting
-- **Automatic progression**: Transitions based on win rate, not fixed steps
 
 ## Key Implementation Files
 
 | File | Purpose |
 |------|---------|
-| `src/rl/observation.rs` | Rust observation encoding (2849 dims) |
-| `src/vec_game.rs` | Rust-side batched VecEnv for fast training |
+| `src/rl/observation.rs` | Rust observation encoding (2129 dims) |
+| `src/vec_game.rs` | Rust-side batched VecEnv with `catch_unwind` safety |
 | `python/deckgym/batched_env.py` | SB3-compatible BatchedDeckGymEnv wrapper |
-| `python/deckgym/attention_policy.py` | CardAttentionExtractor & policy |
-| `python/deckgym/curriculum.py` | CurriculumManager for stage transitions |
-| `python/scripts/train.py` | Training with curriculum & attention |
-| `python/scripts/evaluate.py` | Evaluation with quick_eval_vs_bot() |
+| `python/deckgym/attention_policy.py` | CardAttentionExtractor & policy (GELU, MultiHead) |
+| `python/scripts/train.py` | Pure self-play training with MetaDeckLoader |
+| `python/scripts/evaluate.py` | TrueSkill leaderboard and calibration |
 
 ## Hyperparameters
 
@@ -215,14 +207,14 @@ Training uses a **progressive curriculum** that starts with easier opponents:
 | `attention_embed_dim` | 256 | Embedding dimension after card projection |
 | `attention_num_heads` | 8 | Multi-head attention heads |
 | `attention_num_layers` | 3 | Transformer encoder layers |
-| `learning_rate` | 5e-5 → 1e-5 | Linear decay from base to min LR |
-| `ent_coef` | 0.02 | Higher entropy for exploration |
-| `batch_size` | 2048 | Larger batch for better GPU utilization |
-| `n_steps` | 8192 | Experience per update |
+| `learning_rate` | 3e-4 → 1e-4 | Linear warmup + Cosine decay |
+| `ent_coef` | 0.05 | High entropy for better exploratory self-play |
+| `batch_size` | 1024 | Balanced batch size for attention stability |
+| `n_steps` | 256 | Steps per environment per PPO update |
 | `n_epochs` | 8 | PPO epochs per update |
-| `gamma` | 0.98 | Reduced for shorter episodes |
-| `target_kl` | 0.015 | Early stop if KL divergence too high |
-| `frozen_opponent_update_freq` | 75,000 | Steps between opponent updates |
+| `gamma` | 0.98 | Standard discount factor |
+| `target_kl` | 0.015 | Conservative early stop for divergence protection |
+| `frozen_opponent_rollouts` | 8 | Rollouts before updating self-play opponent |
 
 ## Training Speed (RTX 3050, 8-32 envs)
 
@@ -235,13 +227,11 @@ Training uses a **progressive curriculum** that starts with easier opponents:
 
 *Note: Scaling the number of environments yields diminishing returns; 4× envs provides only ~1.3× speedup.*
 
-## Training Command
+Training now uses pure self-play by default. You can use YAML configs for easy experimentation:
 
 ```bash
-python python/scripts/train.py --steps 30000000
+python python/scripts/train.py --config configs/baseline.yaml
 ```
-
-Training now uses curriculum by default (starts with e2, progresses automatically).
 
 ## Known Issues
 
