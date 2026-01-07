@@ -1,6 +1,6 @@
-# Large Model Configuration (Run #5)
-# Same Goal: Break through 47% plateau, achieve 55%+ win rate consistently against e2
-# Be more conservative with hyperparameters
+# Large Model Configuration (Run #6)
+# New attention architecture may tackle gradient issues and allow to go beyond 47% plateau
+# Hyperparameter are the same as Run #4
 model:
   attention_embed_dim: 256
   attention_num_heads: 8
