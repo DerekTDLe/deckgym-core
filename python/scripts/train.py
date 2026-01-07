@@ -410,20 +410,27 @@ class SelfPlayEnv(gym.Env):
                     obs = np.array(self._env.game.get_obs(), dtype=np.float32)
                     done = self._env.game.is_game_over()
                     if done:
-                        # Determine score-based reward
+                        # Determine turn-based reward (matches vec_game.rs calculate_reward)
                         state = self._env.game.get_state()
                         if state.winner and not state.winner.is_tie:
                             winner = state.winner.winner
                             my_points = float(state.points[0])
                             opp_points = float(state.points[1])
                             point_diff = my_points - opp_points
+                            turn_count = float(state.turn_count)
+                            
+                            # Base reward from point difference
+                            base = 1.0 + (point_diff / 6.0)
+                            
+                            # Speed factor: 1 + (13 - turns) / 13
+                            speed_factor = 1.0 + ((13.0 - turn_count) / 13.0)
                             
                             if winner == 0:
-                                # Agent won: 1.0 base + bonus
-                                final_reward = 1.0 + (point_diff / 6.0)
+                                # Agent won: base * max(1.0, speed_factor)
+                                final_reward = base * max(1.0, speed_factor)
                             else:
-                                # Opponent won: -1.0 base + penalty
-                                final_reward = -1.0 + (point_diff / 6.0)
+                                # Opponent won: -base * speed_factor
+                                final_reward = -base * speed_factor
                         else:
                             final_reward = 0.0  # Tie
                 
