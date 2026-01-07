@@ -59,7 +59,7 @@ const ZONE_DISCARD: usize = 2;
 const ZONE_DECK: usize = 3;
 const NUM_ZONES: usize = 4;
 
-/// Number of board slots for position encoding
+/// Number of board slots for position encoding (1 active + 3 bench)
 const NUM_BOARD_SLOTS: usize = 4;
 
 // --- Feature Dimensions ---
@@ -85,7 +85,8 @@ pub const CARD_INTRINSIC_FEATURES: usize = 1  // is_pokemon (0=trainer, 1=pokemo
 /// Position features (where the card is)
 pub const CARD_POSITION_FEATURES: usize = NUM_ZONES  // zone one-hot (board/hand/discard/deck)
     + 1                                              // owner (0=self, 1=opponent)
-    + NUM_BOARD_SLOTS;                               // slot one-hot (if on board)
+    + 1                                              // is_active (1=active slot, 0=bench/other)
+    + NUM_BOARD_SLOTS;                               // slot one-hot (if on board: 0=active, 1-3=bench)
     // NOTE: visibility removed - all encoded cards are now visible (24 cards only)
 
 /// Total features per card slot
@@ -447,7 +448,10 @@ fn encode_position(zone: usize, owner: f32, slot: Option<usize>, obs: &mut Vec<f
     // Owner
     obs.push(owner);
 
-    // Slot one-hot (if on board)
+    // Is active (explicit feature for active slot)
+    obs.push(if slot == Some(0) { 1.0 } else { 0.0 });
+
+    // Slot one-hot (if on board: 0=active, 1-3=bench)
     for i in 0..NUM_BOARD_SLOTS {
         obs.push(if slot == Some(i) { 1.0 } else { 0.0 });
     }
