@@ -211,7 +211,7 @@ class PFSPCallback(BaseCallback):
                     print(f"[PFSP] Removed oldest opponent: {oldest_name}")
 
         if self.verbose > 0:
-            print(f"[PFSP Rollout {self.rollout_count}] Added {checkpoint_name} to pool (size: {len(self.opponent_pool)})")
+            print(f"[PFSP →Pool] Saved agent as {checkpoint_name} (pool size: {len(self.opponent_pool)})")
 
     def _select_opponent_pfsp(self):
         """Select opponent using PFSP priority function."""
@@ -255,7 +255,7 @@ class PFSPCallback(BaseCallback):
 
         if self.verbose > 0:
             wr = winrates[selected_name]
-            print(f"[PFSP Rollout {self.rollout_count}] Selected opponent: {selected_name} "
+            print(f"[PFSP Pool→] Loading opponent: {selected_name} "
                   f"(opp WR: {wr:.1%}, priority: {priorities[selected_name]:.3f})")
 
         if self.verbose > 1:
