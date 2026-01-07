@@ -20,8 +20,12 @@ import torch
 import torch.nn as nn
 
 
-# Constants must match observation.rs
-OBSERVATION_SIZE = 2849
+# Constants should be fetched from Rust, but we need defaults for when module isn't built
+try:
+    import deckgym
+    OBSERVATION_SIZE = deckgym.Game.observation_size()
+except ImportError:
+    OBSERVATION_SIZE = 2129  # Fallback: 41 global + 18 cards * 116 features
 ACTION_SPACE_SIZE = 175  # Must match src/rl/action_mask.rs
 
 
