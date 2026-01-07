@@ -9,6 +9,7 @@
 use ndarray::Array2;
 #[cfg(feature = "onnx")]
 use ort::{
+    execution_providers::{CUDAExecutionProvider, TensorRTExecutionProvider},
     session::{builder::GraphOptimizationLevel, Session},
     value::TensorRef,
 };
@@ -60,6 +61,11 @@ impl OnnxPlayer {
     pub fn new(model_path: &str, deck: Deck, deterministic: bool) -> Result<Self, String> {
         let session = Session::builder()
             .map_err(|e| format!("Failed to create session builder: {}", e))?
+            .with_execution_providers([
+                TensorRTExecutionProvider::default().build(),
+                CUDAExecutionProvider::default().build(),
+            ])
+            .map_err(|e| format!("Failed to set execution providers: {}", e))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| format!("Failed to set optimization level: {}", e))?
             .with_intra_threads(1)
@@ -197,6 +203,11 @@ impl BatchedOnnxInference {
     pub fn new(model_path: &str, deterministic: bool) -> Result<Self, String> {
         let session = Session::builder()
             .map_err(|e| format!("Failed to create session builder: {}", e))?
+            .with_execution_providers([
+                TensorRTExecutionProvider::default().build(),
+                CUDAExecutionProvider::default().build(),
+            ])
+            .map_err(|e| format!("Failed to set execution providers: {}", e))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| format!("Failed to set optimization level: {}", e))?
             .commit_from_file(model_path)
