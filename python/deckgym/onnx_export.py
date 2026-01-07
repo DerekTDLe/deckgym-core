@@ -22,9 +22,12 @@ import torch.nn as nn
 
 # Constants should be fetched from Rust, but we need defaults for when module isn't built
 try:
-    import deckgym
-    OBSERVATION_SIZE = deckgym.Game.observation_size()
-except ImportError:
+    try:
+        from deckgym import Game as GameClass
+    except ImportError:
+        from .deckgym import PyGame as GameClass
+    OBSERVATION_SIZE = GameClass.observation_size()
+except (ImportError, AttributeError, ValueError):
     OBSERVATION_SIZE = 2129  # Fallback: 41 global + 18 cards * 116 features
 ACTION_SPACE_SIZE = 175  # Must match src/rl/action_mask.rs
 
@@ -161,7 +164,22 @@ def _validate_onnx_export(
         pytorch_output = pytorch_model(torch.from_numpy(test_input)).numpy()
     
     # ONNX output
-    session = ort.InferenceSession(onnx_path)
+    try:
+        # Try to use TensorRT or CUDA if available
+        available_providers = ort.get_available_providers()
+        providers = []
+        if "TensorrtExecutionProvider" in available_providers:
+            providers.append("TensorrtExecutionProvider")
+        if "CUDAExecutionProvider" in available_providers:
+            providers.append("CUDAExecutionProvider")
+        providers.append("CPUExecutionProvider")
+        
+        session = ort.InferenceSession(onnx_path, providers=providers)
+        print(f"[ONNX] Using providers: {session.get_providers()}")
+    except Exception as e:
+        print(f"[ONNX] Warning: Failed to initialize session with GPU providers: {e}")
+        session = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
+        
     onnx_output = session.run(None, {"observation": test_input})[0]
     
     # Compare

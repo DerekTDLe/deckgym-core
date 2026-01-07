@@ -3,9 +3,8 @@
 
 #[cfg(feature = "onnx")]
 mod tests {
-    use deckgym::players::{BatchedOnnxInference, OnnxPlayer};
+    use deckgym::players::BatchedOnnxInference;
     use deckgym::rl::{ACTION_SPACE_SIZE, OBSERVATION_SIZE};
-    use deckgym::Deck;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
