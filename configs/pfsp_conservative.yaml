@@ -1,0 +1,59 @@
+# PFSP Conservative Configuration
+# Lighter version for testing or limited GPU memory
+#
+# This config uses smaller models and less frequent updates for faster iteration.
+
+paths:
+  meta_deck_path: "meta_deck.json"
+  save_path: "models/rl_bot_pfsp_light"
+  checkpoint_dir: "./checkpoints/pfsp_light/"
+  tensorboard_dir: "./logs/pfsp_light/"
+  resume_path: null
+
+model:
+  # Lighter attention architecture
+  use_attention: true
+  attention_embed_dim: 128          # Smaller embedding (vs 256)
+  attention_num_heads: 4            # Fewer heads (vs 8)
+  attention_num_layers: 2           # Shallower (vs 3)
+  use_silu: true
+
+  net_arch:
+    pi: [256, 128]                  # Smaller policy head
+    vf: [256, 128]                  # Smaller value head
+
+ppo:
+  learning_rate: 3e-4
+  min_learning_rate: 1e-4
+  warmup_ratio: 0.02
+  n_steps: 256                      # Smaller rollouts for faster updates
+  batch_size: 512                   # Smaller batches
+  n_epochs: 8
+  gamma: 0.98
+  gae_lambda: 0.95
+  ent_coef: 0.04
+  vf_coef: 0.5
+  clip_range: 0.2
+  max_grad_norm: 1.0
+  target_kl: 0.02
+
+training:
+  total_timesteps: 10_000_000       # Shorter for testing
+  checkpoint_freq: 100_000
+  n_envs: 16                        # Fewer envs for less memory
+  use_batched_env: true
+  device: "auto"
+
+  # PFSP with smaller pool
+  use_pfsp: true
+  pfsp_pool_size: 5                 # Smaller pool
+  pfsp_add_every_n_rollouts: 16     # Less frequent additions
+  pfsp_select_every_n_rollouts: 4   # Less frequent selection changes
+  pfsp_priority_exponent: 1.5       # Less aggressive prioritization
+  pfsp_winrate_window: 100
+  pfsp_checkpoint_dir: "./checkpoints/pfsp_pool_light/"
+
+environment:
+  max_turns: 99
+  max_actions_per_turn: 50
+  max_total_actions: 500

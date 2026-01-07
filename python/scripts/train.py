@@ -38,6 +38,7 @@ from deckgym.env import DeckGymEnv
 from deckgym.batched_env import BatchedDeckGymEnv
 from deckgym.deck_loader import MetaDeckLoader
 from deckgym.attention_policy import CardAttentionExtractor, create_attention_policy_kwargs
+from deckgym.pfsp_callback import PFSPCallback
 
 # =============================================================================
 # Configuration
@@ -84,7 +85,16 @@ class TrainingConfig:
     
     # Self-play (frozen opponent updates)
     frozen_opponent_update_rollouts: int = 8  # Update frozen opponent every N rollouts
-    
+
+    # PFSP (Prioritized Fictitious Self-Play)
+    use_pfsp: bool = False                    # Enable PFSP instead of simple frozen opponent
+    pfsp_pool_size: int = 10                  # Max opponents in PFSP pool
+    pfsp_add_every_n_rollouts: int = 8        # Add current agent to pool every N rollouts
+    pfsp_select_every_n_rollouts: int = 2     # Select new opponent every N rollouts
+    pfsp_priority_exponent: float = 2.0       # PFSP priority: f(x) = (1-x)^p (higher = focus on hard opponents)
+    pfsp_winrate_window: int = 200            # Track winrate over N recent episodes
+    pfsp_checkpoint_dir: str = "./checkpoints/pfsp_pool/"  # Where to save PFSP opponents
+
     # Game limits
     max_turns: int = 99              # Official Pokemon TCG Pocket limit
     max_actions_per_turn: int = 50   # Prevents single-turn infinite loops
@@ -193,6 +203,15 @@ def load_config_from_yaml(yaml_path: str) -> TrainingConfig:
         flat_config['use_batched_env'] = config_dict['training'].get('use_batched_env', True)
         flat_config['device'] = config_dict['training'].get('device', 'auto')
         flat_config['frozen_opponent_update_rollouts'] = config_dict['training'].get('frozen_opponent_update_rollouts', 8)
+
+        # PFSP params
+        flat_config['use_pfsp'] = config_dict['training'].get('use_pfsp', False)
+        flat_config['pfsp_pool_size'] = config_dict['training'].get('pfsp_pool_size', 10)
+        flat_config['pfsp_add_every_n_rollouts'] = config_dict['training'].get('pfsp_add_every_n_rollouts', 8)
+        flat_config['pfsp_select_every_n_rollouts'] = config_dict['training'].get('pfsp_select_every_n_rollouts', 2)
+        flat_config['pfsp_priority_exponent'] = config_dict['training'].get('pfsp_priority_exponent', 2.0)
+        flat_config['pfsp_winrate_window'] = config_dict['training'].get('pfsp_winrate_window', 200)
+        flat_config['pfsp_checkpoint_dir'] = config_dict['training'].get('pfsp_checkpoint_dir', './checkpoints/pfsp_pool/')
     
     # Environment params
     if 'environment' in config_dict:
@@ -871,13 +890,33 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
             name_prefix="rl_bot",
         ),
         EpisodeMetricsCallback(verbose=0),
-        FrozenOpponentCallback(
-            env,
-            n_envs=config.n_envs,
-            update_every_n_rollouts=config.frozen_opponent_update_rollouts,
-            verbose=1,
-        ),
     ]
+
+    # Add PFSP or simple frozen opponent callback
+    if config.use_pfsp:
+        print(f"      Using PFSP with pool_size={config.pfsp_pool_size}")
+        callbacks.append(
+            PFSPCallback(
+                env,
+                n_envs=config.n_envs,
+                pool_size=config.pfsp_pool_size,
+                add_to_pool_every_n_rollouts=config.pfsp_add_every_n_rollouts,
+                select_opponent_every_n_rollouts=config.pfsp_select_every_n_rollouts,
+                priority_exponent=config.pfsp_priority_exponent,
+                winrate_window=config.pfsp_winrate_window,
+                checkpoint_dir=config.pfsp_checkpoint_dir,
+                verbose=1,
+            )
+        )
+    else:
+        callbacks.append(
+            FrozenOpponentCallback(
+                env,
+                n_envs=config.n_envs,
+                update_every_n_rollouts=config.frozen_opponent_update_rollouts,
+                verbose=1,
+            )
+        )
     
     # Initialize frozen opponent with initial weights
     print("      Initializing frozen opponent...")
@@ -907,7 +946,11 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     # Train
     print("[4/4] Starting training...")
     print(f"      Checkpoints: every {config.checkpoint_freq:,} steps")
-    print(f"      Opponent updates: every {config.frozen_opponent_update_rollouts} rollouts")
+    if config.use_pfsp:
+        print(f"      PFSP: pool_size={config.pfsp_pool_size}, priority_exp={config.pfsp_priority_exponent}")
+        print(f"      PFSP: add every {config.pfsp_add_every_n_rollouts} rollouts, select every {config.pfsp_select_every_n_rollouts} rollouts")
+    else:
+        print(f"      Opponent updates: every {config.frozen_opponent_update_rollouts} rollouts")
     
     model.learn(
         total_timesteps=config.total_timesteps,
