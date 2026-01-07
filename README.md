@@ -186,34 +186,35 @@ The agent uses a **card-level attention mechanism** that processes each card ind
 
 | Feature | Value |
 |---------|-------|
-| Observation size | 2849 dims (41 global + 24 cards × 117 features) |
-| Architecture | Transformer Encoder (2 layers, 4 heads) |
-| Card encoding | Intrinsic properties + position (no hidden cards) |
+| Observation size | 2129 dims (41 global + 18 cards × 116 features) |
+| Architecture | Modern Transformer (3 layers, 8 heads, GELU) |
+| Card encoding | Intrinsic properties + Position (Hand + Board) |
+| Training Mode | **Pure Self-Play** (MetaDeckLoader) |
 | Permutation invariant | ✅ Order of cards doesn't matter |
 
 See [RL_ARCHITECTURE.md](RL_ARCHITECTURE.md) for detailed architecture documentation.
 
-### Curriculum Training (Default)
+### Pure Self-Play Training (Default)
 
-Training uses a **progressive curriculum** that starts with easier opponents:
+The agent learns through continuous self-play against its own previous versions, facing 100+ meta decks from step 1. This ensures high-quality adversarial gradients and prevents curriculum-induced biasing.
 
-| Stage | Opponent | Win Rate Threshold |
-|-------|----------|-------------------|
-| warmup | e2 (Expectiminimax depth 2) | 55% |
-| meta | e2 with meta decks | 55% |
-| advanced | e3 (Expectiminimax depth 3) | 50% |
-| mastery | Self-play | - |
+| Feature | Description |
+|---------|-------------|
+| **Meta-Sampling** | Randomly samples from meta_deck.json every episode |
+| **Frozen Updates** | Updates opponent model every 8 rollouts (ONNX-backed) |
+| **Stability** | Rust-side `catch_unwind` prevents game-state crashes |
+| **Scale** | Centered on 1500 mu for TrueSkill calibration |
 
 ### Elo Leaderboard (300 games/baseline)
 
 *Note : Newest and current model architecture did not finish training yet, this serves as a temporary demonstration of the agent level of play*
 
-| Rank | Player | Elo | Win Rate |
-|------|--------|-----|----------|
+| Rank | Player | TrueSkill | Win Rate |
+|------|--------|-----------|----------|
 | 1 | Expectiminimax(5) | 2020 | 84.0% |
 | 2 | Expectiminimax(4) | 2000 | 80.0% |
 | 3 | Expectiminimax(3) | 1978 | 82.0% |
-| 4 | **RL Agent (42M)** | **1935** | **69.4%** |
+| 4 | **RL Agent (Run #4)** | **1825** | **59.8%** |
 | 5 | Expectiminimax(2) | 1893 | 76.2% |
 | 6 | EvolutionRusher | 1549 | 44.2% |
 | 7 | ValueFunction | 1451 | 31.3% |
@@ -225,14 +226,11 @@ Training uses a **progressive curriculum** that starts with easier opponents:
 ### Training Commands
 
 ```bash
-# Train with curriculum (default - uses Rust-side batching)
-python python/scripts/train.py --steps 30000000
+# Train with pure self-play using YAML config
+python python/scripts/train.py --config configs/baseline.yaml
 
-# Train with legacy DummyVecEnv (required for self-play stage)
-python python/scripts/train.py --no-batched-env --steps 30000000
-
-# Evaluate model
-python python/scripts/evaluate.py eval checkpoints/rl_bot_xxx_steps.zip --games 300
+# Evaluate model and update TrueSkill leaderboard
+python python/scripts/evaluate.py eval --model checkpoints/rl_bot_xxx_steps.zip --games 300
 ```
 
 ### Hyperparameters
