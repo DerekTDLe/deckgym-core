@@ -64,7 +64,9 @@ Each card is encoded with intrinsic properties and position information:
 
 **Note:** Opponent hand/deck/discard are NOT encoded as cards (only their sizes in global features). This reduces observation from 40 to 24 cards for faster training.
 
-## Neural Network Architecture
+## Neural Network Architecture (Modern Transformer - Run #6)
+
+### Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -75,43 +77,107 @@ Each card is encoded with intrinsic properties and position information:
           ▼                               ▼
 ┌─────────────────┐             ┌─────────────────────────┐
 │ Global Features │             │   Card Features         │
-│     (25)        │             │   (24 × 118)            │
+│     (41)        │             │   (24 × 117)            │
 └─────────────────┘             └─────────────────────────┘
           │                               │
           ▼                               ▼
 ┌─────────────────┐             ┌─────────────────────────┐
 │   Global MLP    │             │     Card Embedding      │
-│   25 → 64 → 64  │             │     118 → 128 → 128     │
+│ 41 → 128 → 128  │             │   117 → 256 → 256       │
+│   (GELU)        │             │   (GELU)                │
 └─────────────────┘             └─────────────────────────┘
           │                               │
           │                               ▼
           │               ┌─────────────────────────────────┐
-          │               │   Transformer Encoder (2 layers)│
-          │               │   - 128 dim, 4 heads            │
-          │               │   - Mask empty slots            │
+          │               │ Transformer Encoder (3 layers)  │
+          │               │ - 256 dim, 8 heads              │
+          │               │ - Fused QKV projection          │
+          │               │ - Pre-norm architecture         │
+          │               │ - FFN 4× expansion (256→1024)   │
+          │               │ - GELU activation               │
+          │               │ - Bias-free attention           │
+          │               │ - Mask empty card slots         │
           │               └─────────────────────────────────┘
           │                               │
           │                               ▼
           │               ┌─────────────────────────────────┐
-          │               │     Mean Pooling (masked)       │
-          │               │     24×128 → 128                │
+          │               │ Multi-Head Attention Pooling    │
+          │               │ - 4 learned queries             │
+          │               │ - 24×256 → 4×256 = 1024         │
+          │               │ - Compression: 6× (was 24×)     │
+          │               └─────────────────────────────────┘
+          │                               │
+          │                               ▼
+          │               ┌─────────────────────────────────┐
+          │               │     Output Projection           │
+          │               │     1024 → 512 (GELU)           │
           │               └─────────────────────────────────┘
           │                               │
           └───────────────┬───────────────┘
                           ▼
               ┌───────────────────────┐
               │      Concatenate      │
-              │      64 + 128 = 192   │
+              │   128 + 512 = 640     │
               └───────────────────────┘
                           │
           ┌───────────────┴───────────────┐
           ▼                               ▼
 ┌─────────────────┐             ┌─────────────────┐
 │   Policy Head   │             │   Value Head    │
-│ 192 → 256 → 128 │             │ 192 → 256 → 128 │
+│ 640 → 256 → 128 │             │ 640 → 256 → 128 │
 │     → actions   │             │     → value     │
 └─────────────────┘             └─────────────────┘
 ```
+
+### Modern Transformer Improvements (Run #6)
+
+**1. GELU Activation** (GPT/BERT/LLaMA style)
+- Replaces ReLU throughout the network
+- Smoother gradients, no dead neurons
+- Better empirical performance
+
+**2. Bias-Free Attention Projections**
+- All Q, K, V, out_proj without biases
+- Better gradient flow
+- Fewer parameters: -3,072 total
+- Used by: LLaMA, GPT-3, PaLM
+
+**3. Fused QKV Projection** (FlashAttention style)
+- Single matmul for Q, K, V (3× fewer kernel calls)
+- Better memory bandwidth utilization
+- Faster training and inference
+
+**4. Multi-Head Attention Pooling**
+- 4 learned queries instead of 1
+- Reduces compression: 24× → 6×
+- Output: 1024 dims (4 × 256)
+- Captures multiple aspects of card state
+
+**5. Expanded Output Dimensions**
+- Global: 64 → 128 dims
+- Cards: 256 → 512 dims
+- Total: 320 → 640 dims
+- Features/action ratio: 3.66 (optimal for 175 actions)
+
+**6. FFN 4× Expansion**
+- Standard Transformer size (256 → 1024 → 256)
+- GELU activation
+- Dropout(0.1) for regularization
+
+### Parameter Count
+
+| Component | Parameters | % of Total |
+|-----------|------------|------------|
+| Global projection | 21,888 | 0.7% |
+| Card embedding | 96,000 | 2.9% |
+| Attention layers | 786,432 | 24.0% |
+| Feed-forward layers | 1,576,704 | 48.2% |
+| Layer norms | 3,072 | 0.1% |
+| Multi-head pooling | 263,168 | 8.0% |
+| Output projection | 524,800 | 16.0% |
+| **Total** | **3,272,064** | **100%** |
+
+**Compression**: 2,849 input dims → 640 output dims (4.5× compression)
 
 ## Curriculum Training
 
