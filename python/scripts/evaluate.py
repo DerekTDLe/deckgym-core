@@ -43,7 +43,13 @@ except ImportError:
 console = Console()
 
 # --- Configuration ---
-TRUESKILL_ENV = trueskill.TrueSkill(mu=25.0, sigma=8.333, beta=4.167, tau=0.083, draw_probability=0.02)
+TRUESKILL_ENV = trueskill.TrueSkill(
+    mu=1500,              
+    sigma=500,            # Initial uncertainty (large for new agents)
+    beta=250,             # Performance variance (sigma / 2)
+    tau=5,                # Dynamic factor
+    draw_probability=0.02 # Probability of draw
+)
 BASELINES_FILE = Path("trueskill_baselines.json")
 DEFAULT_BASELINES_TO_CALIBRATE = [
     "r", "aa", "et", "w", "v", "er", "e2", "e3", "e4", "e5"
