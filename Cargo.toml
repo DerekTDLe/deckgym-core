@@ -31,7 +31,7 @@ ort = { version = "2.0.0-rc.10", optional = true }  # ONNX Runtime for neural ne
 ndarray = { version = "0.16", optional = true }  # Tensor operations for ONNX
 
 [features]
-default = []
+default = ["onnx", "python"]
 python = ["pyo3"]
 tui = ["ratatui", "crossterm"]
 csv-export = ["csv"]
