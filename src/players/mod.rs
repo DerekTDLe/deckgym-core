@@ -50,6 +50,8 @@ pub enum PlayerCode {
     V,
     E { max_depth: usize },
     ER, // Evolution Rusher
+    #[cfg(feature = "onnx")]
+    Onnx { path: String },
 }
 /// Custom parser function enforcing case-insensitivity
 pub fn parse_player_code(s: &str) -> Result<PlayerCode, String> {
@@ -79,6 +81,13 @@ pub fn parse_player_code(s: &str) -> Result<PlayerCode, String> {
             return Ok(PlayerCode::M { iterations });
         }
         return Err(format!("Invalid player code: {s}. Use 'm<number>' for MCTS with iterations, e.g., 'm100', 'm500'"));
+    }
+
+    // Check if it starts with 'onnx:' (e.g., onnx:/path/to/model.onnx)
+    #[cfg(feature = "onnx")]
+    if lower.starts_with("onnx:") {
+        let path = s[5..].to_string();
+        return Ok(PlayerCode::Onnx { path });
     }
 
     match lower.as_str() {
@@ -139,5 +148,9 @@ fn get_player(deck: Deck, player: &PlayerCode) -> Box<dyn Player> {
             value_function: Box::new(value_functions::baseline_value_function),
         }),
         PlayerCode::ER => Box::new(EvolutionRusherPlayer { deck }),
+        #[cfg(feature = "onnx")]
+        PlayerCode::Onnx { path } => Box::new(
+            OnnxPlayer::new(&path, deck, true).expect("Failed to load ONNX model"),
+        ),
     }
 }
