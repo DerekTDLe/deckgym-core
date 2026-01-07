@@ -83,13 +83,15 @@ impl EnvInstance {
         self.rng = StdRng::seed_from_u64(seed);
         self.state = State::initialize(&deck_a_parsed, &deck_b_parsed, &mut self.rng);
 
-        // Recreate bot players if needed
+        // Recreate bot players if needed (but not for "onnx" - that's handled separately)
         if let Some(opp_type) = &self.opponent_type {
-            let player_codes = vec![
-                parse_player_code("r").unwrap(),
-                parse_player_code(opp_type).unwrap(),
-            ];
-            self.players = Some(create_players(deck_a_parsed, deck_b_parsed, player_codes));
+            if opp_type != "onnx" {
+                let player_codes = vec![
+                    parse_player_code("r").unwrap(),
+                    parse_player_code(opp_type).unwrap(),
+                ];
+                self.players = Some(create_players(deck_a_parsed, deck_b_parsed, player_codes));
+            }
         }
     }
 

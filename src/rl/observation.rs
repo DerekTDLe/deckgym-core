@@ -100,8 +100,8 @@ pub fn get_observation_tensor(state: &State, perspective: usize) -> Vec<f32> {
         }
     }
 
-    // Self hand (max 10 cards)
-    for card in &state.hands[perspective] {
+    // Self hand (caps at 10 cards for fixed observation size)
+    for card in state.hands[perspective].iter().take(10) {
         encode_card(card, ZONE_HAND, 0.0, None, &mut obs);
         card_count += 1;
     }
@@ -125,7 +125,7 @@ pub fn get_observation_tensor(state: &State, perspective: usize) -> Vec<f32> {
         card_count += 1;
     }
 
-    debug_assert_eq!(
+    assert_eq!(
         obs.len(),
         OBSERVATION_SIZE,
         "Observation size mismatch! Expected {}, got {}",

@@ -242,7 +242,7 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         # Manual attention blocks for ONNX compatibility
         # Uses OnnxSafeAttention instead of PyTorch's MultiheadAttention
         self.attention_layers = nn.ModuleList([
-            OnnxSafeAttention(embed_dim, num_heads, dropout=0.1)
+            OnnxSafeAttention(embed_dim, num_heads, dropout=0.15)
             for _ in range(num_layers)
         ])
         # Feed-forward layers with modern Transformer improvements:
@@ -253,9 +253,9 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
             nn.Sequential(
                 nn.Linear(embed_dim, embed_dim * 4),
                 nn.GELU(),
-                nn.Dropout(0.1),
+                nn.Dropout(0.15),
                 nn.Linear(embed_dim * 4, embed_dim),
-                nn.Dropout(0.1),
+                nn.Dropout(0.15),
             )
             for _ in range(num_layers)
         ])
