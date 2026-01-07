@@ -839,10 +839,10 @@ impl PyGame {
                             let opp_points = new_state.points[1 - state.current_player] as f32;
                             let point_diff = my_points - opp_points; // Range: -3 to +3
                             let turn_count = new_state.turn_count as f32;
-                            
+
                             // Speed factor: (13 - turns) / 13
                             let speed_factor = 1.0 + ((13.0 - turn_count) / 13.0);
-                            
+
                             if winner == state.current_player {
                                 // Victory: (1.0 + diff/6) * speed
                                 let base = 1.0 + (point_diff / 6.0);
@@ -1009,7 +1009,7 @@ pub fn get_player_types() -> HashMap<String, String> {
 // =============================================================================
 
 /// Python wrapper for VecGame - batched environment for RL training
-/// 
+///
 /// This significantly reduces Python/Rust FFI overhead by managing multiple
 /// games on the Rust side and returning batched tensors.
 #[pyclass(unsendable)]
@@ -1020,7 +1020,7 @@ pub struct PyVecGame {
 #[pymethods]
 impl PyVecGame {
     /// Create a new vectorized environment
-    /// 
+    ///
     /// Args:
     ///     deck_pairs: List of (deck_a_str, deck_b_str) tuples
     ///     base_seed: Base random seed (each env gets base_seed + idx)
@@ -1037,55 +1037,55 @@ impl PyVecGame {
             inner: crate::vec_game::VecGame::new(deck_pairs, seed, opponent_type),
         }
     }
-    
+
     /// Get number of environments
     fn num_envs(&self) -> usize {
         self.inner.num_envs()
     }
-    
+
     /// Get observation vector size
     #[staticmethod]
     fn observation_size() -> usize {
         crate::rl::OBSERVATION_SIZE
     }
-    
+
     /// Get action space size
     #[staticmethod]
     fn action_space_size() -> usize {
         crate::rl::ACTION_SPACE_SIZE
     }
-    
+
     /// Reset all environments
     /// Returns: observations as flat list (n_envs * obs_size)
     fn reset_all(&mut self) -> Vec<f32> {
         self.inner.reset_all()
     }
-    
+
     /// Reset a single environment with new decks
     fn reset_single(&mut self, env_idx: usize, deck_a: String, deck_b: String) {
         self.inner.reset_single(env_idx, deck_a, deck_b);
     }
-    
+
     /// Get action masks for all environments
     /// Returns: masks as flat list (n_envs * action_size)
     fn get_action_masks(&self) -> Vec<bool> {
         self.inner.get_action_masks()
     }
-    
+
     /// Get observations for all environments
     /// Returns: observations as flat list (n_envs * obs_size)
     fn get_observations(&self) -> Vec<f32> {
         self.inner.get_observations()
     }
-    
+
     /// Step all environments with batched actions
-    /// 
+    ///
     /// This is the key method - ONE FFI call steps all environments!
     /// Environments that finish are automatically reset.
-    /// 
+    ///
     /// Args:
     ///     actions: List of action indices (length = n_envs)
-    /// 
+    ///
     /// Returns:
     ///     tuple of (observations, rewards, dones, action_masks, terminal_obs_list)
     ///     - observations: flat list (n_envs * obs_size) - from NEW episode if done
@@ -1096,7 +1096,13 @@ impl PyVecGame {
     fn step_batch(
         &mut self,
         actions: Vec<usize>,
-    ) -> (Vec<f32>, Vec<f32>, Vec<bool>, Vec<bool>, Vec<(usize, Vec<f32>)>) {
+    ) -> (
+        Vec<f32>,
+        Vec<f32>,
+        Vec<bool>,
+        Vec<bool>,
+        Vec<(usize, Vec<f32>)>,
+    ) {
         let result = self.inner.step_batch(&actions);
         (
             result.observations,
@@ -1106,37 +1112,38 @@ impl PyVecGame {
             result.terminal_observations,
         )
     }
-    
+
     /// Update deck pairs for future resets (e.g., curriculum changes)
     fn set_deck_pairs(&mut self, deck_pairs: Vec<(String, String)>) {
         self.inner.set_deck_pairs(deck_pairs);
     }
-    
+
     /// Get current turn counts for all environments (debugging)
     fn get_turn_counts(&self) -> Vec<u8> {
         self.inner.get_turn_counts()
     }
-    
+
     /// Set ONNX model as opponent for self-play (requires 'onnx' feature)
-    /// 
+    ///
     /// Once set, all environments will use the ONNX model as player 1 (opponent).
     /// The model is shared across all environments and runs batched inference.
-    /// 
+    ///
     /// Args:
     ///     model_path: Path to the .onnx model file
     ///     deterministic: If True, always pick best action; if False, sample from distribution
     #[cfg(feature = "onnx")]
     fn set_onnx_opponent(&mut self, model_path: &str, deterministic: bool) -> PyResult<()> {
-        self.inner.set_onnx_opponent(model_path, deterministic)
+        self.inner
+            .set_onnx_opponent(model_path, deterministic)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))
     }
-    
+
     /// Clear ONNX opponent (revert to no opponent / normal bot mode)
     #[cfg(feature = "onnx")]
     fn clear_onnx_opponent(&mut self) {
         self.inner.clear_onnx_opponent();
     }
-    
+
     fn __repr__(&self) -> String {
         format!(
             "PyVecGame(n_envs={}, obs_size={}, action_size={})",
@@ -1159,7 +1166,7 @@ pub fn deckgym(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyState>()?;
     m.add_class::<PyGameOutcome>()?;
     m.add_class::<PySimulationResults>()?;
-    m.add_class::<PyVecGame>()?;  // Vectorized environment
+    m.add_class::<PyVecGame>()?; // Vectorized environment
     m.add_function(wrap_pyfunction!(py_simulate, m)?)?;
     m.add_function(wrap_pyfunction!(get_player_types, m)?)?;
     Ok(())

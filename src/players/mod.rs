@@ -18,7 +18,7 @@ pub use expectiminimax_player::{ExpectiMiniMaxPlayer, ValueFunction};
 pub use human_player::HumanPlayer;
 pub use mcts_player::MctsPlayer;
 #[cfg(feature = "onnx")]
-pub use onnx_player::{OnnxPlayer, BatchedOnnxInference};
+pub use onnx_player::{BatchedOnnxInference, OnnxPlayer};
 pub use random_player::RandomPlayer;
 pub use value_function_player::ValueFunctionPlayer;
 pub use value_functions::*;
@@ -46,12 +46,18 @@ pub enum PlayerCode {
     R,
     H,
     W,
-    M { iterations: u64 },  // MCTS with configurable iterations
+    M {
+        iterations: u64,
+    }, // MCTS with configurable iterations
     V,
-    E { max_depth: usize },
+    E {
+        max_depth: usize,
+    },
     ER, // Evolution Rusher
     #[cfg(feature = "onnx")]
-    Onnx { path: String },
+    Onnx {
+        path: String,
+    },
 }
 /// Custom parser function enforcing case-insensitivity
 pub fn parse_player_code(s: &str) -> Result<PlayerCode, String> {
@@ -149,8 +155,8 @@ fn get_player(deck: Deck, player: &PlayerCode) -> Box<dyn Player> {
         }),
         PlayerCode::ER => Box::new(EvolutionRusherPlayer { deck }),
         #[cfg(feature = "onnx")]
-        PlayerCode::Onnx { path } => Box::new(
-            OnnxPlayer::new(&path, deck, true).expect("Failed to load ONNX model"),
-        ),
+        PlayerCode::Onnx { path } => {
+            Box::new(OnnxPlayer::new(&path, deck, true).expect("Failed to load ONNX model"))
+        }
     }
 }
