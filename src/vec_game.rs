@@ -6,6 +6,9 @@
 
 use rand::{rngs::StdRng, SeedableRng};
 
+use log::warn;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+
 use crate::{
     actions::apply_action,
     deck::Deck,
@@ -377,26 +380,38 @@ impl VecGame {
         let mut terminal_observations = Vec::new();
 
         // First pass: step agent actions
-        for (_i, (env, &action)) in self.envs.iter_mut().zip(actions.iter()).enumerate() {
-            // Step the agent's action
-            let (mut reward, mut done) = env.step(action);
+        for (i, (env, &action)) in self.envs.iter_mut().zip(actions.iter()).enumerate() {
+            // Step the agent's action with panic protection
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let (mut reward, mut done) = env.step(action);
 
-            // If using classical bots (not ONNX) and game not over, play bot turns
-            #[cfg(feature = "onnx")]
-            let is_onnx = self.onnx_opponent.is_some();
-            #[cfg(not(feature = "onnx"))]
-            let is_onnx = false;
+                // If using classical bots (not ONNX) and game not over, play bot turns
+                #[cfg(feature = "onnx")]
+                let is_onnx = self.onnx_opponent.is_some();
+                #[cfg(not(feature = "onnx"))]
+                let is_onnx = false;
 
-            if !done && env.opponent_type.is_some() && !is_onnx {
-                let (bot_reward, bot_done) = env.play_bot_turns();
-                if bot_done {
-                    done = true;
-                    reward = bot_reward;
+                if !done && env.opponent_type.is_some() && !is_onnx {
+                    let (bot_reward, bot_done) = env.play_bot_turns();
+                    if bot_done {
+                        done = true;
+                        reward = bot_reward;
+                    }
+                }
+                (reward, done)
+            }));
+
+            match result {
+                Ok((reward, done)) => {
+                    rewards.push(reward);
+                    dones.push(done);
+                }
+                Err(_) => {
+                    warn!("Panic caught in environment {} during step! Forcing reset.", i);
+                    rewards.push(0.0);
+                    dones.push(true); // Force reset in next loop
                 }
             }
-
-            rewards.push(reward);
-            dones.push(done);
         }
 
         // ONNX opponent turns (batched) - take onnx temporarily to avoid borrow issues
@@ -416,21 +431,34 @@ impl VecGame {
 
         for (i, env) in self.envs.iter_mut().enumerate() {
             if dones[i] {
-                // Store terminal observation before auto-reset
-                terminal_observations.push((i, env.get_observation()));
+                // Wrap observation and reset in catch_unwind as well
+                let _ = catch_unwind(AssertUnwindSafe(|| {
+                    // Store terminal observation before auto-reset
+                    terminal_observations.push((i, env.get_observation()));
 
-                // Auto-reset this environment
-                self.seed_counter += 1;
-                env.reset(self.seed_counter);
+                    // Auto-reset this environment
+                    self.seed_counter += 1;
+                    env.reset(self.seed_counter);
 
-                // Play bot turns if bot goes first in new game (non-ONNX only)
-                if env.opponent_type.is_some() && !has_onnx {
-                    env.play_bot_turns();
-                }
+                    // Play bot turns if bot goes first in new game (non-ONNX only)
+                    if env.opponent_type.is_some() && !has_onnx {
+                        env.play_bot_turns();
+                    }
+                })).map_err(|_| {
+                    warn!("Panic caught in environment {} during reset! Forcing a secondary reset.", i);
+                    // If reset itself panics, we try one more time or just hope next one works
+                    self.seed_counter += 1;
+                    let _ = catch_unwind(AssertUnwindSafe(|| {
+                        env.reset(self.seed_counter);
+                    }));
+                });
             }
 
             // Get observation (from new episode if reset happened)
-            observations.extend(env.get_observation());
+            // Wrap in case state is corrupted
+            let obs = catch_unwind(AssertUnwindSafe(|| env.get_observation()))
+                .unwrap_or_else(|_| vec![0.0; OBSERVATION_SIZE]);
+            observations.extend(obs);
         }
 
         // ONNX opponent initial turns for newly reset envs
