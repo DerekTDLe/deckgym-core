@@ -6,16 +6,22 @@
 #![allow(unused_imports)]
 
 #[cfg(feature = "onnx")]
-use ort::{session::{Session, builder::GraphOptimizationLevel}, value::TensorRef};
-#[cfg(feature = "onnx")]
 use ndarray::Array2;
+#[cfg(feature = "onnx")]
+use ort::{
+    session::{builder::GraphOptimizationLevel, Session},
+    value::TensorRef,
+};
 
 use rand::rngs::StdRng;
 use rand::Rng;
 
 use crate::{
     actions::Action,
-    rl::{get_action_mask, get_indexed_actions, get_observation_tensor, ACTION_SPACE_SIZE, OBSERVATION_SIZE},
+    rl::{
+        get_action_mask, get_indexed_actions, get_observation_tensor, ACTION_SPACE_SIZE,
+        OBSERVATION_SIZE,
+    },
     state::State,
     Deck,
 };
@@ -26,7 +32,7 @@ use crate::players::Player;
 use std::fmt::Debug;
 
 /// A player that uses an ONNX model for decision-making.
-/// 
+///
 /// The model takes a game observation and outputs action logits.
 /// Supports both deterministic (argmax) and stochastic (sampling) modes.
 #[cfg(feature = "onnx")]
@@ -46,7 +52,7 @@ impl Debug for OnnxPlayer {
 #[cfg(feature = "onnx")]
 impl OnnxPlayer {
     /// Create a new ONNX player from a model file.
-    /// 
+    ///
     /// # Arguments
     /// * `model_path` - Path to the .onnx model file
     /// * `deck` - The deck this player uses
@@ -60,41 +66,42 @@ impl OnnxPlayer {
             .map_err(|e| format!("Failed to set thread count: {}", e))?
             .commit_from_file(model_path)
             .map_err(|e| format!("Failed to load ONNX model from '{}': {}", model_path, e))?;
-        
+
         Ok(Self {
             session,
             deterministic,
             deck,
         })
     }
-    
+
     /// Run inference on a single observation.
     /// Returns the selected action index.
     fn predict(&mut self, obs: &[f32], action_mask: &[bool], rng: &mut StdRng) -> usize {
         // Create input tensor as ndarray
         let obs_array = Array2::from_shape_vec((1, OBSERVATION_SIZE), obs.to_vec())
             .expect("Failed to create observation array");
-        
+
         // Create tensor reference
-        let tensor = TensorRef::from_array_view(&obs_array)
-            .expect("Failed to create tensor");
-        
+        let tensor = TensorRef::from_array_view(&obs_array).expect("Failed to create tensor");
+
         // Run inference and extract logits
         let logits = {
-            let outputs = self.session
+            let outputs = self
+                .session
                 .run(ort::inputs![tensor])
                 .expect("ONNX inference failed");
-            
+
             // Get logits output (index 0) and copy before dropping outputs
-            let (_shape, logits_data) = outputs[0].try_extract_tensor::<f32>()
+            let (_shape, logits_data) = outputs[0]
+                .try_extract_tensor::<f32>()
                 .expect("Failed to extract logits tensor");
             logits_data.to_vec()
         }; // outputs is dropped here
-        
+
         // Apply mask and select action
         self.select_action(&logits, action_mask, rng)
     }
-    
+
     /// Select action from logits with masking.
     fn select_action(&self, logits: &[f32], mask: &[bool], rng: &mut StdRng) -> usize {
         // Apply mask: set invalid actions to -inf
@@ -103,7 +110,7 @@ impl OnnxPlayer {
             .zip(mask.iter())
             .map(|(&l, &valid)| if valid { l } else { f32::NEG_INFINITY })
             .collect();
-        
+
         if self.deterministic {
             // Argmax
             masked_logits
@@ -114,14 +121,17 @@ impl OnnxPlayer {
                 .unwrap_or(0)
         } else {
             // Softmax and sample
-            let max_logit = masked_logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let max_logit = masked_logits
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max);
             let exp_logits: Vec<f32> = masked_logits
                 .iter()
                 .map(|&l| (l - max_logit).exp())
                 .collect();
             let sum: f32 = exp_logits.iter().sum();
             let probs: Vec<f32> = exp_logits.iter().map(|&e| e / sum).collect();
-            
+
             // Sample from distribution
             let mut cumsum = 0.0;
             let rand_val: f32 = rng.gen();
@@ -131,7 +141,7 @@ impl OnnxPlayer {
                     return idx;
                 }
             }
-            
+
             // Fallback to first valid action
             mask.iter().position(|&v| v).unwrap_or(0)
         }
@@ -143,32 +153,32 @@ impl Player for OnnxPlayer {
     fn get_deck(&self) -> Deck {
         self.deck.clone()
     }
-    
+
     fn decision_fn(&mut self, rng: &mut StdRng, state: &State, actions: &[Action]) -> Action {
         if actions.len() == 1 {
             return actions[0].clone();
         }
-        
+
         // Get observation from current player's perspective
         let current_player = state.current_player;
         let obs = get_observation_tensor(state, current_player);
-        
+
         // Get action mask
         let action_mask = get_action_mask(state);
-        
+
         // Get indexed actions to map back from index to Action
         let indexed_actions = get_indexed_actions(state);
-        
+
         // Run neural network
         let action_idx = self.predict(&obs, &action_mask, rng);
-        
+
         // Find the action with this index
         for (idx, action) in &indexed_actions {
             if *idx == action_idx {
                 return action.clone();
             }
         }
-        
+
         // Fallback to first action if index not found (shouldn't happen)
         actions[0].clone()
     }
@@ -191,21 +201,21 @@ impl BatchedOnnxInference {
             .map_err(|e| format!("Failed to set optimization level: {}", e))?
             .commit_from_file(model_path)
             .map_err(|e| format!("Failed to load ONNX model: {}", e))?;
-        
+
         Ok(Self {
             session,
             deterministic,
         })
     }
-    
+
     /// Run batched inference on multiple observations.
-    /// 
+    ///
     /// # Arguments
     /// * `observations` - Flattened observations [n_envs * OBSERVATION_SIZE]
     /// * `action_masks` - Flattened action masks [n_envs * ACTION_SPACE_SIZE]
     /// * `n_envs` - Number of environments
     /// * `rng` - Random number generator for sampling
-    /// 
+    ///
     /// # Returns
     /// Vec of action indices, one per environment
     pub fn predict_batch(
@@ -217,27 +227,28 @@ impl BatchedOnnxInference {
     ) -> Vec<usize> {
         assert_eq!(observations.len(), n_envs * OBSERVATION_SIZE);
         assert_eq!(action_masks.len(), n_envs * ACTION_SPACE_SIZE);
-        
+
         // Create batched input tensor
         let obs_array = Array2::from_shape_vec((n_envs, OBSERVATION_SIZE), observations.to_vec())
             .expect("Failed to create observation array");
-        
+
         // Create tensor reference
-        let tensor = TensorRef::from_array_view(&obs_array)
-            .expect("Failed to create tensor");
-        
+        let tensor = TensorRef::from_array_view(&obs_array).expect("Failed to create tensor");
+
         // Run inference
         let all_logits = {
-            let outputs = self.session
+            let outputs = self
+                .session
                 .run(ort::inputs![tensor])
                 .expect("Batched ONNX inference failed");
-            
+
             // Get logits output and copy before dropping outputs
-            let (_shape, logits_data) = outputs[0].try_extract_tensor::<f32>()
+            let (_shape, logits_data) = outputs[0]
+                .try_extract_tensor::<f32>()
                 .expect("Failed to extract logits tensor");
             logits_data.to_vec()
         }; // outputs is dropped here
-        
+
         // Select actions for each environment
         let mut actions = Vec::with_capacity(n_envs);
         for i in 0..n_envs {
@@ -245,17 +256,17 @@ impl BatchedOnnxInference {
             let end_logit = start_logit + ACTION_SPACE_SIZE;
             let start_mask = i * ACTION_SPACE_SIZE;
             let end_mask = start_mask + ACTION_SPACE_SIZE;
-            
+
             let logits = &all_logits[start_logit..end_logit];
             let mask = &action_masks[start_mask..end_mask];
-            
+
             let action = self.select_action(logits, mask, rng);
             actions.push(action);
         }
-        
+
         actions
     }
-    
+
     fn select_action(&self, logits: &[f32], mask: &[bool], rng: &mut StdRng) -> usize {
         // Apply mask
         let masked_logits: Vec<f32> = logits
@@ -263,7 +274,7 @@ impl BatchedOnnxInference {
             .zip(mask.iter())
             .map(|(&l, &valid)| if valid { l } else { f32::NEG_INFINITY })
             .collect();
-        
+
         if self.deterministic {
             masked_logits
                 .iter()
@@ -272,14 +283,17 @@ impl BatchedOnnxInference {
                 .map(|(idx, _)| idx)
                 .unwrap_or(0)
         } else {
-            let max_logit = masked_logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let max_logit = masked_logits
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max);
             let exp_logits: Vec<f32> = masked_logits
                 .iter()
                 .map(|&l| (l - max_logit).exp())
                 .collect();
             let sum: f32 = exp_logits.iter().sum();
             let probs: Vec<f32> = exp_logits.iter().map(|&e| e / sum).collect();
-            
+
             let mut cumsum = 0.0;
             let rand_val: f32 = rng.gen();
             for (idx, &p) in probs.iter().enumerate() {
@@ -288,7 +302,7 @@ impl BatchedOnnxInference {
                     return idx;
                 }
             }
-            
+
             mask.iter().position(|&v| v).unwrap_or(0)
         }
     }

@@ -211,7 +211,11 @@ fn action_to_index(action: &SimpleAction, maps: &HandMaps) -> Option<usize> {
         }
 
         // Evolve Pokemon
-        SimpleAction::Evolve { evolution, in_play_idx, .. } => {
+        SimpleAction::Evolve {
+            evolution,
+            in_play_idx,
+            ..
+        } => {
             if let Some(&idx) = maps.card_index.get(&evolution.get_id()) {
                 if idx < 20 && *in_play_idx <= 3 {
                     // 0 = Play/Evolve
@@ -345,8 +349,6 @@ pub fn get_indexed_actions(state: &State) -> Vec<(usize, Action)> {
 
     valid_actions
         .into_iter()
-        .filter_map(|action| {
-            action_to_index(&action.action, &maps).map(|idx| (idx, action))
-        })
+        .filter_map(|action| action_to_index(&action.action, &maps).map(|idx| (idx, action)))
         .collect()
 }
