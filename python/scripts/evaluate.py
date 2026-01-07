@@ -42,6 +42,28 @@ except ImportError:
 
 console = Console()
 
+def print_system_info():
+    """Print hardware and software information related to acceleration."""
+    console.print(f"[bold]System Info:[/bold]")
+    try:
+        import torch
+        console.print(f"  PyTorch: {torch.__version__} (CUDA: {torch.cuda.is_available()})")
+    except ImportError:
+        console.print("  PyTorch: Not installed")
+        
+    try:
+        import onnxruntime as ort
+        providers = ort.get_available_providers()
+        console.print(f"  ONNX Runtime: {ort.__version__}")
+        console.print(f"  Available Providers: [cyan]{', '.join(providers)}[/cyan]")
+        if "TensorrtExecutionProvider" in providers:
+            console.print("  [green]✓ TensorRT Execution Provider is available![/green]")
+        else:
+            console.print("  [yellow]⚠ TensorRT Execution Provider not found.[/yellow]")
+    except ImportError:
+        console.print("  ONNX Runtime: Not installed")
+    console.print("─" * 40)
+
 # --- Configuration ---
 TRUESKILL_ENV = trueskill.TrueSkill(
     mu=1500,              
@@ -83,10 +105,13 @@ class Rating:
     def from_trueskill(r: trueskill.Rating) -> 'Rating':
         return Rating(mu=r.mu, sigma=r.sigma)
 
+import threading
+
 class TrueSkillTracker:
     def __init__(self, storage_file: Path = BASELINES_FILE):
         self.storage_file = storage_file
         self.ratings: Dict[str, Rating] = {}
+        self.lock = threading.Lock()
         self.load()
 
     def load(self):
@@ -107,16 +132,17 @@ class TrueSkillTracker:
             json.dump(data, f, indent=2)
 
     def update(self, winner_code: str, loser_code: str, draw: bool = False):
-        r_win = self.ratings.get(winner_code, Rating.from_trueskill(TRUESKILL_ENV.create_rating())).to_trueskill()
-        r_lose = self.ratings.get(loser_code, Rating.from_trueskill(TRUESKILL_ENV.create_rating())).to_trueskill()
-        
-        if draw:
-            new_r1, new_r2 = TRUESKILL_ENV.rate_1vs1(r_win, r_lose, drawn=True)
-        else:
-            new_r1, new_r2 = TRUESKILL_ENV.rate_1vs1(r_win, r_lose, drawn=False)
+        with self.lock:
+            r_winner = self.get(winner_code).to_trueskill()
+            r_loser = self.get(loser_code).to_trueskill()
             
-        self.ratings[winner_code] = Rating.from_trueskill(new_r1)
-        self.ratings[loser_code] = Rating.from_trueskill(new_r2)
+            if draw:
+                new_w, new_l = TRUESKILL_ENV.rate_1vs1(r_winner, r_loser, drawn=True)
+            else:
+                new_w, new_l = TRUESKILL_ENV.rate_1vs1(r_winner, r_loser)
+            
+            self.ratings[winner_code] = Rating.from_trueskill(new_w)
+            self.ratings[loser_code] = Rating.from_trueskill(new_l)
 
     def get(self, code: str) -> Rating:
         return self.ratings.get(code, Rating.from_trueskill(TRUESKILL_ENV.create_rating()))
@@ -177,48 +203,58 @@ def calibrate(n_games_per_pair: int = 50):
         for j in range(i + 1, len(bots)):
             pairs.append((bots[i], bots[j]))
     
-    console.print(f"[bold]Starting Calibration: {len(pairs)} pairs, {n_games_per_pair} games each.[/bold]")
+    total_games = len(pairs) * n_games_per_pair
+    console.print(f"[bold]Starting Calibration: {len(pairs)} pairs, {n_games_per_pair} games each ({total_games} total).[/bold]")
+    
+    from rich.progress import TimeRemainingColumn, MofNCompleteColumn
     
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
+        MofNCompleteColumn(),
         TaskProgressColumn(),
+        TimeRemainingColumn(),
         console=console
     ) as progress:
-        task = progress.add_task("Calibrating...", total=len(pairs) * n_games_per_pair)
+        overall_task = progress.add_task("[bold cyan]Total Progress[/bold cyan]", total=total_games)
         
+        # Track active sub-tasks for each pair to show what's happening
+        pair_tasks = {}
         for p1, p2 in pairs:
-            # Run matches
-            # To speed up, we can parallelize generation and simulation?
-            # Basic sequential for safety first, Rust simulation is fast.
-            # But writing temp files is I/O bound. Batching?
-            # py_simulate does N sims with SAME decks.
-            # TrueSkill wants DIVERSE conditions.
-            # We generate 1 pair of decks, play 1 game. Repeat N times.
+            name = f"{BOT_NAMES.get(p1, p1)} vs {BOT_NAMES.get(p2, p2)}"
+            pair_tasks[(p1, p2)] = progress.add_task(f"  {name}", total=n_games_per_pair, visible=False)
+
+        def play_pair_game(p1, p2):
+            d1 = loader.sample_deck()
+            d2 = loader.sample_deck()
+            d1_s = d1 if isinstance(d1, str) else d1.deck_string
+            d2_s = d2 if isinstance(d2, str) else d2.deck_string
             
-            p1_wins, p2_wins, draws = 0, 0, 0
+            res = run_rust_match(d1_s, d2_s, p1, p2)
             
-            for _ in range(n_games_per_pair):
-                d1 = loader.sample_deck()
-                d2 = loader.sample_deck()
-                
-                # Ensure we have JSON strings
-                d1_s = d1.to_string() if hasattr(d1, "to_string") else str(d1)
-                d2_s = d2.to_string() if hasattr(d2, "to_string") else str(d2)
-                
-                res = run_rust_match(d1_s, d2_s, p1, p2)
-                if res == 1: 
-                    tracker.update(p1, p2, draw=False)
-                    p1_wins += 1
-                elif res == -1: 
-                    tracker.update(p2, p1, draw=False)
-                    p2_wins += 1
-                else: 
-                    tracker.update(p1, p2, draw=True)
-                    draws += 1
-                
-                progress.update(task, advance=1)
+            if res == 1: tracker.update(p1, p2, draw=False)
+            elif res == -1: tracker.update(p2, p1, draw=False)
+            else: tracker.update(p1, p2, draw=True)
+            
+            progress.update(overall_task, advance=1)
+            progress.update(pair_tasks[(p1, p2)], advance=1, visible=True)
+            
+            # Hide task when finished to avoid clutter
+            if progress.tasks[pair_tasks[(p1, p2)]].finished:
+                progress.update(pair_tasks[(p1, p2)], visible=False)
+
+        # Use ThreadPoolExecutor for parallel simulations
+        # Since Rust simulation releases GIL, this is very effective.
+        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+            futures = []
+            for p1, p2 in pairs:
+                for _ in range(n_games_per_pair):
+                    futures.append(executor.submit(play_pair_game, p1, p2))
+            
+            # Wait for all to finish
+            for future in futures:
+                future.result()
                 
     tracker.save()
     print_ratings(tracker)
@@ -329,6 +365,8 @@ def main():
     bench_p.add_argument("dir", help="Directory")
     
     args = parser.parse_args()
+    
+    print_system_info()
     
     if args.command == "calibrate":
         calibrate(args.games)

@@ -1,4 +1,4 @@
-use log::{trace, LevelFilter};
+use log::trace;
 use rand::rngs::StdRng;
 use std::fmt::Debug;
 use std::fmt::Write;
@@ -52,8 +52,6 @@ impl Player for ExpectiMiniMaxPlayer {
         };
 
         // Get value for each possible action
-        let original_level = log::max_level();
-        log::set_max_level(LevelFilter::Info); // Temporarily silence debug and trace logs
         let mut scores: Vec<f64> = Vec::with_capacity(possible_actions.len());
         for action in possible_actions.iter() {
             let (score, action_node) = expected_value_function(
@@ -67,7 +65,6 @@ impl Player for ExpectiMiniMaxPlayer {
             scores.push(score);
             root.children.push(action_node);
         }
-        log::set_max_level(original_level); // Restore the original logging level
 
         trace!("Scores: {scores:?}");
         // Select the one with best score
