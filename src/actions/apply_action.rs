@@ -425,8 +425,8 @@ pub(crate) fn apply_evolve(
             panic!("Basic pokemon do not evolve from others...");
         }
 
-        let damage_taken = from_pokemon.get_damage_counters();
-        played_card.apply_damage(damage_taken);
+        let damage_taken = from_pokemon.get_effective_total_hp().saturating_sub(from_pokemon.remaining_hp);
+        played_card.remaining_hp = played_card.remaining_hp.saturating_sub(damage_taken);
         played_card.attached_energy = from_pokemon.attached_energy.clone();
         played_card.attached_tool = from_pokemon.attached_tool.clone();
         played_card.cards_behind = from_pokemon.cards_behind.clone();
