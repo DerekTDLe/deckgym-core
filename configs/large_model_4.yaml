@@ -44,8 +44,8 @@ environment:
 paths:
   simple_deck_path: "simple_deck.json"
   meta_deck_path: "meta_deck.json"
-  save_path: "models/rl_bot_large_3"
-  checkpoint_dir: "./checkpoints/large_3/"
+  save_path: "models/rl_bot_large_4"
+  checkpoint_dir: "./checkpoints/large_4/"
   tensorboard_dir: "./logs/"
   resume_path: null
 
