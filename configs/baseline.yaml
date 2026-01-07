@@ -1,0 +1,47 @@
+# Baseline Self-Play Configuration
+# Optimized for pure self-play with meta decks and attention architecture
+
+paths:
+  meta_deck_path: "meta_deck.json"
+  save_path: "models/baseline/rl_bot"
+  checkpoint_dir: "./checkpoints/baseline/"
+  tensorboard_dir: "./logs/baseline/"
+
+training:
+  total_timesteps: 30000000
+  checkpoint_freq: 10000
+  n_envs: 32
+  use_batched_env: true
+  frozen_opponent_update_rollouts: 8
+  device: "auto"
+
+ppo:
+  learning_rate: 0.0003
+  min_learning_rate: 0.0001
+  warmup_ratio: 0.02
+  n_steps: 256
+  batch_size: 1024
+  n_epochs: 8
+  gamma: 0.98
+  gae_lambda: 0.95
+  ent_coef: 0.02
+  vf_coef: 0.5
+  clip_range: 0.2
+  max_grad_norm: 1.0
+  target_kl: 0.015
+
+model:
+  use_attention: true
+  attention_embed_dim: 256
+  attention_num_heads: 8
+  attention_num_layers: 3
+  use_silu: true
+  net_arch:
+    pi: [512, 256, 128]
+    vf: [512, 256]
+
+environment:
+  max_turns: 99
+  max_actions_per_turn: 50
+  max_total_actions: 500
+
