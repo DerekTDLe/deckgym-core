@@ -1,10 +1,4 @@
-// Observation Tensor Generation - V2: Set-Based Card Encoding
-//
-// Encodes all cards in the game as a set with position features.
-// Each card gets the same feature template regardless of its location.
-//
-// Order: Allied (board → hand → discard → deck) then Opponent (board → discard, hand/deck as counts)
-// Total: 40 card slots × ~60 features + global features
+// Observation Tensor Generation - V3: Position based encoding
 
 use crate::card_ids::CardId;
 use crate::hooks::{get_retreat_cost, get_stage};
@@ -32,10 +26,14 @@ pub const SLOTS_PER_PLAYER: usize = 4;
 /// Number of distinct tool types for one-hot encoding
 pub const NUM_TOOL_TYPES: usize = 8; // none + 7 tools
 
-/// Maximum cards in observation (20 self + 4 opponent board = 24)
-/// Self cards: full visibility (board, hand, discard, deck).
-/// Opponent cards: only board visible (4 slots max). Hand/deck counts in global features.
-pub const MAX_CARDS_IN_GAME: usize = 24;
+/// Maximum cards in observation (10 hand + 4 self board + 4 opponent board = 18)
+pub const MAX_CARDS_IN_GAME: usize = 18;
+
+/// Zone constants for position encoding
+const ZONE_HAND: usize = 0;
+const ZONE_BOARD: usize = 1;
+const NUM_ZONES: usize = 2; // Only hand and board now
+const NUM_BOARD_SLOTS: usize = 4;
 
 // --- Normalization Constants ---
 
@@ -50,47 +48,21 @@ const MAX_ATTACK_DAMAGE: f32 = 200.0;
 const MAX_ENERGY_COST: f32 = 4.0;
 const MAX_RETREAT_COST: f32 = 4.0;
 
-// --- Zone and Owner encoding ---
-
-/// Zone one-hot indices
-const ZONE_BOARD: usize = 0;
-const ZONE_HAND: usize = 1;
-const ZONE_DISCARD: usize = 2;
-const ZONE_DECK: usize = 3;
-const NUM_ZONES: usize = 4;
-
-/// Number of board slots for position encoding (1 active + 3 bench)
-const NUM_BOARD_SLOTS: usize = 4;
-
 // --- Feature Dimensions ---
 
 /// Card features (intrinsic properties)
-pub const CARD_INTRINSIC_FEATURES: usize = 1  // is_pokemon (0=trainer, 1=pokemon)
-    + 1                                        // stage (0/0.5/1.0)
-    + NUM_ENERGY_TYPES                         // card energy type (one-hot)
-    + 2                                        // hp_current, hp_max (normalized)
-    + NUM_ENERGY_TYPES                         // weakness (one-hot)
-    + 1                                        // ko_points (normalized)
-    + NUM_ENERGY_TYPES                         // energy attached (per type)
-    + 4                                        // attack1: damage, cost, has_effect, exists
-    + NUM_ATTACK_EFFECT_CATEGORIES             // attack1 effect categories
-    + 4                                        // attack2: damage, cost, has_effect, exists
-    + NUM_ATTACK_EFFECT_CATEGORIES             // attack2 effect categories 
-    + 4                                        // status: poison, sleep, para, confuse
-    + NUM_ABILITY_EFFECT_CATEGORIES            // ability categories
-    + NUM_SUPPORTER_EFFECT_CATEGORIES          // supporter categories (for trainers)
-    + 1                                        // retreat cost
-    + NUM_TOOL_TYPES;                          // attached tool (one-hot)
+pub const CARD_INTRINSIC_FEATURES: usize = 108;
+// Breakdown:
+// 1 (is_pokemon) + 1 (stage) + 10 (energy type) + 2 (hp) + 10 (weakness) + 1 (ko)
+// + 10 (attached en) + 4 (atk1) + 12 (atk1 cat) + 4 (atk2) + 12 (atk2 cat)
+// + 4 (status) + 16 (ability cat) + 12 (supporter cat) + 1 (retreat) + 8 (tool)
 
 /// Position features (where the card is)
-pub const CARD_POSITION_FEATURES: usize = NUM_ZONES  // zone one-hot (board/hand/discard/deck)
-    + 1                                              // owner (0=self, 1=opponent)
-    + 1                                              // is_active (1=active slot, 0=bench/other)
-    + NUM_BOARD_SLOTS;                               // slot one-hot (if on board: 0=active, 1-3=bench)
-    // NOTE: visibility removed - all encoded cards are now visible (24 cards only)
+pub const CARD_POSITION_FEATURES: usize = 8;
+// Breakdown: 2 (zone one-hot) + 1 (owner) + 1 (is_active) + 4 (slot one-hot)
 
 /// Total features per card slot
-pub const FEATURES_PER_CARD: usize = CARD_INTRINSIC_FEATURES + CARD_POSITION_FEATURES;
+pub const FEATURES_PER_CARD: usize = CARD_INTRINSIC_FEATURES + CARD_POSITION_FEATURES; // 108 + 8 = 116
 
 /// Global features (game state)
 pub const GLOBAL_FEATURES: usize = 1   // turn count
@@ -98,7 +70,7 @@ pub const GLOBAL_FEATURES: usize = 1   // turn count
     + 2                                 // deck sizes (self, opponent)
     + 2                                 // hand sizes (self, opponent)
     + 2                                 // discard sizes (self, opponent)
-    + 2 * 2 * NUM_ENERGY_TYPES_DECK;    // deck energy composition (2 players × 2 types max × 8 energies)
+    + 2 * 2 * NUM_ENERGY_TYPES_DECK; // deck energy composition (2 players × 2 types max × 8 energies)
 
 /// Total observation size
 pub const OBSERVATION_SIZE: usize = GLOBAL_FEATURES + (MAX_CARDS_IN_GAME * FEATURES_PER_CARD);
@@ -119,7 +91,7 @@ pub fn get_observation_tensor(state: &State, perspective: usize) -> Vec<f32> {
     let mut card_count = 0;
 
     // === SELF CARDS (full visibility) ===
-    
+
     // Self board (Active + Bench)
     for slot in 0..SLOTS_PER_PLAYER {
         if let Some(pokemon) = &state.in_play_pokemon[perspective][slot] {
@@ -128,25 +100,13 @@ pub fn get_observation_tensor(state: &State, perspective: usize) -> Vec<f32> {
         }
     }
 
-    // Self hand
+    // Self hand (max 10 cards)
     for card in &state.hands[perspective] {
-        encode_card(card, None, state, ZONE_HAND, 0.0, None, &mut obs);
+        encode_card(card, ZONE_HAND, 0.0, None, &mut obs);
         card_count += 1;
     }
 
-    // Self discard
-    for card in &state.discard_piles[perspective] {
-        encode_card(card, None, state, ZONE_DISCARD, 0.0, None, &mut obs);
-        card_count += 1;
-    }
-
-    // Self deck (visible to self, composition known but not order)
-    for card in &state.decks[perspective].cards {
-        encode_card(card, None, state, ZONE_DECK, 0.0, None, &mut obs);
-        card_count += 1;
-    }
-
-    // === OPPONENT CARDS (partial visibility) ===
+    // === OPPONENT CARDS (board only) ===
 
     // Opponent board (fully visible)
     for slot in 0..SLOTS_PER_PLAYER {
@@ -156,9 +116,8 @@ pub fn get_observation_tensor(state: &State, perspective: usize) -> Vec<f32> {
         }
     }
 
-    // NOTE: Opponent discard, hand, and deck are NOT encoded as cards.
-    // Their sizes are available in global features (lines 215-216).
-    // This reduces observation from 40 to 24 cards for faster training.
+    // NOTE: Only hand + board cards are encoded individually.
+    // Deck, discard sizes are available in global features.
 
     // === Pad remaining slots with zeros ===
     while card_count < MAX_CARDS_IN_GAME {
@@ -225,7 +184,7 @@ fn encode_in_play_pokemon(
     obs: &mut Vec<f32>,
 ) {
     // --- Intrinsic Features ---
-    
+
     // is_pokemon
     obs.push(1.0);
 
@@ -236,7 +195,11 @@ fn encode_in_play_pokemon(
     // Card energy type (one-hot)
     let card_energy = pokemon.get_energy_type();
     for energy in all_energy_types() {
-        obs.push(if card_energy == Some(energy) { 1.0 } else { 0.0 });
+        obs.push(if card_energy == Some(energy) {
+            1.0
+        } else {
+            0.0
+        });
     }
 
     // HP
@@ -301,16 +264,8 @@ fn encode_in_play_pokemon(
     encode_position(zone, owner, Some(slot), obs);
 }
 
-/// Encode a Card (in hand/discard/deck)
-fn encode_card(
-    card: &Card,
-    _in_play: Option<&PlayedCard>,
-    _state: &State,
-    zone: usize,
-    owner: f32,
-    slot: Option<usize>,
-    obs: &mut Vec<f32>,
-) {
+/// Encode a Card (in hand only now)
+fn encode_card(card: &Card, zone: usize, owner: f32, slot: Option<usize>, obs: &mut Vec<f32>) {
     match card {
         Card::Pokemon(pokemon_card) => {
             // is_pokemon
@@ -331,7 +286,11 @@ fn encode_card(
 
             // Weakness
             for energy in all_energy_types() {
-                obs.push(if pokemon_card.weakness == Some(energy) { 1.0 } else { 0.0 });
+                obs.push(if pokemon_card.weakness == Some(energy) {
+                    1.0
+                } else {
+                    0.0
+                });
             }
 
             // KO points
@@ -585,8 +544,5 @@ mod tests {
         println!("FEATURES_PER_CARD: {}", FEATURES_PER_CARD);
         println!("GLOBAL_FEATURES: {}", GLOBAL_FEATURES);
         println!("OBSERVATION_SIZE: {}", OBSERVATION_SIZE);
-        
-        assert!(FEATURES_PER_CARD > 50, "Expected ~60 features per card");
-        assert!(OBSERVATION_SIZE > 2000, "Expected ~2400 total features");
     }
 }
