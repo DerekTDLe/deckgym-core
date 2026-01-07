@@ -1,6 +1,5 @@
 # Large Model Configuration (Run #6)
 # New attention architecture may tackle gradient issues and allow to go beyond 47% plateau
-# Hyperparameter are the same as Run #4
 model:
   attention_embed_dim: 256
   attention_num_heads: 8
@@ -21,8 +20,8 @@ ppo:
   # PPO hyperparameters 
   gamma: 0.98
   gae_lambda: 0.95
-  ent_coef: 0.03
-  vf_coef: 0.8
+  ent_coef: 0.05
+  vf_coef: 0.5
   clip_range: 0.15
   target_kl: 0.01
 
