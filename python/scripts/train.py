@@ -101,7 +101,7 @@ class TrainingConfig:
     max_total_actions: int = 500     # Prevents runaway episodes
     
     # Parallel environments
-    n_envs: int = 32                  # 32 parallel environments
+    n_envs: int = 12                # 32 parallel environments
     use_batched_env: bool = True     # Use Rust-side batched env
     
     # Device
@@ -116,8 +116,8 @@ class TrainingConfig:
         """
         import math
         
-        base_lr = self.base_learning_rate
-        min_lr = self.min_learning_rate
+        base_lr = float(self.base_learning_rate)
+        min_lr = float(self.min_learning_rate)
         
         if total_timesteps:
             # Calculate warmup steps from ratio
