@@ -587,6 +587,13 @@ impl PyState {
         self.state.debug_string()
     }
 
+    /// Convert state to JSON string
+    fn to_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.state).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("JSON serialization error: {}", e))
+        })
+    }
+
     /// Get hand size for a player
     fn get_hand_size(&self, player: usize) -> PyResult<usize> {
         if player > 1 {
@@ -955,28 +962,35 @@ pub fn py_simulate(
     // Run simulations
     let mut wins_per_deck = [0u32, 0u32, 0u32]; // [player_a, player_b, ties]
 
-    for _ in 0..num_simulations {
-        let players = create_players(deck_a.clone(), deck_b.clone(), cli_players.clone());
-        let game_seed = seed.unwrap_or_else(rand::random::<u64>);
-        let mut game = Game::new(players, game_seed);
-        let outcome = game.play();
+    // Release GIL during simulation
+    let py = unsafe { Python::assume_gil_acquired() };
+    py.allow_threads(|| {
+        for _ in 0..num_simulations {
+            let players = create_players(deck_a.clone(), deck_b.clone(), cli_players.clone());
+            let game_seed = seed.unwrap_or_else(rand::random::<u64>);
+            let mut game = Game::new(players, game_seed);
+            
+            // Safety: limit to 2000 ticks OR 99 turns to avoid infinite loops/cycles
+            let mut total_ticks = 0;
+            while !game.is_game_over() && game.get_state_clone().turn_count < 99 && total_ticks < 2000 {
+                game.play_tick();
+                total_ticks += 1;
+            }
+            
+            let outcome = game.get_state_clone().winner;
 
-        match outcome {
-            Some(GameOutcome::Win(winner)) => {
-                if winner < 2 {
-                    wins_per_deck[winner] += 1;
-                } else {
-                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Invalid winner index: {}",
-                        winner
-                    )));
+            match outcome {
+                Some(GameOutcome::Win(winner)) => {
+                    if winner < 2 {
+                        wins_per_deck[winner] += 1;
+                    }
+                }
+                Some(GameOutcome::Tie) | None => {
+                    wins_per_deck[2] += 1;
                 }
             }
-            Some(GameOutcome::Tie) | None => {
-                wins_per_deck[2] += 1;
-            }
         }
-    }
+    });
 
     Ok(PySimulationResults {
         total_games: num_simulations,
@@ -1121,6 +1135,13 @@ impl PyVecGame {
     /// Get current turn counts for all environments (debugging)
     fn get_turn_counts(&self) -> Vec<u8> {
         self.inner.get_turn_counts()
+    }
+
+    /// Get current state of a specific environment
+    fn get_state(&self, env_idx: usize) -> PyState {
+        PyState {
+            state: self.inner.get_state(env_idx),
+        }
     }
 
     /// Set ONNX model as opponent for self-play (requires 'onnx' feature)

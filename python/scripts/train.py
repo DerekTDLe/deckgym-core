@@ -250,6 +250,8 @@ class SelfPlayEnv(gym.Env):
         self.config = config
         self._episode_actions = 0
         self._current_decks = None  # (deck_a, deck_b) strings
+        from deckgym.diagnostic_logger import get_logger
+        self.diagnostic_logger = get_logger()
         
         # Initialize with a dummy game to get space dimensions
         self._env = DeckGymEnv(*deck_loader.sample_pair())
@@ -288,6 +290,7 @@ class SelfPlayEnv(gym.Env):
         # Play opponent's turns if they go first
         obs, info, _, _ = self._play_opponent_turns(obs, info)
         self._episode_actions = 0
+        self.diagnostic_logger.clear_history(0) # env_idx 0 for single env
         
         return obs, info
     
@@ -334,10 +337,12 @@ class SelfPlayEnv(gym.Env):
             return self._end_episode_truncated("max_actions_exceeded")
         
         # Execute agent's action
+        self.diagnostic_logger.record_action(0, action)
         try:
             obs, reward, done, truncated, info = self._env.step(action)
         except BaseException as e:
             print(f"WARNING: Game error during agent turn: {e}")
+            self.diagnostic_logger.log_error("agent_panic", 0, self._env.game.get_state(), {"error": str(e)})
             return self._end_episode_error(str(e))
         
         # Play opponent's response
@@ -459,6 +464,7 @@ class SelfPlayEnv(gym.Env):
     
     def _end_episode_truncated(self, reason: str):
         """End episode due to limit exceeded."""
+        self.diagnostic_logger.log_error(reason, 0, self._env.game.get_state())
         obs = np.array(self._env.game.get_obs(), dtype=np.float32)
         return obs, 0.0, False, True, {"truncated_reason": reason}
     
@@ -474,6 +480,7 @@ class SelfPlayEnv(gym.Env):
         turn = self._get_turn_count()
         player = self._env.game.current_player()
         print(f"WARNING: {reason} triggered (count={count}, turn={turn}, player={player})")
+        self.diagnostic_logger.log_error(reason, 0, self._env.game.get_state(), {"count": count})
 
 
 # =============================================================================

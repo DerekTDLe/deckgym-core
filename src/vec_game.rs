@@ -667,6 +667,11 @@ impl VecGame {
     pub fn get_turn_counts(&self) -> Vec<u8> {
         self.envs.iter().map(|env| env.state.turn_count).collect()
     }
+
+    /// Get current state of a specific environment
+    pub fn get_state(&self, env_idx: usize) -> State {
+        self.envs[env_idx].state.clone()
+    }
 }
 
 #[cfg(test)]
