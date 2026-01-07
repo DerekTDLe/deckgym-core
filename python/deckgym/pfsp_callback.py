@@ -126,13 +126,41 @@ class PFSPCallback(BaseCallback):
         elif self.verbose > 0 and self.rollout_count % 5 == 0:
             print(f"[PFSP Debug] Rollout {self.rollout_count}: only {len(self.episode_results)} episodes (need 10+)")
 
-        # Add current agent to pool periodically
-        if self.rollout_count % self.add_to_pool_every_n_rollouts == 0:
-            self._add_to_pool()
+        # Calculate average agent winrate against pool for adaptive decisions
+        avg_agent_winrate = self._get_avg_agent_winrate()
+        
+        # Adaptive add frequency: if agent is dominating (>65%), add more frequently
+        effective_add_freq = 4 if avg_agent_winrate > 0.65 else self.add_to_pool_every_n_rollouts
+        
+        # Add current agent to pool periodically, but ONLY if performing well (>60%)
+        if self.rollout_count % effective_add_freq == 0:
+            if avg_agent_winrate >= 0.60 or len(self.opponent_pool) < 2:
+                # Add if winning enough OR pool needs more opponents
+                self._add_to_pool()
+                if self.verbose > 0 and avg_agent_winrate >= 0.60:
+                    print(f"[PFSP] Agent winrate {avg_agent_winrate:.1%} >= 60%, adding to pool")
+            elif self.verbose > 0:
+                print(f"[PFSP] Agent winrate {avg_agent_winrate:.1%} < 60%, skipping pool add")
 
         # Select new opponent periodically (can be different from add frequency)
         if self.rollout_count % self.select_opponent_every_n_rollouts == 0:
             self._select_opponent_pfsp()
+    
+    def _get_avg_agent_winrate(self) -> float:
+        """Calculate average agent winrate across all opponents in pool."""
+        if not self.opponent_pool:
+            return 0.5
+        
+        total_wins = 0
+        total_games = 0
+        for data in self.opponent_pool.values():
+            games = data["wins"] + data["losses"]
+            if games > 0:
+                # Agent winrate = opponent losses / total
+                total_wins += data["losses"]
+                total_games += games
+        
+        return total_wins / total_games if total_games > 0 else 0.5
 
     def _on_step(self) -> bool:
         """Called at each env step - track episode outcomes."""
@@ -191,24 +219,33 @@ class PFSPCallback(BaseCallback):
             "added_at_step": self.num_timesteps,
         }
 
-        # Remove oldest if pool full (FIFO), but NEVER remove current opponent
+        # Remove WEAKEST opponent if pool full (keep hardest opponents!)
+        # But NEVER remove current opponent
         if len(self.opponent_pool) > self.pool_size:
-            # Find oldest that is NOT the current opponent
-            candidates = [
-                (name, data["added_at_step"])
-                for name, data in self.opponent_pool.items()
-                if name != self.current_opponent_name
-            ]
+            # Find opponent with LOWEST winrate (easiest for agent)
+            candidates = []
+            for name, data in self.opponent_pool.items():
+                if name == self.current_opponent_name:
+                    continue  # Never remove current opponent
+                total = data["wins"] + data["losses"]
+                if total > 0:
+                    opp_wr = data["wins"] / total
+                else:
+                    opp_wr = 0.5  # Untested opponents get neutral priority
+                candidates.append((name, opp_wr))
+            
             if candidates:
-                oldest_name = min(candidates, key=lambda x: x[1])[0]
-                oldest_path = Path(self.opponent_pool[oldest_name]["path"])
-                if oldest_path.exists():
-                    oldest_path.unlink()  # Delete checkpoint file
-                del self.opponent_pool[oldest_name]
+                # Remove the opponent with LOWEST winrate (easiest to beat)
+                weakest_name = min(candidates, key=lambda x: x[1])[0]
+                weakest_path = Path(self.opponent_pool[weakest_name]["path"])
+                weakest_wr = min(candidates, key=lambda x: x[1])[1]
+                if weakest_path.exists():
+                    weakest_path.unlink()  # Delete checkpoint file
+                del self.opponent_pool[weakest_name]
                 gc.collect()
 
                 if self.verbose > 0:
-                    print(f"[PFSP] Removed oldest opponent: {oldest_name}")
+                    print(f"[PFSP] Evicted weakest opponent: {weakest_name} (WR: {weakest_wr:.1%})")
 
         if self.verbose > 0:
             print(f"[PFSP →Pool] Saved agent as {checkpoint_name} (pool size: {len(self.opponent_pool)})")
