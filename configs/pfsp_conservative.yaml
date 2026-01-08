@@ -1,59 +1,81 @@
 # PFSP Conservative Configuration
-# Lighter version for testing or limited GPU memory
+# Optimized for stable training with lower KL divergence
 #
-# This config uses smaller models and less frequent updates for faster iteration.
+# Key changes from pfsp_optimal.yaml:
+# - Learning rate: 1e-4 → 3e-5 (conservative to avoid KL explosion)
+# - target_kl: 0.02 → 0.01 (stricter early stopping)
+# - ent_coef: 0.06 → 0.03 (less aggressive exploration)
+#
+# Use this config after diagnosing training plateau from Run #8
 
 paths:
   meta_deck_path: "meta_deck.json"
-  save_path: "models/rl_bot_pfsp_light"
-  checkpoint_dir: "./checkpoints/pfsp_light/"
-  tensorboard_dir: "./logs/pfsp_light/"
-  resume_path: null
+  save_path: "models/rl_bot_pfsp_conservative"
+  checkpoint_dir: "./checkpoints/pfsp_conservative/"
+  tensorboard_dir: "./logs/pfsp_conservative/"
+  resume_path: "./checkpoints/pfsp_pool/pfsp_6815k.zip"  # Best from pool benchmark (1670 Elo)
 
 model:
-  # Lighter attention architecture
+  # Same architecture as pfsp_optimal (proven to work)
   use_attention: true
-  attention_embed_dim: 128          # Smaller embedding (vs 256)
-  attention_num_heads: 4            # Fewer heads (vs 8)
-  attention_num_layers: 2           # Shallower (vs 3)
+  attention_embed_dim: 256
+  attention_num_heads: 8
+  attention_num_layers: 3
   use_silu: true
 
   net_arch:
-    pi: [256, 128]                  # Smaller policy head
-    vf: [256, 128]                  # Smaller value head
+    pi: [512, 256, 128]
+    vf: [512, 256]
 
 ppo:
-  learning_rate: 3e-4
-  min_learning_rate: 1e-4
+  # CONSERVATIVE hyperparameters (key changes)
+  learning_rate: 3e-5              # Was 1e-4 (÷3) - prevents KL explosion
+  min_learning_rate: 5e-6          # Was 1e-5 (÷2)
   warmup_ratio: 0.02
-  n_steps: 256                      # Smaller rollouts for faster updates
-  batch_size: 512                   # Smaller batches
-  n_epochs: 8
+
+  n_steps: 512                     # Same as optimal
+  batch_size: 1024
+  n_epochs: 8                      # Slightly fewer epochs for stability
+
   gamma: 0.98
   gae_lambda: 0.95
-  ent_coef: 0.04
+  ent_coef: 0.03                   # Was 0.06 (÷2) - less aggressive exploration
   vf_coef: 0.5
-  clip_range: 0.2
-  max_grad_norm: 1.0
-  target_kl: 0.02
+  clip_range: 0.15                 # Was 0.2 - tighter clipping
+  max_grad_norm: 0.5               # Was 1.0 - more aggressive grad clipping
+  target_kl: 0.01                  # Was 0.02 (÷2) - stricter early stopping
 
 training:
-  total_timesteps: 10_000_000       # Shorter for testing
-  checkpoint_freq: 100_000
-  n_envs: 16                        # Fewer envs for less memory
+  total_timesteps: 30_000_000
+  checkpoint_freq: 10_000
+  n_envs: 8
   use_batched_env: true
   device: "auto"
 
-  # PFSP with smaller pool
+  # PFSP settings
   use_pfsp: true
-  pfsp_pool_size: 5                 # Smaller pool
-  pfsp_add_every_n_rollouts: 16     # Less frequent additions
-  pfsp_select_every_n_rollouts: 4   # Less frequent selection changes
-  pfsp_priority_exponent: 1.5       # Less aggressive prioritization
-  pfsp_winrate_window: 100
-  pfsp_checkpoint_dir: "./checkpoints/pfsp_pool_light/"
+  pfsp_pool_size: 10
+  pfsp_add_every_n_rollouts: 8
+  pfsp_select_every_n_rollouts: 2
+  pfsp_priority_exponent: 2.0
+  pfsp_winrate_window: 200
+  pfsp_checkpoint_dir: "./checkpoints/pfsp_pool_conservative/"
 
 environment:
   max_turns: 99
   max_actions_per_turn: 50
   max_total_actions: 500
+
+# =============================================================================
+# Expected Behavior
+# =============================================================================
+#
+# With conservative settings, expect:
+# - KL divergence: ~0.008-0.012 (within target)
+# - Clip fraction: ~0.10-0.15 (reduced from 0.20)
+# - Slower but monotonic improvement
+# - PFSP pool should continue growing past 7M steps
+#
+# Resume from best checkpoint:
+# python scripts/train.py --config configs/pfsp_conservative.yaml \
+#   --resume checkpoints/pfsp_training/rl_bot_6400000_steps.zip

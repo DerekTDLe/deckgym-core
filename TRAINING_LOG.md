@@ -747,6 +747,119 @@ The 4 queries can specialize in different aspects:
 - Higher peak Elo (target: 2000+)
 - Faster adaptation to meta matchups.
 - 100% training uptime (no more crashes).
+---
+
+## Run #8: PFSP with Optimal Config (FAILED)
+
+**Date**: 2026-01-07 to 2026-01-08  
+**Model**: Attention-based (256 embed, 8 heads, 3 layers)  
+**Config**: `configs/pfsp_optimal.yaml`  
+**Total Steps**: ~21,200,000 (~21M)  
+**Status**: ❌ **FAILED** - Catastrophic forgetting after 6.4M steps
+
+### Configuration
+
+```python
+# Key hyperparameters (problematic)
+learning_rate = 1e-4           # Too high for attention
+target_kl = 0.02               # Too permissive
+ent_coef = 0.06                # Too aggressive exploration
+n_steps = 512                  # Good
+clip_range = 0.2               # Standard
+
+# PFSP settings
+pfsp_pool_size = 10
+pfsp_add_threshold = 0.60      # Required 60% WR to add to pool
+```
+
+### Training Metrics
+
+| Checkpoint | Elo | Δ vs Best | Win% | Status |
+|------------|-----|-----------|------|--------|
+| 1.6M | 1585 | -59 | 44% | Learning |
+| **6.4M** | **1644** | **0 (BEST)** | **50%** | 🏆 Peak |
+| 8.0M | 1614 | -30 | 49% | ⬇️ Regression |
+| 11.2M | 1610 | -34 | 41% | ⬇️ |
+| 14.4M | 1536 | -108 | 34% | ⬇️⬇️ |
+| 19.2M | 1506 | -138 | 32% | ⬇️⬇️⬇️ |
+| 20.8M | 1581 | -63 | 39% | Slight recovery |
+
+**Gap to e2**: -248 Elo (1644 vs 1893)
+
+### Root Cause Analysis ❌
+
+#### 1. KL Divergence Explosion
+
+```
+Step      KL        Target    Status
+--------------------------------------
+1M        0.021     0.015     ⚠️ Already high
+5M        0.031     0.015     ❌ 2x over target!
+10M       0.032     0.015     ❌
+15M       0.031     0.015     ❌
+20M       0.023     0.015     ⚠️
+```
+
+**Impact**: Policy updates were **2x more aggressive** than intended.
+- Agent "forgot" good strategies learned at 6M steps
+- Performance oscillated wildly instead of converging
+- Explains why 6.4M > 20.8M despite 14M more training steps
+
+#### 2. PFSP Pool Stagnation
+
+| Metric | Value |
+|--------|-------|
+| Last pool addition | 7.47M steps |
+| Pool additions since | **0** (15M steps!) |
+| Cause | Agent winrate dropped below 60% |
+
+The 60% threshold prevented the agent from adding weaker versions to the pool,
+creating a local optimum trap where it trained against the same 10 opponents.
+
+#### 3. Gradient Concentration (Diagnostic @ 19.2M)
+
+```
+Layer                    Gradient Norm    Status
+------------------------------------------------
+card_embed.0.weight      737              ⚠️ Very high
+attention_layers.0       763              ⚠️ Very high
+attention_layers.2       42               ✅ Normal
+policy_net               419-475          ⚠️ High
+```
+
+Gradients concentrated in early layers instead of policy head.
+
+### Lessons Learned
+
+1. **LR 1e-4 is too high** for attention architecture with PFSP
+   - Causes KL divergence explosion
+   - Should use 3e-5 or lower
+
+2. **target_kl 0.02 is too permissive**
+   - Actual KL was 0.031 (1.5x over!)
+   - Should use 0.01 for stricter early stopping
+
+3. **60% threshold caused pool stagnation**
+   - Lowered to 50% in pfsp_callback.py
+   - Ensures pool keeps growing during difficult periods
+
+4. **Catastrophic forgetting is real**
+   - Peak at 6.4M, then 14M steps of regression
+   - Wasted ~14M steps of compute
+
+### Fixes Applied → Run #9
+
+Created `configs/pfsp_conservative.yaml`:
+- LR: 1e-4 → **3e-5** (÷3)
+- target_kl: 0.02 → **0.01** (÷2)
+- ent_coef: 0.06 → **0.03** (÷2)
+- clip_range: 0.2 → **0.15**
+- max_grad_norm: 1.0 → **0.5**
+
+Modified `pfsp_callback.py`:
+- Pool add threshold: 60% → **50%**
+
+**Next Steps**: Resume from 6.4M checkpoint with conservative config.
 
 ---
 
@@ -757,7 +870,8 @@ The 4 queries can specialize in different aspects:
 | Run #1-3 | Curriculum vs e2 | 1760 Elo | Local optima, limited by fixed opponent |
 | Run #4-5 | Attention Fixes | 1825 Elo | High variance, architecture bottlenecks |
 | Run #6 | Multi-Head Pool | - | Validated architecture improvements |
-| **Run #7** | **Pure Self-Play** | - | **Current State: Modern RL Regime** |
+| Run #7 | Pure Self-Play | - | Modern RL Regime |
+| **Run #8** | **PFSP Optimal** | **1644 Elo** | **❌ KL explosion, catastrophic forgetting** |
 
 ---
 
