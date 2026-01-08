@@ -863,6 +863,42 @@ Modified `pfsp_callback.py`:
 
 ---
 
+## Run #9: Stabilized Attention Model (V2 Revamp)
+
+**Date**: 2026-01-08 (Ongoing)
+**Model**: Revamped Attention (Pre-norm, GELU, 4 queries, Bias-free)
+**Config**: `configs/attention_baseline.yaml`
+**Status**: [IN PROGRESS] Excellent gradient health confirmed at 786k steps.
+
+### Gradient Health Analysis (@ 786k steps)
+
+```
+Diagnostic Results:
+  Gradient Imbalance Ratio: 196.7 ✅ (Target < 1,000)
+  Status: ✅ HEALTHY
+
+  Comparison with Run #4 (26B) and Run #5 (6.7K):
+    99.99% reduction in imbalance since architecture revamp.
+
+  Forward Pass Statistics:
+    Layer 0-2 Logit Std: ~0.49 ✅ (No saturation)
+    Layer 0-2 Entropy:   ~2.77 ✅ (Healthy diversity)
+
+  Component Max Grads:
+    card_embed:     34.9
+    pool (queries): 38.6
+    action_net:     45.3
+    Status: ✅ Well balanced across all layers
+```
+
+### Key Improvements ✅
+
+1. **Architecture Revamp**: Bias-free projections and multi-head pooling (4 queries) have completely resolved the feature bottleneck.
+2. **Stable Learning**: Gradients are now perfectly balanced between the feature extractor and the action head.
+3. **Training Speed**: ~400 it/s on RTX 3050.
+
+---
+
 ## Strategy Evolution
 
 | Stage | Approach | Result | Conclusion |
