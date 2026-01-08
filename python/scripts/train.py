@@ -450,7 +450,10 @@ class FrozenOpponentCallback(BaseCallback):
                 export_policy_to_onnx(self.model, onnx_path, validate=False)
 
                 # Set the ONNX model as opponent in VecGame
-                self.env.vec_game.set_onnx_opponent(onnx_path, deterministic=False)
+                device = getattr(self.env.config, "pfsp_opponent_device", "trt")
+                self.env.vec_game.set_onnx_opponent(
+                    onnx_path, deterministic=False, device=device
+                )
 
                 if self.verbose > 0:
                     print(

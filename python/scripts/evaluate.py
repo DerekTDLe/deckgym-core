@@ -47,6 +47,7 @@ from deckgym.config import (
     EVAL_GAMES_PER_PAIR_AUDIT,
     EVAL_GAMES_PER_PAIR_BENCH,
     EVAL_REPORTS_DIR,
+    EVAL_DEFAULT_DEVICE,
 )
 
 # Try importing ONNX export tools (required for audit/bench)
@@ -348,6 +349,7 @@ def evaluate_single_model(
     n_games: int = EVAL_GAMES_PER_PAIR_AUDIT,
     tracker: Optional[TrueSkillTracker] = None,
     show_table: bool = True,
+    device: str = EVAL_DEFAULT_DEVICE,
 ) -> Optional[dict]:
     """Evaluate a single model against baselines."""
     if not ONNX_AVAILABLE:
@@ -375,7 +377,7 @@ def evaluate_single_model(
             console.print(f"[red]Failed to export ONNX: {e}[/red]")
             return
 
-        onnx_code = f"onnx:{onnx_path}"
+        onnx_code = f"onnx:{onnx_path}:{device}"
 
         # 2. Run against baselines
         baselines = DEFAULT_BASELINES_TO_CALIBRATE
@@ -455,7 +457,11 @@ def evaluate_single_model(
         return results
 
 
-def audit_directory(directory: str, n_games: int = EVAL_GAMES_PER_PAIR_AUDIT):
+def audit_directory(
+    directory: str,
+    n_games: int = EVAL_GAMES_PER_PAIR_AUDIT,
+    device: str = EVAL_DEFAULT_DEVICE,
+):
     """Evaluate all models in a directory against baselines."""
     model_dir = Path(directory)
     if not model_dir.exists():
@@ -473,7 +479,7 @@ def audit_directory(directory: str, n_games: int = EVAL_GAMES_PER_PAIR_AUDIT):
     all_results = []
     for mf in model_files:
         res = evaluate_single_model(
-            str(mf), n_games=n_games, tracker=tracker, show_table=False
+            str(mf), n_games=n_games, tracker=tracker, show_table=False, device=device
         )
         if res:
             all_results.append(res)
@@ -494,6 +500,7 @@ def benchmark_directory(
     directory: str,
     n_games_per_pair: int = EVAL_GAMES_PER_PAIR_BENCH,
     include_baselines: bool = True,
+    device: str = EVAL_DEFAULT_DEVICE,
 ):
     """
     Benchmark all models in a directory against each other and baselines.
@@ -555,7 +562,7 @@ def benchmark_directory(
 
         # Add models
         for model_name, onnx_path in onnx_paths.items():
-            participants[model_name] = f"onnx:{onnx_path}"
+            participants[model_name] = f"onnx:{onnx_path}:{device}"
 
         # Add baselines
         if include_baselines:
@@ -776,6 +783,7 @@ def main():
     audit_p = subparsers.add_parser("audit", help="Audit model")
     audit_p.add_argument("model", help="Path to .zip model")
     audit_p.add_argument("--games", type=int, default=EVAL_GAMES_PER_PAIR_AUDIT, help=f"Games per baseline (default: {EVAL_GAMES_PER_PAIR_AUDIT})")
+    audit_p.add_argument("--device", default=EVAL_DEFAULT_DEVICE, help=f"Device for ONNX (default: {EVAL_DEFAULT_DEVICE})")
 
     # Bench (Directory)
     bench_p = subparsers.add_parser("bench", help="Benchmark directory")
@@ -786,6 +794,7 @@ def main():
     bench_p.add_argument(
         "--no-baselines", action="store_true", help="Exclude baselines from tournament"
     )
+    bench_p.add_argument("--device", default=EVAL_DEFAULT_DEVICE, help=f"Device for ONNX (default: {EVAL_DEFAULT_DEVICE})")
 
     args = parser.parse_args()
 
@@ -796,14 +805,12 @@ def main():
     elif args.command == "audit":
         path = Path(args.model)
         if path.is_dir():
-            audit_directory(args.model, args.games)
+            audit_directory(args.model, args.games, args.device)
         else:
-            evaluate_single_model(args.model, args.games)
+            evaluate_single_model(args.model, args.games, device=args.device)
     elif args.command == "bench":
         benchmark_directory(
-            args.dir,
-            n_games_per_pair=args.games,
-            include_baselines=not args.no_baselines,
+            args.dir, args.games, include_baselines=not args.no_baselines, device=args.device
         )
 
 

@@ -57,6 +57,7 @@ pub enum PlayerCode {
     #[cfg(feature = "onnx")]
     Onnx {
         path: String,
+        device: String,
     },
 }
 /// Custom parser function enforcing case-insensitivity
@@ -92,8 +93,14 @@ pub fn parse_player_code(s: &str) -> Result<PlayerCode, String> {
     // Check if it starts with 'onnx:' (e.g., onnx:/path/to/model.onnx)
     #[cfg(feature = "onnx")]
     if lower.starts_with("onnx:") {
-        let path = s[5..].to_string();
-        return Ok(PlayerCode::Onnx { path });
+        let parts: Vec<&str> = s[5..].split(':').collect();
+        let path = parts[0].to_string();
+        let device = if parts.len() > 1 {
+            parts[1].to_string()
+        } else {
+            "auto".to_string()
+        };
+        return Ok(PlayerCode::Onnx { path, device });
     }
 
     match lower.as_str() {
@@ -155,8 +162,8 @@ fn get_player(deck: Deck, player: &PlayerCode) -> Box<dyn Player> {
         }),
         PlayerCode::ER => Box::new(EvolutionRusherPlayer { deck }),
         #[cfg(feature = "onnx")]
-        PlayerCode::Onnx { path } => {
-            Box::new(OnnxPlayer::new(&path, deck, true, "auto").expect("Failed to load ONNX model"))
+        PlayerCode::Onnx { path, device } => {
+            Box::new(OnnxPlayer::new(&path, deck, true, device).expect("Failed to load ONNX model"))
         }
     }
 }
