@@ -441,8 +441,13 @@ class PFSPCallback(BaseCallback):
                 if weakest_path.exists():
                     weakest_path.unlink()  # Delete checkpoint file
 
-                # Also remove from Rust pool if in pool mode
-                # Note: We'd need to implement remove_from_pool in Rust, for now just clear and reload
+                # Remove from Rust pool to free GPU memory
+                if self.pool_mode and isinstance(self.env, BatchedDeckGymEnv):
+                    try:
+                        self.env.vec_game.remove_onnx_from_pool(weakest_name)
+                    except Exception as e:
+                        if self.verbose > 0:
+                            print(f"[PFSP WARNING] Failed to remove from Rust pool: {e}")
 
                 del self.opponent_pool[weakest_name]
                 gc.collect()
