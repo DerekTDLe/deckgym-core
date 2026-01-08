@@ -35,7 +35,7 @@ ppo:
   min_learning_rate: 5e-06
   warmup_ratio: 0.02
 
-  n_steps: 256
+  n_steps: 64 # less steps to compensate for move envs
   batch_size: 1024
   n_epochs: 8
 
@@ -50,7 +50,7 @@ ppo:
 training:
   total_timesteps: 30000000
   checkpoint_freq: 10000
-  n_envs: 12 # Maybe less overheads? Doesn't change much the FPS
+  n_envs: 128 # more env to use the GPU efficiently
   use_batched_env: true
   device: "auto"
   onnx_device: "auto"
