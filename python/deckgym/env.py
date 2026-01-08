@@ -2,7 +2,7 @@
 """
 DeckGymEnv - Gymnasium environment for Pokemon TCG Pocket
 
-This environment allows an RL agent to play Pokemon TCG Pocket 
+This environment allows an RL agent to play Pokemon TCG Pocket
 via the deckgym-core Rust simulator.
 """
 
@@ -48,7 +48,7 @@ class DeckGymEnv(gym.Env):
             low=0.0,
             high=1.0,
             shape=(deckgym.Game.observation_size(),),
-            dtype=np.float32
+            dtype=np.float32,
         )
         self.action_space = gym.spaces.Discrete(deckgym.Game.action_space_size())
 
@@ -67,9 +67,7 @@ class DeckGymEnv(gym.Env):
 
         game_seed = seed if seed is not None else self.seed
         self.game = deckgym.Game.from_deck_strings(
-            self.deck_a_str,
-            self.deck_b_str,
-            seed=game_seed
+            self.deck_a_str, self.deck_b_str, seed=game_seed
         )
 
         obs = self._sanitize_obs(np.array(self.game.get_obs(), dtype=np.float32))
@@ -96,19 +94,23 @@ class DeckGymEnv(gym.Env):
             # End episode with neutral reward to avoid crashing training
             print(f"WARNING: Panic in step_action: {e}")
             try:
-                obs = self._sanitize_obs(np.array(self.game.get_obs(), dtype=np.float32))
+                obs = self._sanitize_obs(
+                    np.array(self.game.get_obs(), dtype=np.float32)
+                )
             except BaseException:
                 obs = np.zeros(self.observation_space.shape, dtype=np.float32)
             return obs, 0.0, True, False, {"error": str(e)}
-        
+
         obs = self._sanitize_obs(np.array(self.game.get_obs(), dtype=np.float32))
         return obs, reward, done, False, {"action": info_str}
-    
+
     def _sanitize_obs(self, obs: np.ndarray) -> np.ndarray:
         """Check and fix corrupted observations containing NaN or inf values."""
         if np.any(np.isnan(obs)) or np.any(np.isinf(obs)):
             bad_indices = np.where(np.isnan(obs) | np.isinf(obs))[0]
-            print(f"WARNING: Corrupted observation at indices {bad_indices[:10]}... Sanitizing.")
+            print(
+                f"WARNING: Corrupted observation at indices {bad_indices[:10]}... Sanitizing."
+            )
             obs = np.nan_to_num(obs, nan=0.0, posinf=1.0, neginf=-1.0)
         return obs
 
@@ -129,10 +131,10 @@ class DeckGymEnv(gym.Env):
             mask = np.zeros(self.action_space.n, dtype=np.bool_)
             mask[0] = True  # Only EndTurn valid
             return mask
-        
+
         # Fallback: if no actions valid, force EndTurn (action 0) to continue
         # This handles edge cases where the game is stuck
         if not mask.any():
             mask[0] = True  # EndTurn is always index 0
-        
+
         return mask
