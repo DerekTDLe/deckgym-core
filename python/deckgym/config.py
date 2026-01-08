@@ -175,7 +175,7 @@ class TrainingConfig:
     attention_ff_expansion_factor: int = MODEL_FF_EXPANSION_FACTOR
     attention_output_proj_factor: int = MODEL_OUTPUT_PROJ_FACTOR
     attention_mask_threshold: float = MODEL_MASK_THRESHOLD
-    
+
     # Attention stability parameters (NEW)
     attention_dropout: float = MODEL_ATTENTION_DROPOUT
     attention_pool_queries: int = MODEL_ATTENTION_POOL_QUERIES
@@ -512,59 +512,63 @@ environment:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
             f.write(self.to_yaml())
-    
+
     def validate(self) -> list:
         """
         Validate configuration and return list of warnings.
-        
+
         Returns empty list if all good.
         """
         warnings = []
-        
+
         # Architecture checks
         if self.attention_embed_dim % self.attention_num_heads != 0:
             warnings.append(
                 f"attention_embed_dim ({self.attention_embed_dim}) must be divisible by "
                 f"attention_num_heads ({self.attention_num_heads})"
             )
-        
+
         if self.attention_embed_dim < 64:
-            warnings.append(f"attention_embed_dim ({self.attention_embed_dim}) is very small, may underfit")
-        
+            warnings.append(
+                f"attention_embed_dim ({self.attention_embed_dim}) is very small, may underfit"
+            )
+
         if self.attention_embed_dim > 1024:
-            warnings.append(f"attention_embed_dim ({self.attention_embed_dim}) is very large, may be slow")
-        
+            warnings.append(
+                f"attention_embed_dim ({self.attention_embed_dim}) is very large, may be slow"
+            )
+
         if self.attention_num_layers > 6:
             warnings.append(
                 f"attention_num_layers ({self.attention_num_layers}) is high, "
                 "consider gradient checkpointing"
             )
-        
+
         # Stability checks
         if self.attention_temperature < 0.5:
             warnings.append(
                 f"attention_temperature ({self.attention_temperature}) is low, "
                 "may cause gradient issues"
             )
-        
+
         if self.attention_dropout > 0.3:
             warnings.append(
                 f"attention_dropout ({self.attention_dropout}) is high, "
                 "may slow learning"
             )
-        
+
         if not self.attention_init_residual_scale and self.attention_num_layers > 2:
             warnings.append(
                 "attention_init_residual_scale=False with >2 layers may cause instability"
             )
-        
+
         # Head checks
         if len(self.policy_layers) > 4:
             warnings.append(
                 f"policy_layers has {len(self.policy_layers)} layers, "
                 "may dilute gradients from attention"
             )
-        
+
         return warnings
 
 
