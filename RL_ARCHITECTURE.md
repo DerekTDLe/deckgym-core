@@ -12,7 +12,7 @@ The agent uses a custom feature extractor (`CardAttentionExtractor`) that proces
 
 ### Observation Structure
 
-### Global Features (131 dims)
+### Global Features (41 dims)
 
 | Feature | Dimensions | Description |
 |---------|------------|-------------|
@@ -21,18 +21,13 @@ The agent uses a custom feature extractor (`CardAttentionExtractor`) that proces
 | Deck sizes | 2 | Self and opponent (normalized) |
 | Hand sizes | 2 | Self and opponent (normalized) |
 | Discard sizes | 2 | Self and opponent (normalized) |
-| Active Energy | 9 | One-hot active energy (8 types + none) |
-| Deck energy types | 16 | 8 energy types × 2 slots (dual type) (multi-hot) |
-| Opponent Deck energy types | 16 | 8 energy types × 2 slots (dual type) (multi-hot) |
-| Opponent Active Energy | 9 | One-hot active energy (8 types + none) |
-| Support used | 2 | Flags for self/opponent support used this turn |
-| Supporter features | 70 | 7 types × 5 features × 2 players |
+| Deck energy types | 32 | 8 energy types × 2 slots × 2 players (multi-hot) |
 
-### Card Features (116 dims per card × 18 cards = 2088 dims)
+### Card Features (121 dims per card × 18 cards = 2178 dims)
 
 Each card is encoded with intrinsic properties and position information:
 
-#### Intrinsic Features (108 dims)
+#### Intrinsic Features (113 dims)
 - `is_pokemon` (1) - Pokemon vs Trainer
 - `stage` (1) - Basic/Stage1/Stage2 normalized
 - `energy_type` (10) - One-hot energy type
@@ -40,11 +35,11 @@ Each card is encoded with intrinsic properties and position information:
 - `weakness` (10) - One-hot weakness type
 - `ko_points` (1) - Points awarded on KO
 - `energy_attached` (10) - Per-type energy count
-- `attack_1` (4 + 12) - Damage, cost, effect flag, effect categories
-- `attack_2` (4 + 12) - Same as attack_1
+- `attack_1` (4 + 13) - Damage, cost, effect flag, has_attack, effect categories (V3: 13 cats)
+- `attack_2` (4 + 13) - Same as attack_1
 - `status` (4) - Poison, sleep, paralysis, confusion
-- `ability_categories` (16) - Ability effect encoding (enhanced)
-- `supporter_categories` (12) - Supporter effect encoding (enhanced)
+- `ability_categories` (17) - Ability effect encoding (enhanced)
+- `supporter_categories` (14) - Supporter effect encoding (enhanced)
 - `retreat_cost` (1) - Normalized retreat cost
 - `attached_tool` (8) - One-hot tool type
 
@@ -54,7 +49,7 @@ Each card is encoded with intrinsic properties and position information:
 - `is_active` (1) - Active pokemon flag
 - `slot` (4) - One-hot board position (active + 3 bench)
 
-### Total Observation Size: 2219 dims (131 + 18×116)
+### Total Observation Size: 2219 dims (41 + 18×121)
 
 ## Neural Network Architecture (Dynamic Attention - Run #8)
 
@@ -72,10 +67,10 @@ Each card is encoded with intrinsic properties and position information:
 │     (131)       │             │   (18 × 116)            │
 └─────────────────┘             └─────────────────────────┘
           │                               │
-          ▼                               ▼
+           ▼                               ▼
 ┌─────────────────┐             ┌─────────────────────────┐
-│   Global MLP    │             │     Card Embedding      │
-│ 131 → 128 → 128 │             │   116 → 256 → 256       │
+│     Global MLP  │             │     Card Embedding      │
+│  41 → 128 → 128 │             │   121 → 256 → 256       │
 │   (GELU)        │             │   (GELU)                │
 └─────────────────┘             └─────────────────────────┘
           │                               │
@@ -87,6 +82,7 @@ Each card is encoded with intrinsic properties and position information:
           │               │ - PRE-NORM architecture         │
           │               │ - FFN 4× expansion (dynamic)    │
           │               │ - GELU activation               │
+          │               │ - Bias-free projections         │
           │               │ - Mask empty card slots         │
           │               └─────────────────────────────────┐
           │                               │
@@ -94,13 +90,14 @@ Each card is encoded with intrinsic properties and position information:
           │               ┌─────────────────────────────────┐
           │               │ Multi-Head Attention Pooling    │
           │               │ - 4 learned queries (config)    │
-          │               │ - dynamic attended features     │
+          │               │ - Final LayerNorm before Pool   │
+          │               │ - Output: 4 × 256 = 1024 dims   │
           │               └─────────────────────────────────┐
           │                               │
           │                               ▼
           │               ┌─────────────────────────────────┐
           │               │     Output Projection           │
-          │               │     1024 → 512 (dynamic factor) │
+          │               │   1024 → 512 (LayerNorm, GELU)  │
           │               └─────────────────────────────────┐
           │                               │
           └───────────────┬───────────────┘
@@ -114,8 +111,8 @@ Each card is encoded with intrinsic properties and position information:
           ▼                               ▼
 ┌─────────────────┐             ┌─────────────────┐
 │   Policy Head   │             │   Value Head    │
-│ 640 → 512 → 256 │             │ 640 → 512 → 256 │
-│  → 128 → actions│             │  → 128 → value  │
+│ 640 → 256 → 128 │             │ 640 → 256 → 128 │
+│  → actions      │             │  → value        │
 └─────────────────┘             └─────────────────┘
 ```
 
@@ -148,7 +145,7 @@ Each card is encoded with intrinsic properties and position information:
 | `src/vec_game.rs` | Rust-side batched VecEnv with `catch_unwind` safety |
 | `python/deckgym/attention_policy.py` | CardAttentionExtractor (Fully dynamic architecture) |
 | `python/scripts/train.py` | Training loop (loads from `TrainingConfig`) |
-| `python/scripts/evaluate.py` | Leaderboard & TrueSkill (uses centralized constants) |
+| `python/scripts/evaluate.py` | Leaderboard & TrueSkill evaluation (revamped from Elo) |
 
 ## Hyperparameters (Managed in `config.py`)
 
@@ -159,39 +156,27 @@ The default configuration uses the following values:
 | `attention_embed_dim` | 256 | Transformer embedding dimension |
 | `attention_num_heads` | 8 | Multi-head attention heads |
 | `attention_num_layers` | 3 | Transformer encoder layers |
-| `base_learning_rate` | 1e-5 | Peak LR after warmup |
+| `base_learning_rate` | 1e-5 | Peak LR after warmup (stabilized) |
 | `ent_coef` | 0.02 | Entropy coefficient for exploration |
 | `batch_size` | 1024 | Minibatch size for PPO updates |
 | `n_steps` | 256 | Steps per environment per PPO update |
 | `gamma` | 0.98 | PPO discount factor |
-| `total_timesteps` | 1.5M | Target training duration |
+| `total_timesteps` | 30M | Target training duration (long-term) |
 | `use_pfsp` | True | Enable Prioritized Fictitious Self-Play |
 
-## PFSP (Prioritized Fictitious Self-Play)
+## Evaluation (TrueSkill)
 
-The system manages a pool of frozen opponents to prevent catastrophic forgetting and strategy cycling:
-- **Pool Management**: Automatically adds current model to pool based on winrate thresholds.
-- **Priority Selection**: Opponents are selected using TrueSkill-based weights.
-- **Adaptive Scheduling**: Update frequency scales based on agent performance.
+The evaluation system in `evaluate.py` has been revamped to use **TrueSkill** instead of traditional Elo. This provides:
+- **Faster Convergence**: Ratings stabilize with fewer matches.
+- **Uncertainty Tracking**: Models have a `mu` (mean) and `sigma` (uncertainty).
+- **Matchmaking**: More accurate assessment of model performance against baselines and other pool models.
 
-## Training Speed (RTX 3050, 8-32 envs)
+## Training Performance
 
-| Configuration | Speed | Notes |
-|---------------|-------|-------|
-| BatchedDeckGymEnv + e2 | ~1078 it/s | **Default** (Rust-side batching) |
-| BatchedDeckGymEnv (no bot) | ~7000 it/s | Pure env stepping |
-| DummyVecEnv + e2 | ~720 it/s | Legacy (use --no-batched-env) |
-| DummyVecEnv + self-play | ~490 it/s | Final mastery stage |
-
-*Note: Scaling the number of environments yields diminishing returns; 4× envs provides only ~1.3× speedup.*
-
-Training now uses pure self-play by default. You can use YAML configs for easy experimentation:
+With the current attention-based architecture and `configs/attention_baseline.yaml`:
+- **Training Speed**: ~400 it/s (on RTX 3050).
+- **Adaptability**: Training now uses pure self-play by default, sampling from 1k+ meta decks via `MetaDeckLoader`.
 
 ```bash
 python python/scripts/train.py --config configs/baseline.yaml
 ```
-
-## Known Issues
-
-- `torch.compile()` breaks checkpoint loading - do not use
-- SB3 cannot properly reload compiled models for frozen opponent updates
