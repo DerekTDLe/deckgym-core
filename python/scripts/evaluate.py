@@ -332,6 +332,224 @@ def evaluate_single_model(model_path: str, n_games: int = 100):
             
         console.print(f"\nFinal Rating: [bold green]mu={model_rating.mu:.2f} sigma={model_rating.sigma:.2f}[/bold green] (Expose: {model_rating.mu - 3*model_rating.sigma:.2f})")
 
+def benchmark_directory(directory: str, n_games_per_pair: int = 20, include_baselines: bool = True):
+    """
+    Benchmark all models in a directory against each other and baselines.
+    
+    This runs a full round-robin tournament:
+    1. Model vs Model (all pairs)
+    2. Model vs Baselines (all combinations)
+    
+    Results are ranked by TrueSkill expose rating.
+    """
+    if not ONNX_AVAILABLE:
+        console.print("[red]ONNX tools not installed. Cannot benchmark models.[/red]")
+        return
+    
+    model_dir = Path(directory)
+    if not model_dir.exists():
+        console.print(f"[red]Directory not found: {directory}[/red]")
+        return
+    
+    # Find all .zip model files
+    model_files = sorted(model_dir.glob("*.zip"))
+    if not model_files:
+        console.print(f"[red]No .zip files found in {directory}[/red]")
+        return
+    
+    console.print(f"[bold]Found {len(model_files)} models in {directory}[/bold]")
+    for mf in model_files:
+        console.print(f"  • {mf.name}")
+    
+    # Create temp directory for ONNX files
+    tmpdir = tempfile.mkdtemp(prefix="bench_onnx_")
+    onnx_paths: Dict[str, str] = {}  # model_name -> onnx_path
+    
+    try:
+        # Convert all models to ONNX
+        console.print("\n[bold cyan]Converting models to ONNX...[/bold cyan]")
+        for model_file in model_files:
+            model_name = model_file.stem
+            onnx_path = os.path.join(tmpdir, f"{model_name}.onnx")
+            
+            try:
+                model = MaskablePPO.load(str(model_file), device="cpu")
+                obs_size = model.observation_space.shape[0]
+                export_policy_to_onnx(model, onnx_path, observation_size=obs_size, validate=False)
+                onnx_paths[model_name] = onnx_path
+                console.print(f"  [green]✓[/green] {model_name}")
+                del model
+            except Exception as e:
+                console.print(f"  [red]✗[/red] {model_name}: {e}")
+        
+        if not onnx_paths:
+            console.print("[red]No models could be converted to ONNX![/red]")
+            return
+        
+        # Build participants list
+        participants: Dict[str, str] = {}  # name -> code (for rust)
+        
+        # Add models
+        for model_name, onnx_path in onnx_paths.items():
+            participants[model_name] = f"onnx:{onnx_path}"
+        
+        # Add baselines
+        if include_baselines:
+            baselines_to_test = ["e2", "e3", "e4"]  # Main baselines
+            for bl in baselines_to_test:
+                participants[BOT_NAMES[bl]] = bl
+        
+        console.print(f"\n[bold]Participants: {len(participants)}[/bold]")
+        
+        # Build all matchup pairs
+        names = list(participants.keys())
+        pairs = []
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                pairs.append((names[i], names[j]))
+        
+        total_games = len(pairs) * n_games_per_pair
+        console.print(f"[bold]Running {len(pairs)} matchups × {n_games_per_pair} games = {total_games} total games[/bold]\n")
+        
+        # Initialize ratings
+        ratings: Dict[str, trueskill.Rating] = {}
+        for name in participants:
+            ratings[name] = TRUESKILL_ENV.create_rating()
+        
+        # Load calibrated baselines for initial ratings
+        if include_baselines and BASELINES_FILE.exists():
+            tracker = TrueSkillTracker()
+            for bl_code in ["e2", "e3", "e4"]:
+                bl_name = BOT_NAMES[bl_code]
+                if bl_name in participants:
+                    rating = tracker.get(bl_code)
+                    ratings[bl_name] = trueskill.Rating(mu=rating.mu, sigma=rating.sigma)
+        
+        # Statistics tracking
+        wins: Dict[str, int] = {name: 0 for name in participants}
+        losses: Dict[str, int] = {name: 0 for name in participants}
+        draws: Dict[str, int] = {name: 0 for name in participants}
+        
+        loader = MetaDeckLoader("meta_deck.json")
+        ratings_lock = threading.Lock()
+        
+        from rich.progress import TimeRemainingColumn, MofNCompleteColumn
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+            console=console
+        ) as progress:
+            overall_task = progress.add_task("[bold cyan]Tournament Progress[/bold cyan]", total=total_games)
+            
+            def play_game(name_a: str, name_b: str):
+                code_a = participants[name_a]
+                code_b = participants[name_b]
+                
+                d1 = loader.sample_deck()
+                d2 = loader.sample_deck()
+                d1_s = d1.to_string() if hasattr(d1, "to_string") else str(d1)
+                d2_s = d2.to_string() if hasattr(d2, "to_string") else str(d2)
+                
+                res = run_rust_match(d1_s, d2_s, code_a, code_b)
+                
+                with ratings_lock:
+                    r_a = ratings[name_a]
+                    r_b = ratings[name_b]
+                    
+                    if res == 1:  # A wins
+                        new_a, new_b = TRUESKILL_ENV.rate_1vs1(r_a, r_b)
+                        wins[name_a] += 1
+                        losses[name_b] += 1
+                    elif res == -1:  # B wins
+                        new_b, new_a = TRUESKILL_ENV.rate_1vs1(r_b, r_a)
+                        wins[name_b] += 1
+                        losses[name_a] += 1
+                    else:  # Draw
+                        new_a, new_b = TRUESKILL_ENV.rate_1vs1(r_a, r_b, drawn=True)
+                        draws[name_a] += 1
+                        draws[name_b] += 1
+                    
+                    ratings[name_a] = new_a
+                    ratings[name_b] = new_b
+                
+                progress.update(overall_task, advance=1)
+            
+            # Run games in parallel
+            with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+                futures = []
+                for name_a, name_b in pairs:
+                    for _ in range(n_games_per_pair):
+                        futures.append(executor.submit(play_game, name_a, name_b))
+                
+                for future in futures:
+                    future.result()
+        
+        # Print results
+        print_bench_results(ratings, wins, losses, draws, participants)
+        
+    finally:
+        # Cleanup temp ONNX files
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def print_bench_results(
+    ratings: Dict[str, trueskill.Rating],
+    wins: Dict[str, int],
+    losses: Dict[str, int],
+    draws: Dict[str, int],
+    participants: Dict[str, str]
+):
+    """Print benchmark results as a rich table."""
+    console.print("\n")
+    
+    table = Table(title="[bold]Benchmark Results[/bold]", show_lines=True)
+    table.add_column("Rank", style="dim", width=4)
+    table.add_column("Name", style="cyan")
+    table.add_column("Mu", style="green", justify="right")
+    table.add_column("Sigma", style="yellow", justify="right")
+    table.add_column("Expose", style="bold white", justify="right")
+    table.add_column("W-L-D", justify="center")
+    table.add_column("Win%", style="magenta", justify="right")
+    
+    # Sort by expose rating
+    sorted_participants = sorted(
+        ratings.items(),
+        key=lambda x: x[1].mu - 3 * x[1].sigma,
+        reverse=True
+    )
+    
+    for rank, (name, rating) in enumerate(sorted_participants, 1):
+        expose = rating.mu - 3 * rating.sigma
+        w, l, d = wins[name], losses[name], draws[name]
+        total = w + l + d
+        win_pct = (w / total * 100) if total > 0 else 0
+        
+        # Highlight baselines differently
+        is_baseline = name in BOT_NAMES.values()
+        name_style = "[dim italic]" if is_baseline else ""
+        name_end = "[/dim italic]" if is_baseline else ""
+        
+        table.add_row(
+            str(rank),
+            f"{name_style}{name}{name_end}",
+            f"{rating.mu:.1f}",
+            f"{rating.sigma:.1f}",
+            f"{expose:.1f}",
+            f"{w}-{l}-{d}",
+            f"{win_pct:.1f}%"
+        )
+    
+    console.print(table)
+    
+    # Summary
+    console.print("\n[dim]Legend: Mu=TrueSkill mean, Sigma=uncertainty, Expose=Mu-3σ (conservative rating)[/dim]")
+
+
 def print_ratings(tracker: TrueSkillTracker):
     table = Table(title="TrueSkill Ratings")
     table.add_column("Bot", style="cyan")
@@ -360,9 +578,11 @@ def main():
     audit_p.add_argument("model", help="Path to .zip model")
     audit_p.add_argument("--games", type=int, default=30)
 
-    # Bench (Directory) - To Implement
+    # Bench (Directory)
     bench_p = subparsers.add_parser("bench", help="Benchmark directory")
-    bench_p.add_argument("dir", help="Directory")
+    bench_p.add_argument("dir", help="Directory containing .zip models")
+    bench_p.add_argument("--games", type=int, default=20, help="Games per matchup (default: 20)")
+    bench_p.add_argument("--no-baselines", action="store_true", help="Exclude baselines from tournament")
     
     args = parser.parse_args()
     
@@ -373,7 +593,7 @@ def main():
     elif args.command == "audit":
         evaluate_single_model(args.model, args.games)
     elif args.command == "bench":
-        console.print("[yellow]Bench mode not fully implemented yet, use audit loop manually.[/yellow]")
+        benchmark_directory(args.dir, n_games_per_pair=args.games, include_baselines=not args.no_baselines)
 
 if __name__ == "__main__":
     main()

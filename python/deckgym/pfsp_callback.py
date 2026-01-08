@@ -132,15 +132,16 @@ class PFSPCallback(BaseCallback):
         # Adaptive add frequency: if agent is dominating (>65%), add more frequently
         effective_add_freq = 4 if avg_agent_winrate > 0.65 else self.add_to_pool_every_n_rollouts
         
-        # Add current agent to pool periodically, but ONLY if performing well (>60%)
+        # Add current agent to pool periodically, but ONLY if performing well (>50%)
+        # NOTE: Lowered from 60% to 50% to prevent pool stagnation (Run #8 analysis)
         if self.rollout_count % effective_add_freq == 0:
-            if avg_agent_winrate >= 0.60 or len(self.opponent_pool) < 2:
+            if avg_agent_winrate >= 0.50 or len(self.opponent_pool) < 2:
                 # Add if winning enough OR pool needs more opponents
                 self._add_to_pool()
-                if self.verbose > 0 and avg_agent_winrate >= 0.60:
-                    print(f"[PFSP] Agent winrate {avg_agent_winrate:.1%} >= 60%, adding to pool")
+                if self.verbose > 0 and avg_agent_winrate >= 0.50:
+                    print(f"[PFSP] Agent winrate {avg_agent_winrate:.1%} >= 50%, adding to pool")
             elif self.verbose > 0:
-                print(f"[PFSP] Agent winrate {avg_agent_winrate:.1%} < 60%, skipping pool add")
+                print(f"[PFSP] Agent winrate {avg_agent_winrate:.1%} < 50%, skipping pool add")
 
         # Select new opponent periodically (can be different from add frequency)
         if self.rollout_count % self.select_opponent_every_n_rollouts == 0:
