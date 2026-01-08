@@ -262,8 +262,9 @@ class PFSPCallback(BaseCallback):
                     f"[PFSP] Agent winrate {avg_agent_winrate:.1%} < 50%, skipping pool add"
                 )
 
-        # Select new opponent periodically (can be different from add frequency)
-        if self.rollout_count % self.select_opponent_every_n_rollouts == 0:
+        # Select new opponent periodically (legacy mode only)
+        # In pool mode, opponents are assigned per-env on episode end
+        if not self.pool_mode and self.rollout_count % self.select_opponent_every_n_rollouts == 0:
             self._select_opponent_pfsp()
 
     def _get_avg_agent_winrate(self) -> float:
