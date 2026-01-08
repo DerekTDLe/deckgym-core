@@ -663,17 +663,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         print(
             f"      Using attention policy (embed_dim={config.attention_embed_dim}, heads={config.attention_num_heads}, layers={config.attention_num_layers})"
         )
-        policy_kwargs = create_attention_policy_kwargs(
-            embed_dim=config.attention_embed_dim,
-            num_heads=config.attention_num_heads,
-            num_layers=config.attention_num_layers,
-            global_proj_dim=config.attention_global_proj_dim,
-            ff_expansion_factor=config.attention_ff_expansion_factor,
-            output_proj_factor=config.attention_output_proj_factor,
-            mask_threshold=config.attention_mask_threshold,
-            net_arch=dict(pi=list(config.policy_layers), vf=list(config.value_layers)),
-        )
-        policy_kwargs["activation_fn"] = activation_fn
+        policy_kwargs = create_attention_policy_kwargs(config)
     else:
         # Use standard MLP policy
         policy_kwargs = dict(
