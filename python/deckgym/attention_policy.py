@@ -21,10 +21,17 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint as gradient_checkpoint
 from gymnasium import spaces
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from typing import Tuple, Dict, Any, Optional, List
+
+# Enable TF32 for faster matmuls on Ampere+ GPUs (up to 2x speedup, minimal precision loss)
+# This is a global setting that affects all subsequent operations
+if torch.cuda.is_available():
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
 # Import constants from centralized config
 from deckgym.config import (
@@ -142,37 +149,44 @@ class OnnxSafeAttention(nn.Module):
         k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
-        # Attention scores with temperature
-        attn_logits = (
-            torch.matmul(q, k.transpose(-2, -1)) * self.scale / self.temperature
-        )
-
-        # Apply mask if provided
+        # Convert key_padding_mask to attention mask for SDPA
+        # SDPA expects: True = attend, False = mask (opposite of our convention)
+        attn_mask = None
         if key_padding_mask is not None:
-            mask = key_padding_mask.unsqueeze(1).unsqueeze(2)
-            attn_logits = attn_logits.masked_fill(mask, float("-inf"))
+            # Expand mask: [batch, seq_len] -> [batch, 1, 1, seq_len]
+            attn_mask = ~key_padding_mask.unsqueeze(1).unsqueeze(2)
 
-        # Track attention statistics for debugging (saturation detection)
+        # Track attention statistics for debugging (only when requested)
         if track_stats:
             with torch.no_grad():
-                # Logit std - if too high, softmax saturates
+                # Manual attention for stats (not used for output)
+                attn_logits = (
+                    torch.matmul(q, k.transpose(-2, -1)) * self.scale / self.temperature
+                )
+                if key_padding_mask is not None:
+                    mask = key_padding_mask.unsqueeze(1).unsqueeze(2)
+                    attn_logits = attn_logits.masked_fill(mask, float("-inf"))
                 valid_logits = attn_logits[~attn_logits.isinf()]
                 if valid_logits.numel() > 0:
                     self._attn_logit_std = valid_logits.std()
-
-                # Attention entropy - if too low, attention is too peaky
                 attn_probs_for_stats = F.softmax(attn_logits, dim=-1)
                 entropy = -(
                     attn_probs_for_stats * (attn_probs_for_stats + 1e-10).log()
                 ).sum(dim=-1)
                 self._attn_entropy = entropy.mean()
 
-        # Softmax and dropout
-        attn_probs = F.softmax(attn_logits, dim=-1)
-        attn_probs = self.dropout(attn_probs)
+        # Use PyTorch SDPA (FlashAttention when available) - 2-4x faster
+        # Apply temperature by scaling q (equivalent to dividing attention logits)
+        q_scaled = q * (self.scale / self.temperature) ** 0.5
+        k_scaled = k * (self.scale / self.temperature) ** 0.5
 
-        # Apply attention to values
-        attn_output = torch.matmul(attn_probs, v)
+        attn_output = F.scaled_dot_product_attention(
+            q_scaled,
+            k_scaled,
+            v,
+            attn_mask=attn_mask,
+            dropout_p=self.dropout.p if self.training else 0.0,
+        )
 
         # Reshape back
         attn_output = (
@@ -337,6 +351,7 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         self.max_cards = max_cards
         self.embed_dim = embed_dim
         self.num_layers = num_layers
+        self.use_gradient_checkpointing = config.use_gradient_checkpointing
 
         # Global features projection
         self.global_proj = nn.Sequential(
@@ -435,6 +450,30 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
                     if layer.bias is not None:
                         nn.init.zeros_(layer.bias)
 
+    def _attention_block(
+        self,
+        x: torch.Tensor,
+        card_mask: torch.Tensor,
+        layer_idx: int,
+        track_stats: bool,
+    ) -> torch.Tensor:
+        """Single attention block (for gradient checkpointing)."""
+        # Self-attention with pre-norm
+        normed = self.layer_norms[layer_idx * 2](x)
+        attn_out = self.attention_layers[layer_idx](
+            normed,
+            key_padding_mask=card_mask,
+            track_stats=track_stats,
+        )
+        x = x + attn_out
+
+        # Feed-forward with pre-norm
+        normed = self.layer_norms[layer_idx * 2 + 1](x)
+        ff_out = self.ff_layers[layer_idx](normed)
+        x = x + ff_out
+
+        return x
+
     def forward(
         self,
         observations: torch.Tensor,
@@ -463,19 +502,18 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
 
         # Apply attention layers with PRE-NORM
         for i in range(self.num_layers):
-            # Self-attention with pre-norm
-            normed = self.layer_norms[i * 2](x)
-            attn_out = self.attention_layers[i](
-                normed,
-                key_padding_mask=card_mask,
-                track_stats=track_attention_stats,
-            )
-            x = x + attn_out
-
-            # Feed-forward with pre-norm
-            normed = self.layer_norms[i * 2 + 1](x)
-            ff_out = self.ff_layers[i](normed)
-            x = x + ff_out
+            if self.training and self.use_gradient_checkpointing:
+                # Gradient checkpointing: trade compute for memory
+                x = gradient_checkpoint(
+                    self._attention_block,
+                    x,
+                    card_mask,
+                    i,
+                    track_attention_stats,
+                    use_reentrant=False,
+                )
+            else:
+                x = self._attention_block(x, card_mask, i, track_attention_stats)
 
         # CRITICAL: Final normalization before pooling
         x = self.final_norm(x)
