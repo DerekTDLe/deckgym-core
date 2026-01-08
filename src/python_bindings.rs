@@ -1227,6 +1227,18 @@ impl PyVecGame {
         self.inner.get_pool_opponent_names()
     }
 
+    /// Remove an opponent from the pool (frees GPU memory)
+    ///
+    /// Call this when evicting opponents from PFSP pool to prevent GPU OOM.
+    /// Returns True if opponent was found and removed.
+    ///
+    /// Args:
+    ///     opponent_name: Name of opponent to remove
+    #[cfg(feature = "onnx")]
+    fn remove_onnx_from_pool(&mut self, opponent_name: &str) -> bool {
+        self.inner.remove_onnx_from_pool(opponent_name)
+    }
+
     /// Check if using per-env opponents (pool mode) vs single opponent (legacy mode)
     #[cfg(feature = "onnx")]
     fn is_using_pool(&self) -> bool {

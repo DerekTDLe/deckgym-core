@@ -380,6 +380,39 @@ impl VecGame {
         }
     }
 
+    /// Remove a specific opponent from the pool (frees GPU memory)
+    /// 
+    /// Returns true if opponent was found and removed, false otherwise.
+    /// If any environment was using this opponent, its assignment is cleared.
+    #[cfg(feature = "onnx")]
+    pub fn remove_onnx_from_pool(&mut self, opponent_name: &str) -> bool {
+        // Find the opponent index
+        let opp_idx = match self.onnx_pool_names.iter().position(|n| n == opponent_name) {
+            Some(idx) => idx,
+            None => return false,
+        };
+
+        // Remove from pool (this drops the Session, freeing GPU memory)
+        self.onnx_pool.remove(opp_idx);
+        self.onnx_pool_names.remove(opp_idx);
+        self.opponent_groups.remove(opp_idx);
+
+        // Update env assignments: clear any using this opponent, shift others down
+        for env_opp_idx in &mut self.env_opponent_indices {
+            if let Some(idx) = *env_opp_idx {
+                if idx == opp_idx {
+                    // This env was using the removed opponent
+                    *env_opp_idx = None;
+                } else if idx > opp_idx {
+                    // Shift down indices above the removed one
+                    *env_opp_idx = Some(idx - 1);
+                }
+            }
+        }
+
+        true
+    }
+
     /// Get list of opponent names in the pool
     #[cfg(feature = "onnx")]
     pub fn get_pool_opponent_names(&self) -> Vec<String> {
