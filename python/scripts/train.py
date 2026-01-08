@@ -871,7 +871,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         single_env = None
 
     # Verify observation space
-    expected_obs_size = 2129  # 41 global + 18 cards × 116 features
+    expected_obs_size = 2229  # 41 global + 18 cards × 121 features
     if env.observation_space.shape[0] != expected_obs_size:
         raise ValueError(
             f"Observation size mismatch! Expected {expected_obs_size}, "

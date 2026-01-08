@@ -39,9 +39,9 @@ except (ImportError, AttributeError):
     # Fallback for development - must match observation.rs constants
     # GLOBAL_FEATURES = 1 (turn) + 2 (points) + 2 (deck_size) + 2 (hand_size) + 2 (discard_size) + 32 (2×2×8 deck_energy with dual type)
     GLOBAL_FEATURES = 41
-    FEATURES_PER_CARD = 116  # intrinsic (108) + position (8) features per card
+    FEATURES_PER_CARD = 121  # intrinsic (113) + position (8) features per card
     MAX_CARDS = 18  # 10 hand + 4 self board + 4 opponent board
-    # Total observation size: 41 + 18 × 116 = 2129 dims
+    # Total observation size: 41 + 18 × 121 = 2219 dims
 
 
 class OnnxSafeAttention(nn.Module):
