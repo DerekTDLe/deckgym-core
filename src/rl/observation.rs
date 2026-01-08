@@ -51,18 +51,18 @@ const MAX_RETREAT_COST: f32 = 4.0;
 // --- Feature Dimensions ---
 
 /// Card features (intrinsic properties)
-pub const CARD_INTRINSIC_FEATURES: usize = 108;
+pub const CARD_INTRINSIC_FEATURES: usize = 110;
 // Breakdown:
 // 1 (is_pokemon) + 1 (stage) + 10 (energy type) + 2 (hp) + 10 (weakness) + 1 (ko)
-// + 10 (attached en) + 4 (atk1) + 12 (atk1 cat) + 4 (atk2) + 12 (atk2 cat)
-// + 4 (status) + 16 (ability cat) + 12 (supporter cat) + 1 (retreat) + 8 (tool)
+// + 10 (attached en) + 4 (atk1) + 13 (atk1 cat) + 4 (atk2) + 13 (atk2 cat)
+// + 4 (status) + 17 (ability cat) + 14 (supporter cat) + 1 (retreat) + 8 (tool)
 
 /// Position features (where the card is)
 pub const CARD_POSITION_FEATURES: usize = 8;
 // Breakdown: 2 (zone one-hot) + 1 (owner) + 1 (is_active) + 4 (slot one-hot)
 
 /// Total features per card slot
-pub const FEATURES_PER_CARD: usize = CARD_INTRINSIC_FEATURES + CARD_POSITION_FEATURES; // 108 + 8 = 116
+pub const FEATURES_PER_CARD: usize = CARD_INTRINSIC_FEATURES + CARD_POSITION_FEATURES; // 113 + 8 = 121
 
 /// Global features (game state)
 pub const GLOBAL_FEATURES: usize = 1   // turn count

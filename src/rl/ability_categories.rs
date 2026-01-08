@@ -20,6 +20,7 @@ pub enum AbilityEffectCategory {
     Draw,
     Disrupt,
     Debuff,
+    Drawback, // Pokémon take damage, end turn, etc
 
     // === ACTIVATION TYPES ===
     Passive,
@@ -29,7 +30,7 @@ pub enum AbilityEffectCategory {
     OncePerTurn,
 }
 
-pub const NUM_ABILITY_EFFECT_CATEGORIES: usize = 16;
+pub const NUM_ABILITY_EFFECT_CATEGORIES: usize = 17;
 
 pub fn get_ability_effect_categories(ability_id: AbilityId) -> &'static [AbilityEffectCategory] {
     use AbilityEffectCategory::*;
@@ -40,7 +41,7 @@ pub fn get_ability_effect_categories(ability_id: AbilityId) -> &'static [Ability
         AbilityId::A4a022MiloticHealingRipples => &[Heals, Triggered, OncePerGame],
         AbilityId::A4083EspeonExPsychicHealing => &[Heals, Activated, OncePerTurn],
         AbilityId::PA037CresseliaExLunarPlumage => &[Heals, Triggered],
-        AbilityId::A2072DusknoirShadowVoid => &[Heals, Triggered],
+        AbilityId::A2072DusknoirShadowVoid => &[Heals, Triggered, Drawback],
         AbilityId::B1121IndeedeeExWatchOver => &[Heals, Activated, OncePerTurn],
         AbilityId::A1007Butterfree => &[Heals, Activated, OncePerTurn],
 
@@ -48,11 +49,11 @@ pub fn get_ability_effect_categories(ability_id: AbilityId) -> &'static [Ability
         AbilityId::A1098MagnetonVoltCharge => &[Charge, Activated, OncePerTurn],
         AbilityId::A1132Gardevoir => &[Charge, Activated, OncePerTurn],
         AbilityId::A2a010LeafeonExForestBreath => &[Charge, Activated, OncePerTurn],
-        AbilityId::A3b009FlareonExCombust => &[Charge, Activated, OncePerTurn],
+        AbilityId::A3b009FlareonExCombust => &[Charge, Activated, OncePerTurn, Drawback],
         AbilityId::B1a012CharmeleonIgnition => &[Charge, OncePerGame, Triggered],
-        AbilityId::A2b035GiratinaExBrokenSpaceBellow => &[Charge, Activated, OncePerTurn],
+        AbilityId::A2b035GiratinaExBrokenSpaceBellow => &[Charge, Activated, OncePerTurn, Drawback],
         AbilityId::A3a021ZeraoraThunderclapFlash => &[Charge, Triggered],
-        AbilityId::B1157HydreigonRoarInUnison => &[Charge, Activated, OncePerTurn],
+        AbilityId::B1157HydreigonRoarInUnison => &[Charge, Activated, OncePerTurn, Drawback],
 
         // === DRAW ===
         AbilityId::A4a010EnteiExLegendaryPulse => &[Draw, Passive],
