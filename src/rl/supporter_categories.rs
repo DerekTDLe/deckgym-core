@@ -57,7 +57,9 @@ pub fn get_supporter_effect_categories(card_id: CardId) -> &'static [SupporterEf
         CardId::A2a072Irida | CardId::A2a087Irida | CardId::A4b330Irida | CardId::A4b331Irida => {
             &[Heal, Supporter, Specialized]
         }
-        CardId::A2b070PokemonCenterLady | CardId::A2b089PokemonCenterLady => &[Heal, Supporter, Generalist],
+        CardId::A2b070PokemonCenterLady | CardId::A2b089PokemonCenterLady => {
+            &[Heal, Supporter, Generalist]
+        }
         CardId::A3155Lillie
         | CardId::A3197Lillie
         | CardId::A3209Lillie
@@ -66,7 +68,9 @@ pub fn get_supporter_effect_categories(card_id: CardId) -> &'static [SupporterEf
         | CardId::A4b374Lillie => &[Heal, Supporter, Specialized],
 
         // === DRAW ===
-        CardId::PA007ProfessorsResearch | CardId::A4b373ProfessorsResearch => &[Draw, Supporter, Generalist],
+        CardId::PA007ProfessorsResearch | CardId::A4b373ProfessorsResearch => {
+            &[Draw, Supporter, Generalist]
+        }
         CardId::B1225Copycat | CardId::B1270Copycat => &[Draw, Supporter, Generalist],
         CardId::A2b069Iono | CardId::A2b088Iono | CardId::A4b340Iono | CardId::A4b341Iono => {
             &[Draw, Disrupt, Supporter, Generalist]
@@ -81,7 +85,9 @@ pub fn get_supporter_effect_categories(card_id: CardId) -> &'static [SupporterEf
         CardId::A3a067Gladion | CardId::A3a081Gladion => &[Search, Supporter, Specialized],
         CardId::B1223May | CardId::B1268May => &[Search, Supporter, Generalist],
         CardId::B1226Lisia | CardId::B1271Lisia => &[Search, Supporter, Specialized],
-        CardId::A2a073CelesticTownElder | CardId::A2a088CelesticTownElder => &[Search, Supporter, Specialized],
+        CardId::A2a073CelesticTownElder | CardId::A2a088CelesticTownElder => {
+            &[Search, Supporter, Specialized]
+        }
         CardId::B1a068Clemont | CardId::B1a081Clemont => &[Search, Supporter, Specialized],
 
         // === ENERGY ===
@@ -139,7 +145,9 @@ pub fn get_supporter_effect_categories(card_id: CardId) -> &'static [SupporterEf
         }
 
         // === TOOL ===
-        CardId::A2147GiantCape | CardId::A4b320GiantCape | CardId::A4b321GiantCape => &[Tool, Heal, Generalist],
+        CardId::A2147GiantCape | CardId::A4b320GiantCape | CardId::A4b321GiantCape => {
+            &[Tool, Heal, Generalist]
+        }
         CardId::A2148RockyHelmet | CardId::A4b322RockyHelmet | CardId::A4b323RockyHelmet => {
             &[Tool, DamageBoost, Generalist]
         }
@@ -156,7 +164,9 @@ pub fn get_supporter_effect_categories(card_id: CardId) -> &'static [SupporterEf
         | CardId::A4b314RareCandy
         | CardId::A4b315RareCandy
         | CardId::A4b379RareCandy => &[Evolution, Item, Generalist],
-        CardId::B1a067QuickGrowExtract | CardId::B1a103QuickGrowExtract => &[Evolution, Item, Specialized],
+        CardId::B1a067QuickGrowExtract | CardId::B1a103QuickGrowExtract => {
+            &[Evolution, Item, Specialized]
+        }
 
         // === SPECIAL / MULTI-CATEGORY ===
         CardId::A3b066EeveeBag
