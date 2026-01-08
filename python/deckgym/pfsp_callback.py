@@ -166,7 +166,14 @@ class PFSPCallback(BaseCallback):
                 del loaded_model
 
             # Add to Rust pool
-            self.env.vec_game.add_onnx_to_pool(opp_name, opp_data["onnx_path"], False)
+            device = (
+                getattr(self.env.config, "pfsp_opponent_device", "cpu")
+                if hasattr(self.env, "config")
+                else "cpu"
+            )
+            self.env.vec_game.add_onnx_to_pool(
+                opp_name, opp_data["onnx_path"], False, device
+            )
             if self.verbose > 1:
                 print(f"[PFSP] Added {opp_name} to pool")
 
@@ -394,7 +401,14 @@ class PFSPCallback(BaseCallback):
                 self.opponent_pool[checkpoint_name]["onnx_path"] = onnx_path
 
                 # Add to Rust pool
-                self.env.vec_game.add_onnx_to_pool(checkpoint_name, onnx_path, False)
+                device = (
+                    getattr(self.env.config, "pfsp_opponent_device", "cpu")
+                    if hasattr(self.env, "config")
+                    else "cpu"
+                )
+                self.env.vec_game.add_onnx_to_pool(
+                    checkpoint_name, onnx_path, False, device
+                )
                 if self.verbose > 0:
                     print(f"[PFSP] Added {checkpoint_name} to Rust pool")
             except Exception as e:
@@ -532,7 +546,14 @@ class PFSPCallback(BaseCallback):
                 export_policy_to_onnx(loaded_model, onnx_path, validate=False)
 
                 # Set in VecGame
-                self.env.vec_game.set_onnx_opponent(onnx_path, deterministic=False)
+                device = (
+                    getattr(self.env.config, "pfsp_opponent_device", "cpu")
+                    if hasattr(self.env, "config")
+                    else "cpu"
+                )
+                self.env.vec_game.set_onnx_opponent(
+                    onnx_path, deterministic=False, device=device
+                )
 
                 # Clean up loaded model
                 del loaded_model

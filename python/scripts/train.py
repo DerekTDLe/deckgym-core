@@ -637,6 +637,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
             n_envs=config.n_envs,
             deck_loader=deck_loader,
             opponent_type=None,  # Self-play via ONNX
+            config=config,
         )
         single_env = None
     else:
@@ -656,6 +657,10 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
 
     # Setup model
     print("[3/4] Initializing model...")
+    if torch.cuda.is_available():
+        print(f"      PyTorch Training Device: {torch.cuda.get_device_name(0)} (CUDA)")
+    else:
+        print(f"      PyTorch Training Device: CPU")
     activation_fn = torch.nn.SiLU if config.use_silu else torch.nn.ReLU
 
     if config.use_attention:
@@ -788,7 +793,9 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
 
             onnx_path = os.path.join(tempfile.gettempdir(), "frozen_opponent.onnx")
             export_policy_to_onnx(model, onnx_path, validate=False)
-            env.vec_game.set_onnx_opponent(onnx_path, deterministic=False)
+            env.vec_game.set_onnx_opponent(
+                onnx_path, deterministic=False, device=config.onnx_device
+            )
             print(f"      ONNX opponent initialized")
         except Exception as e:
             print(f"      [WARNING] Could not initialize ONNX opponent: {e}")

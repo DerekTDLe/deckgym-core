@@ -50,9 +50,11 @@ ppo:
 training:
   total_timesteps: 30000000
   checkpoint_freq: 10000
-  n_envs: 12
+  n_envs: 20 # Sweet spot for current architecture
   use_batched_env: true
   device: "auto"
+  onnx_device: "auto"
+  pfsp_opponent_device: "cpu"
   frozen_opponent_update_rollouts: 8
 
   # PFSP settings

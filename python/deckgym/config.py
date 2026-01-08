@@ -220,6 +220,8 @@ class TrainingConfig:
     # Hardware
     # -------------------------------------------------------------------------
     device: str = "auto"  # "auto", "cuda", "cpu"
+    onnx_device: str = "auto"  # "auto", "cuda", "trt", "cpu"
+    pfsp_opponent_device: str = "cpu"  # Force pool opponents to CPU to save VRAM
 
     # -------------------------------------------------------------------------
     # Methods
@@ -389,6 +391,8 @@ training:
   n_envs: {self.n_envs}
   use_batched_env: {str(self.use_batched_env).lower()}
   device: "{self.device}"
+  onnx_device: "{self.onnx_device}"
+  pfsp_opponent_device: "{self.pfsp_opponent_device}"
   frozen_opponent_update_rollouts: {self.frozen_opponent_update_rollouts}
 
   # PFSP settings
@@ -485,6 +489,8 @@ environment:
                 "n_envs",
                 "use_batched_env",
                 "device",
+                "onnx_device",
+                "pfsp_opponent_device",
                 "frozen_opponent_update_rollouts",
                 "use_pfsp",
                 "pfsp_pool_size",
