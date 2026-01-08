@@ -1159,9 +1159,15 @@ impl PyVecGame {
     ///     model_path: Path to the .onnx model file
     ///     deterministic: If True, always pick best action; if False, sample from distribution
     #[cfg(feature = "onnx")]
-    fn set_onnx_opponent(&mut self, model_path: &str, deterministic: bool) -> PyResult<()> {
+    #[pyo3(signature = (model_path, deterministic, device="auto"))]
+    fn set_onnx_opponent(
+        &mut self,
+        model_path: &str,
+        deterministic: bool,
+        device: &str,
+    ) -> PyResult<()> {
         self.inner
-            .set_onnx_opponent(model_path, deterministic)
+            .set_onnx_opponent(model_path, deterministic, device)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))
     }
 
@@ -1181,14 +1187,16 @@ impl PyVecGame {
     ///     model_path: Path to the .onnx model file
     ///     deterministic: If True, always pick best action; if False, sample
     #[cfg(feature = "onnx")]
+    #[pyo3(signature = (name, model_path, deterministic, device="auto"))]
     fn add_onnx_to_pool(
         &mut self,
         name: &str,
         model_path: &str,
         deterministic: bool,
+        device: &str,
     ) -> PyResult<()> {
         self.inner
-            .add_onnx_to_pool(name, model_path, deterministic)
+            .add_onnx_to_pool(name, model_path, deterministic, device)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))
     }
 
