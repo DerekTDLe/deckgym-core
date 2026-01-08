@@ -5,6 +5,13 @@ import argparse
 import numpy as np
 import torch
 from sb3_contrib import MaskablePPO
+from deckgym.config import (
+    DIAG_GRADIENT_IMBALANCE_WARNING,
+    DIAG_GRADIENT_IMBALANCE_CRITICAL,
+    DIAG_LARGE_GRADIENT_THRESHOLD,
+    DIAG_WEIGHT_STD_MIN,
+    DIAG_WEIGHT_STD_MAX,
+)
 
 
 def analyze_gradients(model):
@@ -38,7 +45,7 @@ def analyze_gradients(model):
             status = "✅"
             if grad_norm < 1e-6:
                 status = "❌ VANISHING"
-            elif grad_norm > 100:
+            elif grad_norm > DIAG_LARGE_GRADIENT_THRESHOLD:
                 status = "⚠️  LARGE"
 
             print(f"    {name:55s}: {grad_norm:10.6f} {status}")
@@ -50,10 +57,10 @@ def analyze_gradients(model):
         ratio = max_grad / min_grad if min_grad > 0 else float("inf")
 
         print(f"\n  Gradient Imbalance Ratio: {ratio:.1f}")
-        if ratio > 1000:
-            print("  ❌ CRITICAL: Ratio >1000")
-        elif ratio > 100:
-            print("  ⚠️  WARNING: Ratio >100")
+        if ratio > DIAG_GRADIENT_IMBALANCE_CRITICAL:
+            print(f"  ❌ CRITICAL: Ratio >{DIAG_GRADIENT_IMBALANCE_CRITICAL}")
+        elif ratio > DIAG_GRADIENT_IMBALANCE_WARNING:
+            print(f"  ⚠️  WARNING: Ratio >{DIAG_GRADIENT_IMBALANCE_WARNING}")
         else:
             print("  ✅ Balanced")
 
@@ -76,7 +83,7 @@ def analyze_weights(model):
             status = "✅"
             if abs(mean) > 0.1:
                 status = "⚠️  High mean"
-            if std < 0.01 or std > 2.0:
+            if std < DIAG_WEIGHT_STD_MIN or std > DIAG_WEIGHT_STD_MAX:
                 status = "⚠️  Unusual std"
 
             print(f"  {name:55s}: μ={mean:7.4f}, σ={std:6.4f} {status}")
@@ -137,8 +144,10 @@ def main():
     print("=" * 70)
 
     issues = []
-    if grad_ratio and grad_ratio > 1000:
-        issues.append("Severe gradient imbalance")
+    if grad_ratio and grad_ratio > DIAG_GRADIENT_IMBALANCE_CRITICAL:
+        issues.append(
+            f"Severe gradient imbalance (>{DIAG_GRADIENT_IMBALANCE_CRITICAL})"
+        )
 
     if issues:
         print("  ⚠️  Issues:")

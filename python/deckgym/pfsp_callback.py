@@ -19,6 +19,13 @@ from stable_baselines3.common.callbacks import BaseCallback
 from sb3_contrib import MaskablePPO
 
 from deckgym.batched_env import BatchedDeckGymEnv
+from deckgym.config import (
+    DEFAULT_CONFIG,
+    PFSP_NEUTRAL_WINRATE,
+    PFSP_MIN_EPISODES_FOR_UPDATE,
+    PFSP_ADAPTIVE_DOMINATION_THRESHOLD,
+    PFSP_ADAPTIVE_DOMINATION_ADD_FREQ,
+)
 
 
 class PFSPCallback(BaseCallback):
@@ -41,13 +48,13 @@ class PFSPCallback(BaseCallback):
     def __init__(
         self,
         env,
-        n_envs: int = 32,
-        pool_size: int = 10,
-        add_to_pool_every_n_rollouts: int = 8,
-        select_opponent_every_n_rollouts: int = 2,
-        priority_exponent: float = 2.0,
-        winrate_window: int = 200,
-        checkpoint_dir: str = "./checkpoints/pfsp_pool/",
+        n_envs: int = DEFAULT_CONFIG.n_envs,
+        pool_size: int = DEFAULT_CONFIG.pfsp_pool_size,
+        add_to_pool_every_n_rollouts: int = DEFAULT_CONFIG.pfsp_add_every_n_rollouts,
+        select_opponent_every_n_rollouts: int = DEFAULT_CONFIG.pfsp_select_every_n_rollouts,
+        priority_exponent: float = DEFAULT_CONFIG.pfsp_priority_exponent,
+        winrate_window: int = DEFAULT_CONFIG.pfsp_winrate_window,
+        checkpoint_dir: str = DEFAULT_CONFIG.pfsp_checkpoint_dir,
         verbose: int = 1,
     ):
         """
@@ -200,13 +207,11 @@ class PFSPCallback(BaseCallback):
         for name, data in self.opponent_pool.items():
             total = data["wins"] + data["losses"]
             if total == 0:
-                opp_winrate = 0.5
+                opp_winrate = PFSP_NEUTRAL_WINRATE
             else:
                 opp_winrate = data["wins"] / total
             priorities[name] = opp_winrate**self.priority_exponent
 
-        # Sample
-        total_priority = sum(priorities.values())
         if total_priority <= 0:
             return np.random.choice(list(self.opponent_pool.keys()))
 
@@ -218,7 +223,9 @@ class PFSPCallback(BaseCallback):
         self.rollout_count += 1
 
         # Update win rates from recent episodes
-        if len(self.episode_results) >= 10:  # Update every 10 episodes minimum
+        if (
+            len(self.episode_results) >= PFSP_MIN_EPISODES_FOR_UPDATE
+        ):  # Update every N episodes minimum
             if self.verbose > 0:
                 # Count wins/losses per opponent
                 from collections import Counter
@@ -242,35 +249,46 @@ class PFSPCallback(BaseCallback):
         # Calculate average agent winrate against pool for adaptive decisions
         avg_agent_winrate = self._get_avg_agent_winrate()
 
-        # Adaptive add frequency: if agent is dominating (>65%), add more frequently
+        # Adaptive add frequency: if agent is dominating, add more frequently
         effective_add_freq = (
-            4 if avg_agent_winrate > 0.65 else self.add_to_pool_every_n_rollouts
+            PFSP_ADAPTIVE_DOMINATION_ADD_FREQ
+            if avg_agent_winrate > PFSP_ADAPTIVE_DOMINATION_THRESHOLD
+            else self.add_to_pool_every_n_rollouts
         )
 
-        # Add current agent to pool periodically, but ONLY if performing well (>50%)
-        # NOTE: Lowered from 60% to 50% to prevent pool stagnation (Run #8 analysis)
+        # Add current agent to pool periodically, but ONLY if performing well
+        # Threshold is defined in TrainingConfig per instance (can be overriden via YAML)
+        min_wr_to_add = (
+            getattr(self.env.config, "pfsp_min_winrate_to_add", 0.50)
+            if hasattr(self.env, "config")
+            else 0.50
+        )
+
         if self.rollout_count % effective_add_freq == 0:
-            if avg_agent_winrate >= 0.50 or len(self.opponent_pool) < 2:
+            if avg_agent_winrate >= min_wr_to_add or len(self.opponent_pool) < 2:
                 # Add if winning enough OR pool needs more opponents
                 self._add_to_pool()
-                if self.verbose > 0 and avg_agent_winrate >= 0.50:
+                if self.verbose > 0 and avg_agent_winrate >= min_wr_to_add:
                     print(
-                        f"[PFSP] Agent winrate {avg_agent_winrate:.1%} >= 50%, adding to pool"
+                        f"[PFSP] Agent winrate {avg_agent_winrate:.1%} >= {min_wr_to_add:.0%}, adding to pool"
                     )
             elif self.verbose > 0:
                 print(
-                    f"[PFSP] Agent winrate {avg_agent_winrate:.1%} < 50%, skipping pool add"
+                    f"[PFSP] Agent winrate {avg_agent_winrate:.1%} < {min_wr_to_add:.0%}, skipping pool add"
                 )
 
         # Select new opponent periodically (legacy mode only)
         # In pool mode, opponents are assigned per-env on episode end
-        if not self.pool_mode and self.rollout_count % self.select_opponent_every_n_rollouts == 0:
+        if (
+            not self.pool_mode
+            and self.rollout_count % self.select_opponent_every_n_rollouts == 0
+        ):
             self._select_opponent_pfsp()
 
     def _get_avg_agent_winrate(self) -> float:
         """Calculate average agent winrate across all opponents in pool."""
         if not self.opponent_pool:
-            return 0.5
+            return PFSP_NEUTRAL_WINRATE
 
         total_wins = 0
         total_games = 0
@@ -281,7 +299,7 @@ class PFSPCallback(BaseCallback):
                 total_wins += data["losses"]
                 total_games += games
 
-        return total_wins / total_games if total_games > 0 else 0.5
+        return total_wins / total_games if total_games > 0 else PFSP_NEUTRAL_WINRATE
 
     def _on_step(self) -> bool:
         """Called at each env step - track episode outcomes and reassign opponents."""
