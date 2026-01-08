@@ -417,15 +417,12 @@ class PFSPCallback(BaseCallback):
 
         # Remove WEAKEST opponent if pool full (keep hardest opponents!)
         # But NEVER remove current opponent
-        if len(self.opponent_pool) > self.pool_size:
+        while len(self.opponent_pool) > self.pool_size:
             # Find opponent with LOWEST winrate (easiest for agent)
             candidates = []
             for name, data in self.opponent_pool.items():
                 # Don't remove the one we just added!
                 if name == checkpoint_name:
-                    continue
-                # In pool mode, don't remove if any env is using this opponent
-                if self.pool_mode and name in self.env_opponent_names:
                     continue
                 if name == self.current_opponent_name:
                     continue  # Never remove current opponent
@@ -442,24 +439,39 @@ class PFSPCallback(BaseCallback):
                 # Remove the opponent with LOWEST winrate (easiest to beat)
                 # If winrates are tied, remove the OLDEST one (lowest added_at_step)
                 weakest_name, weakest_wr, _ = min(candidates, key=lambda x: (x[1], x[2]))
+                weakest_path = Path(self.opponent_pool[weakest_name]["path"])
+                
+                # 1. Remove from selectable pool IMMEDIATELY
+                del self.opponent_pool[weakest_name]
+
+                # 2. Force reassign any envs currently using this opponent
+                # This ensures we don't have "zombies" mid-episode
+                if self.pool_mode:
+                    for env_idx, name in enumerate(self.env_opponent_names):
+                        if name == weakest_name:
+                            self._assign_opponent_to_env(env_idx)
+
+                # 3. Now safe to remove from Rust and Disk
                 if weakest_path.exists():
                     weakest_path.unlink()  # Delete checkpoint file
 
-                # Remove from Rust pool to free GPU memory
                 if self.pool_mode and isinstance(self.env, BatchedDeckGymEnv):
                     try:
                         self.env.vec_game.remove_onnx_from_pool(weakest_name)
                     except Exception as e:
                         if self.verbose > 0:
                             print(f"[PFSP WARNING] Failed to remove from Rust pool: {e}")
-
-                del self.opponent_pool[weakest_name]
-                gc.collect()
-
+                
                 if self.verbose > 0:
                     print(
                         f"[PFSP] Evicted weakest opponent: {weakest_name} (WR: {weakest_wr:.1%})"
                     )
+                
+                gc.collect()
+            else:
+                if self.verbose > 0:
+                    print("[PFSP WARNING] Pool full but no candidates for eviction")
+                break
 
         if self.verbose > 0:
             print(
