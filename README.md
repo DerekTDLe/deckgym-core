@@ -177,24 +177,24 @@ The agent uses a **card-level attention mechanism** that processes each card ind
 
 | Feature | Value |
 |---------|-------|
-| Observation size | 2129 dims (41 global + 18 cards × 116 features) |
+| Observation size | 2219 dims (131 global + 18 cards × 116 features) |
 | Architecture | Modern Transformer (3 layers, 8 heads, GELU) |
 | Card encoding | Intrinsic properties + Position (Hand + Board) |
-| Training Mode | **Pure Self-Play** (MetaDeckLoader) |
-| Permutation invariant | ✅ Order of cards doesn't matter |
+| Training Mode | **Pure Self-Play** (PFSP Enabled) |
+| Configuration | **Centralized** via `python/deckgym/config.py` |
 
 See [RL_ARCHITECTURE.md](RL_ARCHITECTURE.md) for detailed architecture documentation.
 
 ### Pure Self-Play Training (Default)
 
-The agent learns through continuous self-play against its own previous versions, facing 100+ meta decks from step 1. This ensures high-quality adversarial gradients and prevents curriculum-induced biasing.
+The agent learns through continuous self-play against its own previous versions using **Prioritized Fictitious Self-Play (PFSP)**. It faces 100+ meta decks from step 1, ensuring high-quality adversarial gradients.
 
 | Feature | Description |
 |---------|-------------|
 | **Meta-Sampling** | Randomly samples from meta_deck.json every episode |
-| **Frozen Updates** | Updates opponent model every 8 rollouts (ONNX-backed) |
+| **PFSP Pool** | Manages a prioritized pool of historical versions based on winrate |
 | **Stability** | Rust-side `catch_unwind` prevents game-state crashes |
-| **Scale** | Centered on 1500 mu for TrueSkill calibration |
+| **YAML Config** | Fully configurable via `configs/template.yaml` |
 
 ### Elo Leaderboard (300 games/baseline)
 
@@ -217,8 +217,11 @@ The agent learns through continuous self-play against its own previous versions,
 ### Training Commands
 
 ```bash
+# Generate a training configuration template
+python python/deckgym/config.py --generate-template my_config.yaml
+
 # Train with pure self-play using YAML config
-python python/scripts/train.py --config configs/baseline.yaml
+python python/scripts/train.py --config my_config.yaml
 
 # Evaluate model and update TrueSkill leaderboard
 python python/scripts/evaluate.py eval --model checkpoints/rl_bot_xxx_steps.zip --games 300
