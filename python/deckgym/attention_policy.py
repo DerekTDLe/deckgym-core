@@ -21,27 +21,20 @@ from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from typing import Tuple, Dict, Any, Optional, List
 
-# Import constants from the Rust side (via deckgym)
-try:
-    import deckgym
-
-    # Use PyGame class which is exposed by the Rust bindings
-    game_cls = getattr(deckgym, "PyGame", None) or getattr(deckgym, "Game", None)
-    if game_cls is None:
-        raise ImportError("Could not find Game or PyGame class in deckgym")
-
-    GLOBAL_FEATURES = game_cls.global_features_size()
-    FEATURES_PER_CARD = game_cls.features_per_card()
-    # Calculate MAX_CARDS from total observation size
-    # obs_size = global + max_cards * features
-    MAX_CARDS = (game_cls.observation_size() - GLOBAL_FEATURES) // FEATURES_PER_CARD
-except (ImportError, AttributeError):
-    # Fallback for development - must match observation.rs constants
-    # GLOBAL_FEATURES = 1 (turn) + 2 (points) + 2 (deck_size) + 2 (hand_size) + 2 (discard_size) + 32 (2×2×8 deck_energy with dual type)
-    GLOBAL_FEATURES = 41
-    FEATURES_PER_CARD = 121  # intrinsic (113) + position (8) features per card
-    MAX_CARDS = 18  # 10 hand + 4 self board + 4 opponent board
-    # Total observation size: 41 + 18 × 121 = 2219 dims
+# Import constants from centralized config
+from deckgym.config import (
+    GLOBAL_FEATURES,
+    FEATURES_PER_CARD,
+    MAX_CARDS_IN_GAME as MAX_CARDS,
+    MODEL_ATTENTION_DROPOUT,
+    MODEL_ATTENTION_POOL_QUERIES,
+    MODEL_GLOBAL_PROJ_DIM,
+    MODEL_FF_EXPANSION_FACTOR,
+    MODEL_OUTPUT_PROJ_FACTOR,
+    MODEL_MASK_THRESHOLD,
+    MODEL_POLICY_LAYERS_DEFAULT,
+    MODEL_VALUE_LAYERS_DEFAULT,
+)
 
 
 class OnnxSafeAttention(nn.Module):
@@ -232,24 +225,27 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         global_features: int = GLOBAL_FEATURES,
         features_per_card: int = FEATURES_PER_CARD,
         max_cards: int = MAX_CARDS,
+        global_proj_dim: int = MODEL_GLOBAL_PROJ_DIM,
+        ff_expansion_factor: int = MODEL_FF_EXPANSION_FACTOR,
+        output_proj_factor: int = MODEL_OUTPUT_PROJ_FACTOR,
+        mask_threshold: float = MODEL_MASK_THRESHOLD,
     ):
         # Calculate output features dimension
-        # Expanded from 320 to 640 to provide richer features for action net
-        # global (128) + cards (512) = 640
-        features_dim = 128 + embed_dim * 2  # Attended cards + processed global
+        # global (global_proj_dim) + cards (embed_dim * output_proj_factor)
+        features_dim = global_proj_dim + (embed_dim * output_proj_factor)
         super().__init__(observation_space, features_dim)
 
         self.global_features = global_features
         self.features_per_card = features_per_card
         self.max_cards = max_cards
         self.embed_dim = embed_dim
+        self.mask_threshold = mask_threshold
 
         # Project global features (GELU activation for smoother gradients)
-        # Expanded from 64 to 128 dims for richer global representation
         self.global_proj = nn.Sequential(
-            nn.Linear(global_features, 128),
+            nn.Linear(global_features, global_proj_dim),
             nn.GELU(),
-            nn.Linear(128, 128),
+            nn.Linear(global_proj_dim, global_proj_dim),
             nn.GELU(),
         )
 
@@ -264,7 +260,7 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         # Uses OnnxSafeAttention instead of PyTorch's MultiheadAttention
         self.attention_layers = nn.ModuleList(
             [
-                OnnxSafeAttention(embed_dim, num_heads, dropout=0.15)
+                OnnxSafeAttention(embed_dim, num_heads, dropout=MODEL_ATTENTION_DROPOUT)
                 for _ in range(num_layers)
             ]
         )
@@ -275,11 +271,11 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         self.ff_layers = nn.ModuleList(
             [
                 nn.Sequential(
-                    nn.Linear(embed_dim, embed_dim * 4),
+                    nn.Linear(embed_dim, embed_dim * ff_expansion_factor),
                     nn.GELU(),
-                    nn.Dropout(0.15),
-                    nn.Linear(embed_dim * 4, embed_dim),
-                    nn.Dropout(0.15),
+                    nn.Dropout(MODEL_ATTENTION_DROPOUT),
+                    nn.Linear(embed_dim * ff_expansion_factor, embed_dim),
+                    nn.Dropout(MODEL_ATTENTION_DROPOUT),
                 )
                 for _ in range(num_layers)
             ]
@@ -292,14 +288,15 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         # Multi-head pooling with 4 queries (reduces compression from 24× to 6×)
         # Output: [batch, 4 * embed_dim] = [batch, 1024] for embed_dim=256
         self.attention_pool = MultiHeadAttentionPooling(
-            embed_dim, num_heads, num_queries=4
+            embed_dim, num_heads, num_queries=MODEL_ATTENTION_POOL_QUERIES
         )
 
         # Final projection after pooling (GELU activation)
-        # Input: 4 * embed_dim (1024 for embed_dim=256)
-        # Output: 2 * embed_dim (512 for embed_dim=256)
         self.output_proj = nn.Sequential(
-            nn.Linear(embed_dim * 4, embed_dim * 2),
+            nn.Linear(
+                embed_dim * MODEL_ATTENTION_POOL_QUERIES,
+                embed_dim * output_proj_factor,
+            ),
             nn.GELU(),
         )
 
@@ -318,7 +315,7 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         # Create mask for empty card slots (all zeros = padding)
         # A card is considered "present" if it has any non-zero features
         card_sum = card_feats.abs().sum(dim=-1)  # [batch, max_cards]
-        card_mask = card_sum < 1e-6  # True = masked (empty slot)
+        card_mask = card_sum < self.mask_threshold  # True = masked (empty slot)
 
         # Process global features
         global_out = self.global_proj(global_feats)
@@ -376,7 +373,7 @@ class CardAttentionPolicy(ActorCriticPolicy):
     ):
         # Set default net_arch for policy/value heads after attention
         if net_arch is None:
-            net_arch = [256, 128]
+            net_arch = list(MODEL_POLICY_LAYERS_DEFAULT)
 
         # Store attention params
         self.embed_dim = embed_dim
@@ -402,9 +399,13 @@ class CardAttentionPolicy(ActorCriticPolicy):
 
 # For sb3-contrib MaskablePPO compatibility
 def create_attention_policy_kwargs(
-    embed_dim: int = 128,
-    num_heads: int = 4,
-    num_layers: int = 2,
+    embed_dim: int = 256,
+    num_heads: int = 8,
+    num_layers: int = 3,
+    global_proj_dim: int = MODEL_GLOBAL_PROJ_DIM,
+    ff_expansion_factor: int = MODEL_FF_EXPANSION_FACTOR,
+    output_proj_factor: int = MODEL_OUTPUT_PROJ_FACTOR,
+    mask_threshold: float = MODEL_MASK_THRESHOLD,
     net_arch: Optional[List[int]] = None,
     ortho_init: bool = False,  # Disabled by default - SB3's gain=0.01 is too conservative
 ) -> Dict[str, Any]:
@@ -432,7 +433,9 @@ def create_attention_policy_kwargs(
         )
     """
     if net_arch is None:
-        net_arch = dict(pi=[256, 128], vf=[256, 128])
+        net_arch = dict(
+            pi=list(MODEL_POLICY_LAYERS_DEFAULT), vf=list(MODEL_VALUE_LAYERS_DEFAULT)
+        )
 
     return {
         "features_extractor_class": CardAttentionExtractor,
@@ -440,6 +443,10 @@ def create_attention_policy_kwargs(
             "embed_dim": embed_dim,
             "num_heads": num_heads,
             "num_layers": num_layers,
+            "global_proj_dim": global_proj_dim,
+            "ff_expansion_factor": ff_expansion_factor,
+            "output_proj_factor": output_proj_factor,
+            "mask_threshold": mask_threshold,
         },
         "net_arch": net_arch,
         "ortho_init": ortho_init,  # Disable SB3's conservative init

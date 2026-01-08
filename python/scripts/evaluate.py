@@ -36,6 +36,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import deckgym
 from deckgym.deck_loader import MetaDeckLoader
+from deckgym.config import (
+    TRUESKILL_MU,
+    TRUESKILL_SIGMA,
+    TRUESKILL_BETA,
+    TRUESKILL_TAU,
+    TRUESKILL_DRAW_PROBABILITY,
+    EVAL_GAMES_PER_PAIR_CALIBRATE,
+    EVAL_GAMES_PER_PAIR_AUDIT,
+    EVAL_GAMES_PER_PAIR_BENCH,
+)
 
 # Try importing ONNX export tools (required for audit/bench)
 try:
@@ -81,11 +91,11 @@ def print_system_info():
 
 # --- Configuration ---
 TRUESKILL_ENV = trueskill.TrueSkill(
-    mu=1500,
-    sigma=500,  # Initial uncertainty (large for new agents)
-    beta=250,  # Performance variance (sigma / 2)
-    tau=5,  # Dynamic factor
-    draw_probability=0.02,  # Probability of draw
+    mu=TRUESKILL_MU,
+    sigma=TRUESKILL_SIGMA,
+    beta=TRUESKILL_BETA,
+    tau=TRUESKILL_TAU,
+    draw_probability=TRUESKILL_DRAW_PROBABILITY,
 )
 BASELINES_FILE = Path("trueskill_baselines.json")
 DEFAULT_BASELINES_TO_CALIBRATE = [
@@ -228,7 +238,7 @@ def run_rust_match(
             return 0  # Treat error as draw/void
 
 
-def calibrate(n_games_per_pair: int = 50):
+def calibrate(n_games_per_pair: int = EVAL_GAMES_PER_PAIR_CALIBRATE):
     """Run round-robin tournament between baselines."""
     tracker = TrueSkillTracker()
     loader = MetaDeckLoader("meta_deck.json")
@@ -305,7 +315,7 @@ def calibrate(n_games_per_pair: int = 50):
     print_ratings(tracker)
 
 
-def evaluate_single_model(model_path: str, n_games: int = 100):
+def evaluate_single_model(model_path: str, n_games: int = EVAL_GAMES_PER_PAIR_AUDIT):
     """Evaluate a single model against baselines."""
     if not ONNX_AVAILABLE:
         console.print("[red]ONNX tools not installed. Cannot evaluate model.[/red]")
@@ -390,7 +400,9 @@ def evaluate_single_model(model_path: str, n_games: int = 100):
 
 
 def benchmark_directory(
-    directory: str, n_games_per_pair: int = 20, include_baselines: bool = True
+    directory: str,
+    n_games_per_pair: int = EVAL_GAMES_PER_PAIR_BENCH,
+    include_baselines: bool = True,
 ):
     """
     Benchmark all models in a directory against each other and baselines.

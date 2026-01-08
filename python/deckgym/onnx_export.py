@@ -19,17 +19,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-
-# Constants should be fetched from Rust, but we need defaults for when module isn't built
-try:
-    try:
-        from deckgym import Game as GameClass
-    except ImportError:
-        from .deckgym import PyGame as GameClass
-    OBSERVATION_SIZE = GameClass.observation_size()
-except (ImportError, AttributeError, ValueError):
-    OBSERVATION_SIZE = 2219  # Fallback: 41 global + 18 cards * 121 features
-ACTION_SPACE_SIZE = 175  # Must match src/rl/action_mask.rs
+# Import constants from centralized config
+from deckgym.config import OBSERVATION_SIZE, ACTION_SPACE_SIZE
 
 
 class PolicyWrapper(nn.Module):

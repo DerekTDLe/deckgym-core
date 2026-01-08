@@ -44,241 +44,15 @@ from deckgym.attention_policy import (
 )
 from deckgym.pfsp_callback import PFSPCallback
 
+# Import configuration and constants
+from deckgym.config import TrainingConfig, DEFAULT_CONFIG, OBSERVATION_SIZE
+
 # =============================================================================
 # Configuration
 # =============================================================================
 
 
-@dataclass
-class TrainingConfig:
-    """All training hyperparameters in one place."""
-
-    # Paths
-    meta_deck_path: str = "meta_deck.json"
-    save_path: str = "models/rl_bot"
-    checkpoint_dir: str = "./checkpoints/"
-    tensorboard_dir: str = "./logs/"
-    resume_path: str = None  # Path to checkpoint to resume from (None = start fresh)
-
-    # Training duration
-    total_timesteps: int = 30_000_000
-    checkpoint_freq: int = 10_000  # Checkpoint every 10k steps
-
-    # PPO hyperparameters
-    base_learning_rate: float = 3e-4  # Peak LR after warmup
-    min_learning_rate: float = 1e-4  # Final LR after decay
-    warmup_ratio: float = 0.02  # 2% of total steps for warmup
-    n_steps: int = 256  # Steps per env per rollout
-    batch_size: int = 1024  # Minibatch size
-    n_epochs: int = 8  # PPO epochs per update
-    gamma: float = 0.98  # Discount factor
-    gae_lambda: float = 0.95  # GAE lambda
-    ent_coef: float = 0.02  # Entropy coefficient
-    vf_coef: float = 0.5  # Value function coefficient
-    clip_range: float = 0.2  # PPO clipping range
-    max_grad_norm: float = 1.0  # Gradient clipping
-    target_kl: float = 0.015  # Stop epoch early if KL > target
-
-    # Network architecture (Attention)
-    use_attention: bool = True
-    attention_embed_dim: int = 256  # Embedding dimension
-    attention_num_heads: int = 8  # Attention heads
-    attention_num_layers: int = 3  # Transformer layers
-    policy_layers: tuple = (512, 256, 128)  # Policy head after attention
-    value_layers: tuple = (512, 256)  # Value head after attention
-    use_silu: bool = True  # Use SiLU activation
-
-    # Self-play (frozen opponent updates)
-    frozen_opponent_update_rollouts: int = 8  # Update frozen opponent every N rollouts
-
-    # PFSP (Prioritized Fictitious Self-Play)
-    use_pfsp: bool = False  # Enable PFSP instead of simple frozen opponent
-    pfsp_pool_size: int = 10  # Max opponents in PFSP pool
-    pfsp_add_every_n_rollouts: int = 8  # Add current agent to pool every N rollouts
-    pfsp_select_every_n_rollouts: int = 2  # Select new opponent every N rollouts
-    pfsp_priority_exponent: float = (
-        2.0  # PFSP priority: f(x) = (1-x)^p (higher = focus on hard opponents)
-    )
-    pfsp_winrate_window: int = 200  # Track winrate over N recent episodes
-    pfsp_checkpoint_dir: str = (
-        "./checkpoints/pfsp_pool/"  # Where to save PFSP opponents
-    )
-
-    # Game limits
-    max_turns: int = 99  # Official Pokemon TCG Pocket limit
-    max_actions_per_turn: int = 50  # Prevents single-turn infinite loops
-    max_total_actions: int = 500  # Prevents runaway episodes
-
-    # Parallel environments
-    n_envs: int = 12  # 32 parallel environments
-    use_batched_env: bool = True  # Use Rust-side batched env
-
-    # Device
-    device: str = "auto"
-
-    def get_learning_rate_schedule(self, total_timesteps: int = None):
-        """
-        Learning rate schedule with warmup + cosine annealing.
-
-        - Linear warmup: 0 → base_lr (first warmup_ratio % of training)
-        - Cosine decay: base_lr → min_lr
-        """
-        import math
-
-        base_lr = float(self.base_learning_rate)
-        min_lr = float(self.min_learning_rate)
-
-        if total_timesteps:
-            # Calculate warmup steps from ratio
-            total_updates = total_timesteps // self.n_steps
-            warmup_updates = int(total_updates * self.warmup_ratio)
-
-            def lr_schedule_cosine(progress_remaining: float) -> float:
-                # progress_remaining goes from 1.0 → 0.0
-                current_update = int((1.0 - progress_remaining) * total_updates)
-
-                if current_update < warmup_updates:
-                    # Warmup phase: linear 0 → base_lr
-                    return (current_update / max(1, warmup_updates)) * base_lr
-                else:
-                    # Cosine annealing: base_lr → min_lr
-                    decay_updates = total_updates - warmup_updates
-                    if decay_updates <= 0:
-                        return min_lr
-                    progress = (current_update - warmup_updates) / decay_updates
-                    cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
-                    return min_lr + (base_lr - min_lr) * cosine_decay
-
-            return lr_schedule_cosine
-        else:
-            # Fallback: constant LR
-            return lambda _: base_lr
-
-
-# Default configuration
-DEFAULT_CONFIG = TrainingConfig()
-
-
-def load_config_from_yaml(yaml_path: str) -> TrainingConfig:
-    """
-    Load training configuration from YAML file.
-
-    Args:
-        yaml_path: Path to YAML config file
-
-    Returns:
-        TrainingConfig instance with values from YAML
-    """
-    with open(yaml_path, "r") as f:
-        config_dict = yaml.safe_load(f)
-
-    # Flatten nested structure
-    flat_config = {}
-
-    # Model params
-    if "model" in config_dict:
-        flat_config["attention_embed_dim"] = config_dict["model"].get(
-            "attention_embed_dim", 256
-        )
-        flat_config["attention_num_heads"] = config_dict["model"].get(
-            "attention_num_heads", 8
-        )
-        flat_config["attention_num_layers"] = config_dict["model"].get(
-            "attention_num_layers", 3
-        )
-        flat_config["use_attention"] = config_dict["model"].get("use_attention", True)
-        flat_config["use_silu"] = config_dict["model"].get("use_silu", True)
-
-        if "net_arch" in config_dict["model"]:
-            net_arch = config_dict["model"]["net_arch"]
-            flat_config["policy_layers"] = tuple(net_arch.get("pi", [512, 256, 128]))
-            flat_config["value_layers"] = tuple(net_arch.get("vf", [512, 256]))
-
-    # PPO params
-    if "ppo" in config_dict:
-        flat_config["base_learning_rate"] = config_dict["ppo"].get(
-            "learning_rate", 3e-4
-        )
-        flat_config["min_learning_rate"] = config_dict["ppo"].get(
-            "min_learning_rate", 1e-4
-        )
-        flat_config["warmup_ratio"] = config_dict["ppo"].get("warmup_ratio", 0.02)
-        flat_config["batch_size"] = config_dict["ppo"].get("batch_size", 1024)
-        flat_config["n_steps"] = config_dict["ppo"].get("n_steps", 256)
-        flat_config["n_epochs"] = config_dict["ppo"].get("n_epochs", 8)
-        flat_config["gamma"] = config_dict["ppo"].get("gamma", 0.98)
-        flat_config["gae_lambda"] = config_dict["ppo"].get("gae_lambda", 0.95)
-        flat_config["ent_coef"] = config_dict["ppo"].get("ent_coef", 0.02)
-        flat_config["vf_coef"] = config_dict["ppo"].get("vf_coef", 0.5)
-        flat_config["clip_range"] = config_dict["ppo"].get("clip_range", 0.2)
-        flat_config["max_grad_norm"] = config_dict["ppo"].get("max_grad_norm", 1.0)
-        flat_config["target_kl"] = config_dict["ppo"].get("target_kl", 0.015)
-
-    # Training params
-    if "training" in config_dict:
-        flat_config["total_timesteps"] = config_dict["training"].get(
-            "total_timesteps", 30_000_000
-        )
-        flat_config["checkpoint_freq"] = config_dict["training"].get(
-            "checkpoint_freq", 10_000
-        )
-        flat_config["n_envs"] = config_dict["training"].get("n_envs", 32)
-        flat_config["use_batched_env"] = config_dict["training"].get(
-            "use_batched_env", True
-        )
-        flat_config["device"] = config_dict["training"].get("device", "auto")
-        flat_config["frozen_opponent_update_rollouts"] = config_dict["training"].get(
-            "frozen_opponent_update_rollouts", 8
-        )
-
-        # PFSP params
-        flat_config["use_pfsp"] = config_dict["training"].get("use_pfsp", False)
-        flat_config["pfsp_pool_size"] = config_dict["training"].get(
-            "pfsp_pool_size", 10
-        )
-        flat_config["pfsp_add_every_n_rollouts"] = config_dict["training"].get(
-            "pfsp_add_every_n_rollouts", 8
-        )
-        flat_config["pfsp_select_every_n_rollouts"] = config_dict["training"].get(
-            "pfsp_select_every_n_rollouts", 2
-        )
-        flat_config["pfsp_priority_exponent"] = config_dict["training"].get(
-            "pfsp_priority_exponent", 2.0
-        )
-        flat_config["pfsp_winrate_window"] = config_dict["training"].get(
-            "pfsp_winrate_window", 200
-        )
-        flat_config["pfsp_checkpoint_dir"] = config_dict["training"].get(
-            "pfsp_checkpoint_dir", "./checkpoints/pfsp_pool/"
-        )
-
-    # Environment params
-    if "environment" in config_dict:
-        flat_config["max_turns"] = config_dict["environment"].get("max_turns", 99)
-        flat_config["max_actions_per_turn"] = config_dict["environment"].get(
-            "max_actions_per_turn", 50
-        )
-        flat_config["max_total_actions"] = config_dict["environment"].get(
-            "max_total_actions", 500
-        )
-
-    # Paths
-    if "paths" in config_dict:
-        flat_config["meta_deck_path"] = config_dict["paths"].get(
-            "meta_deck_path", "meta_deck.json"
-        )
-        flat_config["save_path"] = config_dict["paths"].get(
-            "save_path", "models/rl_bot"
-        )
-        flat_config["checkpoint_dir"] = config_dict["paths"].get(
-            "checkpoint_dir", "./checkpoints/"
-        )
-        flat_config["tensorboard_dir"] = config_dict["paths"].get(
-            "tensorboard_dir", "./logs/"
-        )
-        flat_config["resume_path"] = config_dict["paths"].get("resume_path", None)
-
-    return TrainingConfig(**flat_config)
+# Configuration is now centralized in deckgym/config.py
 
 
 # =============================================================================
@@ -853,7 +627,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     print(f"[2/4] Creating {config.n_envs} environment(s) for self-play...")
     if config.n_envs == 1:
         # Single environment (simpler)
-        single_env = SelfPlayEnv(deck_loader, opponent_type=None, config=config)
+        single_env = SelfPlayEnv(deck_loader, opponent_type="self", config=config)
         env = ActionMasker(single_env, mask_fn)
         env = Monitor(env)
     elif config.use_batched_env:
@@ -871,7 +645,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         single_env = None
 
     # Verify observation space
-    expected_obs_size = 2219  # 41 global + 18 cards × 121 features
+    expected_obs_size = OBSERVATION_SIZE
     if env.observation_space.shape[0] != expected_obs_size:
         raise ValueError(
             f"Observation size mismatch! Expected {expected_obs_size}, "
@@ -893,6 +667,10 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
             embed_dim=config.attention_embed_dim,
             num_heads=config.attention_num_heads,
             num_layers=config.attention_num_layers,
+            global_proj_dim=config.attention_global_proj_dim,
+            ff_expansion_factor=config.attention_ff_expansion_factor,
+            output_proj_factor=config.attention_output_proj_factor,
+            mask_threshold=config.attention_mask_threshold,
             net_arch=dict(pi=list(config.policy_layers), vf=list(config.value_layers)),
         )
         policy_kwargs["activation_fn"] = activation_fn
@@ -1078,7 +856,7 @@ if __name__ == "__main__":
     )
 
     # Create default config for default values
-    _defaults = TrainingConfig()
+    _defaults = DEFAULT_CONFIG
 
     # Config file (YAML) - load entire config from file
     parser.add_argument(
@@ -1187,7 +965,7 @@ if __name__ == "__main__":
     # Load config from YAML if provided, otherwise use defaults
     if args.config:
         print(f"Loading configuration from {args.config}...")
-        config = load_config_from_yaml(args.config)
+        config = TrainingConfig.from_yaml(args.config)
         print(f"  Loaded config: {Path(args.config).stem}")
     else:
         config = TrainingConfig()
