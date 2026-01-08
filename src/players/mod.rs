@@ -156,7 +156,7 @@ fn get_player(deck: Deck, player: &PlayerCode) -> Box<dyn Player> {
         PlayerCode::ER => Box::new(EvolutionRusherPlayer { deck }),
         #[cfg(feature = "onnx")]
         PlayerCode::Onnx { path } => {
-            Box::new(OnnxPlayer::new(&path, deck, true).expect("Failed to load ONNX model"))
+            Box::new(OnnxPlayer::new(&path, deck, true, "auto").expect("Failed to load ONNX model"))
         }
     }
 }

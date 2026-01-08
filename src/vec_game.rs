@@ -276,8 +276,9 @@ impl VecGame {
         &mut self,
         model_path: &str,
         deterministic: bool,
+        device: &str,
     ) -> Result<(), String> {
-        let inference = BatchedOnnxInference::new(model_path, deterministic)?;
+        let inference = BatchedOnnxInference::new(model_path, deterministic, device)?;
         self.onnx_opponent = Some(inference);
 
         // Clear bot players since we're using ONNX now
@@ -314,8 +315,9 @@ impl VecGame {
         name: &str,
         model_path: &str,
         deterministic: bool,
+        device: &str,
     ) -> Result<(), String> {
-        let inference = BatchedOnnxInference::new(model_path, deterministic)?;
+        let inference = BatchedOnnxInference::new(model_path, deterministic, device)?;
         self.onnx_pool.insert(name.to_string(), inference);
         Ok(())
     }

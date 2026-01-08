@@ -51,6 +51,43 @@ impl Debug for OnnxPlayer {
 }
 
 #[cfg(feature = "onnx")]
+fn get_execution_providers(
+    device: &str,
+) -> Vec<ort::execution_providers::ExecutionProviderDispatch> {
+    match device.to_lowercase().as_str() {
+        "cpu" => {
+            println!("[ONNX] Using CPU Execution Provider");
+            vec![]
+        }
+        "cuda" => {
+            println!("[ONNX] Using CUDA Execution Provider (with CPU fallback)");
+            vec![CUDAExecutionProvider::default().build()]
+        }
+        "trt" | "tensorrt" => {
+            println!("[ONNX] Using TensorRT Execution Provider (STRICT)");
+            vec![TensorRTExecutionProvider::default().build()]
+        }
+        "auto" => {
+            println!("[ONNX] Using Auto Selection (TensorRT -> CUDA -> CPU fallback)");
+            vec![
+                TensorRTExecutionProvider::default().build(),
+                CUDAExecutionProvider::default().build(),
+            ]
+        }
+        _ => {
+            println!(
+                "[ONNX] Unknown device '{}', using Auto Selection (TensorRT -> CUDA -> CPU)",
+                device
+            );
+            vec![
+                TensorRTExecutionProvider::default().build(),
+                CUDAExecutionProvider::default().build(),
+            ]
+        }
+    }
+}
+
+#[cfg(feature = "onnx")]
 impl OnnxPlayer {
     /// Create a new ONNX player from a model file.
     ///
@@ -58,13 +95,17 @@ impl OnnxPlayer {
     /// * `model_path` - Path to the .onnx model file
     /// * `deck` - The deck this player uses
     /// * `deterministic` - If true, always pick the best action; if false, sample from distribution
-    pub fn new(model_path: &str, deck: Deck, deterministic: bool) -> Result<Self, String> {
+    pub fn new(
+        model_path: &str,
+        deck: Deck,
+        deterministic: bool,
+        device: &str,
+    ) -> Result<Self, String> {
+        let providers = get_execution_providers(device);
+
         let session = Session::builder()
             .map_err(|e| format!("Failed to create session builder: {}", e))?
-            .with_execution_providers([
-                TensorRTExecutionProvider::default().build(),
-                CUDAExecutionProvider::default().build(),
-            ])
+            .with_execution_providers(providers)
             .map_err(|e| format!("Failed to set execution providers: {}", e))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| format!("Failed to set optimization level: {}", e))?
@@ -72,6 +113,11 @@ impl OnnxPlayer {
             .map_err(|e| format!("Failed to set thread count: {}", e))?
             .commit_from_file(model_path)
             .map_err(|e| format!("Failed to load ONNX model from '{}': {}", model_path, e))?;
+
+        println!(
+            "[ONNX] Session initialized for {:?} (device: {})",
+            model_path, device
+        );
 
         Ok(Self {
             session,
@@ -200,18 +246,22 @@ pub struct BatchedOnnxInference {
 
 #[cfg(feature = "onnx")]
 impl BatchedOnnxInference {
-    pub fn new(model_path: &str, deterministic: bool) -> Result<Self, String> {
+    pub fn new(model_path: &str, deterministic: bool, device: &str) -> Result<Self, String> {
+        let providers = get_execution_providers(device);
+
         let session = Session::builder()
             .map_err(|e| format!("Failed to create session builder: {}", e))?
-            .with_execution_providers([
-                TensorRTExecutionProvider::default().build(),
-                CUDAExecutionProvider::default().build(),
-            ])
+            .with_execution_providers(providers)
             .map_err(|e| format!("Failed to set execution providers: {}", e))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| format!("Failed to set optimization level: {}", e))?
             .commit_from_file(model_path)
             .map_err(|e| format!("Failed to load ONNX model: {}", e))?;
+
+        println!(
+            "[ONNX] Batched session initialized for {:?} (device: {})",
+            model_path, device
+        );
 
         Ok(Self {
             session,
