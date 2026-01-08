@@ -56,29 +56,21 @@ fn get_execution_providers(
 ) -> Vec<ort::execution_providers::ExecutionProviderDispatch> {
     match device.to_lowercase().as_str() {
         "cpu" => {
-            println!("[ONNX] Using CPU Execution Provider");
             vec![]
         }
         "cuda" => {
-            println!("[ONNX] Using CUDA Execution Provider (with CPU fallback)");
             vec![CUDAExecutionProvider::default().build()]
         }
         "trt" | "tensorrt" => {
-            println!("[ONNX] Using TensorRT Execution Provider (STRICT)");
             vec![TensorRTExecutionProvider::default().build()]
         }
         "auto" => {
-            println!("[ONNX] Using Auto Selection (TensorRT -> CUDA -> CPU fallback)");
             vec![
                 TensorRTExecutionProvider::default().build(),
                 CUDAExecutionProvider::default().build(),
             ]
         }
         _ => {
-            println!(
-                "[ONNX] Unknown device '{}', using Auto Selection (TensorRT -> CUDA -> CPU)",
-                device
-            );
             vec![
                 TensorRTExecutionProvider::default().build(),
                 CUDAExecutionProvider::default().build(),
@@ -114,10 +106,6 @@ impl OnnxPlayer {
             .commit_from_file(model_path)
             .map_err(|e| format!("Failed to load ONNX model from '{}': {}", model_path, e))?;
 
-        println!(
-            "[ONNX] Session initialized for {:?} (device: {})",
-            model_path, device
-        );
 
         Ok(Self {
             session,
@@ -258,10 +246,6 @@ impl BatchedOnnxInference {
             .commit_from_file(model_path)
             .map_err(|e| format!("Failed to load ONNX model: {}", e))?;
 
-        println!(
-            "[ONNX] Batched session initialized for {:?} (device: {})",
-            model_path, device
-        );
 
         Ok(Self {
             session,
