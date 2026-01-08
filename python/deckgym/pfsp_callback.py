@@ -421,6 +421,9 @@ class PFSPCallback(BaseCallback):
             # Find opponent with LOWEST winrate (easiest for agent)
             candidates = []
             for name, data in self.opponent_pool.items():
+                # Don't remove the one we just added!
+                if name == checkpoint_name:
+                    continue
                 # In pool mode, don't remove if any env is using this opponent
                 if self.pool_mode and name in self.env_opponent_names:
                     continue
@@ -431,13 +434,14 @@ class PFSPCallback(BaseCallback):
                     opp_wr = data["wins"] / total
                 else:
                     opp_wr = 0.5  # Untested opponents get neutral priority
-                candidates.append((name, opp_wr))
+                
+                # We store (name, winrate, added_at_step)
+                candidates.append((name, opp_wr, data.get("added_at_step", 0)))
 
             if candidates:
                 # Remove the opponent with LOWEST winrate (easiest to beat)
-                weakest_name = min(candidates, key=lambda x: x[1])[0]
-                weakest_path = Path(self.opponent_pool[weakest_name]["path"])
-                weakest_wr = min(candidates, key=lambda x: x[1])[1]
+                # If winrates are tied, remove the OLDEST one (lowest added_at_step)
+                weakest_name, weakest_wr, _ = min(candidates, key=lambda x: (x[1], x[2]))
                 if weakest_path.exists():
                     weakest_path.unlink()  # Delete checkpoint file
 
