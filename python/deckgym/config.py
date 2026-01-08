@@ -67,8 +67,9 @@ TRUESKILL_DRAW_PROBABILITY = 0.02  # Probability of draw
 
 # Default evaluation games
 EVAL_GAMES_PER_PAIR_CALIBRATE = 50
-EVAL_GAMES_PER_PAIR_AUDIT = 30
+EVAL_GAMES_PER_PAIR_AUDIT = 40
 EVAL_GAMES_PER_PAIR_BENCH = 20
+EVAL_REPORTS_DIR = "eval_reports"
 
 
 # =============================================================================
@@ -220,8 +221,8 @@ class TrainingConfig:
     # Hardware
     # -------------------------------------------------------------------------
     device: str = "auto"  # "auto", "cuda", "cpu"
-    onnx_device: str = "auto"  # "auto", "cuda", "trt", "cpu"
-    pfsp_opponent_device: str = "cpu"  # Force pool opponents to CPU to save VRAM
+    onnx_device: str = "trt"  # "auto", "cuda", "trt", "cpu"
+    pfsp_opponent_device: str = "trt"  # "auto", "cuda", "trt", "cpu"
     use_gradient_checkpointing: bool = False  # Trade compute for memory (~30% slower, ~60% less VRAM)
     use_tf32: bool = True  # Enable TF32 for faster matmuls on Ampere+ GPUs
 
