@@ -710,7 +710,7 @@ impl PyGame {
     /// Create a game from deck strings (faster than file I/O).
     ///
     /// Deck strings should be in the same format as deck files:
-    /// ```
+    /// ```text
     /// Energy: Electric
     /// 2 Magnemite B1a 024
     /// 2 Magneton A1 098

@@ -384,30 +384,22 @@ impl State {
     }
 
     pub(crate) fn discard_from_active(&mut self, actor: usize, to_discard: &[EnergyType]) {
-        self.discard_energy_from_in_play(actor, 0, to_discard);
-    }
-
-    pub(crate) fn discard_energy_from_in_play(
-        &mut self,
-        actor: usize,
-        in_play_idx: usize,
-        to_discard: &[EnergyType],
-    ) {
-        let pokemon = self.in_play_pokemon[actor][in_play_idx]
-            .as_mut()
-            .expect("Pokemon should be there if discarding energy");
-        let mut discarded: Vec<EnergyType> = Vec::new();
-        for energy in to_discard {
-            if let Some(pos) = pokemon.attached_energy.iter().position(|e| *e == *energy) {
-                pokemon.attached_energy.swap_remove(pos);
-                discarded.push(*energy);
-            } else {
-                panic!("Active Pokemon does not have energy to discard");
+        let mut removed_energies = Vec::new();
+        {
+            let active = self.get_active_mut(actor);
+            for energy in to_discard {
+                if let Some(pos) = active.attached_energy.iter().position(|x| x == energy) {
+                    removed_energies.push(active.attached_energy.swap_remove(pos));
+                } else {
+                    debug!(
+                        "Warning: Active Pokemon for player {} does not have energy {:?} to discard",
+                        actor + 1,
+                        energy
+                    );
+                }
             }
         }
-        if !discarded.is_empty() {
-            self.discard_energies[actor].extend(discarded);
-        }
+        self.discard_energies[actor].extend(removed_energies);
     }
 
     /// Triggers promotion from bench or declares winner if no bench pokemon available.

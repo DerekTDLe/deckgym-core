@@ -198,6 +198,6 @@ mod tests {
         };
         let encoding = encode_attack_categories(&mechanic);
         assert_eq!(encoding.len(), NUM_ATTACK_EFFECT_CATEGORIES);
-        assert_eq!(encoding[AttackEffectCategory::EnergyManip as usize], 1.0);
+        assert_eq!(encoding[AttackEffectCategory::EnergyDiscard as usize], 1.0);
     }
 }

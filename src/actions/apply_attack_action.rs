@@ -1325,17 +1325,21 @@ fn self_energy_discard_attack(
 fn damage_and_discard_energy(damage: u32, discard_count: usize) -> (Probabilities, Mutations) {
     active_damage_effect_doutcome(damage, move |rng, state, action| {
         let opponent = (action.actor + 1) % 2;
-        let active = state.get_active_mut(opponent);
+        let mut to_discard = Vec::new();
 
         for _ in 0..discard_count {
+            let active = state.get_active(opponent);
             if active.attached_energy.is_empty() {
-                break; // No more energy to discard
+                break;
             }
 
-            // Get a random index to discard
             let energy_count = active.attached_energy.len();
             let rand_idx = rng.gen_range(0..energy_count);
-            active.attached_energy.remove(rand_idx);
+            to_discard.push(active.attached_energy[rand_idx]);
+        }
+
+        if !to_discard.is_empty() {
+            state.discard_from_active(opponent, &to_discard);
         }
     })
 }
@@ -1903,12 +1907,13 @@ fn mawile_crunch() -> (Probabilities, Mutations) {
         active_damage_effect_mutation(20, move |rng, state, action| {
             // Heads: damage + discard random energy
             let opponent = (action.actor + 1) % 2;
-            let active = state.get_active_mut(opponent);
+            let active = state.get_active(opponent);
 
             if !active.attached_energy.is_empty() {
                 let energy_count = active.attached_energy.len();
                 let rand_idx = rng.gen_range(0..energy_count);
-                active.attached_energy.remove(rand_idx);
+                let energy = active.attached_energy[rand_idx];
+                state.discard_from_active(opponent, &[energy]);
             }
         }),
     ];

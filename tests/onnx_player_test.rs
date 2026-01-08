@@ -22,7 +22,7 @@ mod tests {
 
         // Test BatchedOnnxInference
         let mut inference =
-            BatchedOnnxInference::new(model_path, false).expect("Failed to load ONNX model");
+            BatchedOnnxInference::new(model_path, false, "auto").expect("Failed to load ONNX model");
 
         let mut rng = StdRng::seed_from_u64(42);
 
