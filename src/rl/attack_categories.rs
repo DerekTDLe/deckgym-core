@@ -19,8 +19,10 @@ pub enum AttackEffectCategory {
     Variance,
 
     // === RESOURCES ===
-    /// Manipulates energy (discard, charge, move)
-    EnergyManip,
+    /// Generates energy or moves it
+    EnergyGeneration,
+    /// Discards energy
+    EnergyDiscard,
     /// Searches or draws cards
     CardAdvantage,
 
@@ -46,7 +48,7 @@ pub enum AttackEffectCategory {
 }
 
 /// Number of attack effect categories
-pub const NUM_ATTACK_EFFECT_CATEGORIES: usize = 12;
+pub const NUM_ATTACK_EFFECT_CATEGORIES: usize = 13;
 
 /// Returns the effect categories for a given Mechanic.
 pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffectCategory] {
@@ -74,16 +76,16 @@ pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffe
         Mechanic::CoinFlipToBlockAttackNextTurn => &[Variance, Protection],
 
         // === ENERGY MANIPULATION ===
-        Mechanic::SelfDiscardEnergy { .. } => &[EnergyManip],
-        Mechanic::SelfDiscardAllEnergy => &[EnergyManip],
-        Mechanic::SelfDiscardRandomEnergy => &[EnergyManip, Variance],
-        Mechanic::DiscardRandomGlobalEnergy => &[EnergyManip, Variance],
-        Mechanic::DiscardEnergyFromOpponentActive => &[EnergyManip],
-        Mechanic::SelfChargeActive { .. } => &[EnergyManip],
-        Mechanic::ChargeBench { .. } => &[EnergyManip],
-        Mechanic::ManaphyOceanicGift => &[EnergyManip],
-        Mechanic::MoltresExInfernoDance => &[EnergyManip, Variance],
-        Mechanic::VaporeonHyperWhirlpool => &[EnergyManip],
+        Mechanic::SelfDiscardEnergy { .. } => &[EnergyDiscard],
+        Mechanic::SelfDiscardAllEnergy => &[EnergyDiscard],
+        Mechanic::SelfDiscardRandomEnergy => &[EnergyDiscard, Variance, Disruption],
+        Mechanic::DiscardRandomGlobalEnergy => &[EnergyDiscard, Variance, Disruption],
+        Mechanic::DiscardEnergyFromOpponentActive => &[EnergyDiscard, Disruption],
+        Mechanic::SelfChargeActive { .. } => &[EnergyGeneration],
+        Mechanic::ChargeBench { .. } => &[EnergyGeneration],
+        Mechanic::ManaphyOceanicGift => &[EnergyGeneration],
+        Mechanic::MoltresExInfernoDance => &[EnergyGeneration, Variance],
+        Mechanic::VaporeonHyperWhirlpool => &[EnergyGeneration],
 
         // === CONDITIONAL DAMAGE ===
         Mechanic::ExtraDamageIfEx { .. } => &[ConditionalDamage],
@@ -108,7 +110,7 @@ pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffe
         Mechanic::AlsoChoiceBenchDamage { .. } => &[SpreadDamage],
         Mechanic::DirectDamage { .. } => &[SpreadDamage],
         Mechanic::ConditionalBenchDamage { .. } => &[SpreadDamage, ConditionalDamage],
-        Mechanic::PalkiaExDimensionalStorm => &[SpreadDamage, EnergyManip],
+        Mechanic::PalkiaExDimensionalStorm => &[SpreadDamage, EnergyDiscard],
 
         // === CARD EFFECTS ===
         Mechanic::DamageAndCardEffect { .. } => &[Protection],
@@ -129,13 +131,13 @@ pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffe
         // === SPECIAL / UTILITY ===
         Mechanic::SwitchSelfWithBench => &[Movement],
         Mechanic::CelebiExPowerfulBloom => &[Variance],
-        Mechanic::MegaBlazikenExMegaBurningAttack => &[EnergyManip, StatusInflict],
-        Mechanic::HoOhExPhoenixTurbo => &[EnergyManip],
+        Mechanic::MegaBlazikenExMegaBurningAttack => &[EnergyDiscard, StatusInflict],
+        Mechanic::HoOhExPhoenixTurbo => &[EnergyGeneration],
         Mechanic::HealBenchedBasic { .. } => &[Heal],
 
         // === NEW MECHANICS ===
         Mechanic::SearchToHandSupporterCard => &[CardAdvantage],
-        Mechanic::MoveAllEnergyTypeToBench { .. } => &[EnergyManip],
+        Mechanic::MoveAllEnergyTypeToBench { .. } => &[EnergyGeneration],
         Mechanic::ExtraDamagePerRetreatCost { .. } => &[ConditionalDamage],
     }
 }
