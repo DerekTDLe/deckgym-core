@@ -28,7 +28,7 @@ try:
         from .deckgym import PyGame as GameClass
     OBSERVATION_SIZE = GameClass.observation_size()
 except (ImportError, AttributeError, ValueError):
-    OBSERVATION_SIZE = 2229  # Fallback: 41 global + 18 cards * 121 features
+    OBSERVATION_SIZE = 2219  # Fallback: 41 global + 18 cards * 121 features
 ACTION_SPACE_SIZE = 175  # Must match src/rl/action_mask.rs
 
 
