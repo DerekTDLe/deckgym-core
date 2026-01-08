@@ -57,7 +57,7 @@ from deckgym.config import (
 class OnnxSafeAttention(nn.Module):
     """
     ONNX-compatible multi-head self-attention with gradient stability improvements.
-    
+
     Changes from V1:
         - Explicit Xavier initialization for QKV projections
         - Scaled initialization for output projection (residual scaling)
@@ -81,7 +81,7 @@ class OnnxSafeAttention(nn.Module):
         self.num_heads = num_heads
         self.num_layers = num_layers
         self.head_dim = embed_dim // num_heads
-        self.scale = self.head_dim ** -0.5
+        self.scale = self.head_dim**-0.5
         self.temperature = attention_temperature
 
         # Fused QKV projection
@@ -89,29 +89,28 @@ class OnnxSafeAttention(nn.Module):
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False)
 
         self.dropout = nn.Dropout(dropout)
-        
+
         # For monitoring attention saturation
-        self.register_buffer('_attn_logit_std', torch.tensor(0.0))
-        self.register_buffer('_attn_entropy', torch.tensor(0.0))
-        
+        self.register_buffer("_attn_logit_std", torch.tensor(0.0))
+        self.register_buffer("_attn_entropy", torch.tensor(0.0))
+
         # Initialize weights properly
         self._init_weights(init_residual_scale)
 
     def _init_weights(self, init_residual_scale: bool):
         """
         Initialize weights for stable gradient flow.
-        
+
         - QKV: Xavier uniform for balanced variance
         - Output: Scaled by 1/sqrt(2*num_layers) for residual streams (GPT-2 style)
         """
         nn.init.xavier_uniform_(self.qkv_proj.weight)
-        
+
         if init_residual_scale:
             # Scale down output projection for stable residuals
             # This makes attention blocks start closer to identity
             nn.init.xavier_uniform_(
-                self.out_proj.weight,
-                gain=1.0 / math.sqrt(2 * self.num_layers)
+                self.out_proj.weight, gain=1.0 / math.sqrt(2 * self.num_layers)
             )
         else:
             nn.init.xavier_uniform_(self.out_proj.weight)
@@ -144,7 +143,9 @@ class OnnxSafeAttention(nn.Module):
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
         # Attention scores with temperature
-        attn_logits = torch.matmul(q, k.transpose(-2, -1)) * self.scale / self.temperature
+        attn_logits = (
+            torch.matmul(q, k.transpose(-2, -1)) * self.scale / self.temperature
+        )
 
         # Apply mask if provided
         if key_padding_mask is not None:
@@ -158,10 +159,12 @@ class OnnxSafeAttention(nn.Module):
                 valid_logits = attn_logits[~attn_logits.isinf()]
                 if valid_logits.numel() > 0:
                     self._attn_logit_std = valid_logits.std()
-                
+
                 # Attention entropy - if too low, attention is too peaky
                 attn_probs_for_stats = F.softmax(attn_logits, dim=-1)
-                entropy = -(attn_probs_for_stats * (attn_probs_for_stats + 1e-10).log()).sum(dim=-1)
+                entropy = -(
+                    attn_probs_for_stats * (attn_probs_for_stats + 1e-10).log()
+                ).sum(dim=-1)
                 self._attn_entropy = entropy.mean()
 
         # Softmax and dropout
@@ -183,15 +186,15 @@ class OnnxSafeAttention(nn.Module):
     def get_attention_stats(self) -> Dict[str, float]:
         """Return attention statistics for monitoring."""
         return {
-            'attn_logit_std': self._attn_logit_std.item(),
-            'attn_entropy': self._attn_entropy.item(),
+            "attn_logit_std": self._attn_logit_std.item(),
+            "attn_entropy": self._attn_entropy.item(),
         }
 
 
 class MultiHeadAttentionPooling(nn.Module):
     """
     Multi-head attention pooling with gradient stability improvements.
-    
+
     Changes from V1:
         - Proper initialization matching the attention layers
         - LayerNorm on queries for stable cross-attention
@@ -209,15 +212,15 @@ class MultiHeadAttentionPooling(nn.Module):
         self.num_heads = num_heads
         self.num_queries = num_queries
         self.head_dim = embed_dim // num_heads
-        self.scale = self.head_dim ** -0.5
+        self.scale = self.head_dim**-0.5
         self.temperature = attention_temperature
 
         # Learned query vectors with proper initialization
         self.queries = nn.Parameter(torch.zeros(num_queries, embed_dim))
-        
+
         # LayerNorm for queries (stabilizes cross-attention)
         self.query_norm = nn.LayerNorm(embed_dim)
-        
+
         # Projections
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False)
         self.kv_proj = nn.Linear(embed_dim, 2 * embed_dim, bias=False)
@@ -229,7 +232,7 @@ class MultiHeadAttentionPooling(nn.Module):
         """Initialize for stable gradients."""
         # Queries: small init so pooling starts near uniform
         nn.init.normal_(self.queries, std=0.02)
-        
+
         # Projections: Xavier
         nn.init.xavier_uniform_(self.q_proj.weight)
         nn.init.xavier_uniform_(self.kv_proj.weight)
@@ -253,7 +256,7 @@ class MultiHeadAttentionPooling(nn.Module):
         # Expand and normalize queries
         queries = self.queries.unsqueeze(0).expand(batch_size, -1, -1)
         queries = self.query_norm(queries)
-        
+
         # Project queries
         q = self.q_proj(queries)
 
@@ -263,12 +266,16 @@ class MultiHeadAttentionPooling(nn.Module):
         k, v = kv.unbind(dim=2)
 
         # Reshape for multi-head
-        q = q.view(batch_size, self.num_queries, self.num_heads, self.head_dim).transpose(1, 2)
+        q = q.view(
+            batch_size, self.num_queries, self.num_heads, self.head_dim
+        ).transpose(1, 2)
         k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
         # Attention scores
-        attn_scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale / self.temperature
+        attn_scores = (
+            torch.matmul(q, k.transpose(-2, -1)) * self.scale / self.temperature
+        )
 
         # Apply mask
         if key_padding_mask is not None:
@@ -297,7 +304,7 @@ class MultiHeadAttentionPooling(nn.Module):
 class CardAttentionExtractor(BaseFeaturesExtractor):
     """
     Feature extractor with gradient stability improvements.
-    
+
     Key changes from V1:
         1. Final LayerNorm after attention layers
         2. Proper weight initialization throughout
@@ -317,9 +324,11 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         embed_dim = config.attention_embed_dim
         num_heads = config.attention_num_heads
         num_layers = config.attention_num_layers
-        
+
         # Calculate output features dimension
-        features_dim = config.attention_global_proj_dim + (embed_dim * config.attention_output_proj_factor)
+        features_dim = config.attention_global_proj_dim + (
+            embed_dim * config.attention_output_proj_factor
+        )
         super().__init__(observation_space, features_dim)
 
         self.config = config
@@ -334,7 +343,9 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
             nn.Linear(global_features, config.attention_global_proj_dim),
             nn.GELU(),
             nn.LayerNorm(config.attention_global_proj_dim),
-            nn.Linear(config.attention_global_proj_dim, config.attention_global_proj_dim),
+            nn.Linear(
+                config.attention_global_proj_dim, config.attention_global_proj_dim
+            ),
             nn.GELU(),
         )
 
@@ -347,29 +358,29 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         )
 
         # Attention layers
-        self.attention_layers = nn.ModuleList([
-            OnnxSafeAttention(
-                embed_dim,
-                num_heads,
-                num_layers=num_layers,
-                dropout=config.attention_dropout,
-                attention_temperature=config.attention_temperature,
-                init_residual_scale=config.attention_init_residual_scale,
-            )
-            for _ in range(num_layers)
-        ])
+        self.attention_layers = nn.ModuleList(
+            [
+                OnnxSafeAttention(
+                    embed_dim,
+                    num_heads,
+                    num_layers=num_layers,
+                    dropout=config.attention_dropout,
+                    attention_temperature=config.attention_temperature,
+                    init_residual_scale=config.attention_init_residual_scale,
+                )
+                for _ in range(num_layers)
+            ]
+        )
 
         # Feed-forward layers with proper init
-        self.ff_layers = nn.ModuleList([
-            self._make_ff_block(config)
-            for _ in range(num_layers)
-        ])
+        self.ff_layers = nn.ModuleList(
+            [self._make_ff_block(config) for _ in range(num_layers)]
+        )
 
         # Layer norms (2 per layer: pre-attention, pre-FF)
-        self.layer_norms = nn.ModuleList([
-            nn.LayerNorm(embed_dim)
-            for _ in range(num_layers * 2)
-        ])
+        self.layer_norms = nn.ModuleList(
+            [nn.LayerNorm(embed_dim) for _ in range(num_layers * 2)]
+        )
 
         # CRITICAL: Final LayerNorm after all attention layers
         self.final_norm = nn.LayerNorm(embed_dim)
@@ -405,15 +416,14 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
             nn.Linear(embed_dim * config.attention_ff_expansion_factor, embed_dim),
             nn.Dropout(config.attention_dropout),
         )
-        
+
         # Scale down the output layer for stable residuals
         if config.attention_init_residual_scale:
             nn.init.xavier_uniform_(
-                ff[3].weight,
-                gain=1.0 / math.sqrt(2 * config.attention_num_layers)
+                ff[3].weight, gain=1.0 / math.sqrt(2 * config.attention_num_layers)
             )
             nn.init.zeros_(ff[3].bias)
-        
+
         return ff
 
     def _init_embeddings(self):
@@ -433,11 +443,13 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         batch_size = observations.shape[0]
 
         # Split into global and card features
-        global_feats = observations[:, :self.global_features]
-        card_feats_flat = observations[:, self.global_features:]
+        global_feats = observations[:, : self.global_features]
+        card_feats_flat = observations[:, self.global_features :]
 
         # Reshape cards
-        card_feats = card_feats_flat.view(batch_size, self.max_cards, self.features_per_card)
+        card_feats = card_feats_flat.view(
+            batch_size, self.max_cards, self.features_per_card
+        )
 
         # Create mask for empty slots
         card_sum = card_feats.abs().sum(dim=-1)
@@ -483,14 +495,14 @@ class CardAttentionExtractor(BaseFeaturesExtractor):
         """Get attention statistics from all layers for monitoring."""
         stats = {}
         for i, layer in enumerate(self.attention_layers):
-            stats[f'layer_{i}'] = layer.get_attention_stats()
+            stats[f"layer_{i}"] = layer.get_attention_stats()
         return stats
 
 
 class CardAttentionPolicy(ActorCriticPolicy):
     """
     Custom policy using CardAttentionExtractor.
-    
+
     Compatible with MaskablePPO from sb3-contrib.
     """
 
@@ -504,7 +516,7 @@ class CardAttentionPolicy(ActorCriticPolicy):
         **kwargs,
     ):
         self.training_config = config
-        
+
         net_arch = dict(
             pi=list(config.policy_layers),
             vf=list(config.value_layers),
@@ -522,16 +534,16 @@ class CardAttentionPolicy(ActorCriticPolicy):
             *args,
             **kwargs,
         )
-        
+
         # Re-initialize action and value nets with proper scaling
         self._init_heads()
 
     def _init_heads(self):
         """Initialize policy and value heads for balanced gradients."""
         for net in [self.action_net, self.value_net]:
-            if hasattr(net, 'weight'):
+            if hasattr(net, "weight"):
                 nn.init.xavier_uniform_(net.weight, gain=0.01)
-                if hasattr(net, 'bias') and net.bias is not None:
+                if hasattr(net, "bias") and net.bias is not None:
                     nn.init.zeros_(net.bias)
 
 
@@ -544,7 +556,7 @@ def create_attention_policy_kwargs(
     Usage:
         from attention_policy_v2 import create_attention_policy_kwargs
         from deckgym.config import TrainingConfig, CONSERVATIVE_CONFIG
-        
+
         model = MaskablePPO(
             CardAttentionPolicy,
             env,
@@ -568,70 +580,74 @@ def create_attention_policy_kwargs(
 # Diagnostic utilities
 # =============================================================================
 
+
 def diagnose_gradients(model: nn.Module) -> Dict[str, float]:
     """
     Compute gradient norms by module for debugging.
-    
+
     Call after loss.backward() but before optimizer.step().
-    
+
     Returns dict with gradient norms per module group.
     """
     grad_norms = {}
-    
+
     groups = {
-        'card_embed': [],
-        'global_proj': [],
-        'attention_qkv': [],
-        'attention_out': [],
-        'attention_ff': [],
-        'layer_norms': [],
-        'pool': [],
-        'output_proj': [],
-        'policy_net': [],
-        'value_net': [],
-        'action_net': [],
+        "card_embed": [],
+        "global_proj": [],
+        "attention_qkv": [],
+        "attention_out": [],
+        "attention_ff": [],
+        "layer_norms": [],
+        "pool": [],
+        "output_proj": [],
+        "policy_net": [],
+        "value_net": [],
+        "action_net": [],
     }
-    
+
     for name, param in model.named_parameters():
         if param.grad is None:
             continue
-            
+
         grad_norm = param.grad.norm().item()
-        
-        if 'card_embed' in name:
-            groups['card_embed'].append(grad_norm)
-        elif 'global_proj' in name:
-            groups['global_proj'].append(grad_norm)
-        elif 'qkv_proj' in name:
-            groups['attention_qkv'].append(grad_norm)
-        elif 'out_proj' in name and 'attention' in name:
-            groups['attention_out'].append(grad_norm)
-        elif 'ff_layers' in name:
-            groups['attention_ff'].append(grad_norm)
-        elif 'layer_norm' in name or 'final_norm' in name:
-            groups['layer_norms'].append(grad_norm)
-        elif 'pool' in name:
-            groups['pool'].append(grad_norm)
-        elif 'output_proj' in name:
-            groups['output_proj'].append(grad_norm)
-        elif 'mlp_extractor' in name and 'policy' in name:
-            groups['policy_net'].append(grad_norm)
-        elif 'mlp_extractor' in name and 'value' in name:
-            groups['value_net'].append(grad_norm)
-        elif 'action_net' in name:
-            groups['action_net'].append(grad_norm)
-    
+
+        if "card_embed" in name:
+            groups["card_embed"].append(grad_norm)
+        elif "global_proj" in name:
+            groups["global_proj"].append(grad_norm)
+        elif "qkv_proj" in name:
+            groups["attention_qkv"].append(grad_norm)
+        elif "out_proj" in name and "attention" in name:
+            groups["attention_out"].append(grad_norm)
+        elif "ff_layers" in name:
+            groups["attention_ff"].append(grad_norm)
+        elif "layer_norm" in name or "final_norm" in name:
+            groups["layer_norms"].append(grad_norm)
+        elif "pool" in name:
+            groups["pool"].append(grad_norm)
+        elif "output_proj" in name:
+            groups["output_proj"].append(grad_norm)
+        elif "mlp_extractor" in name and "policy" in name:
+            groups["policy_net"].append(grad_norm)
+        elif "mlp_extractor" in name and "value" in name:
+            groups["value_net"].append(grad_norm)
+        elif "action_net" in name:
+            groups["action_net"].append(grad_norm)
+
     for group_name, norms in groups.items():
         if norms:
-            grad_norms[f'{group_name}_mean'] = sum(norms) / len(norms)
-            grad_norms[f'{group_name}_max'] = max(norms)
-    
+            grad_norms[f"{group_name}_mean"] = sum(norms) / len(norms)
+            grad_norms[f"{group_name}_max"] = max(norms)
+
     # Compute imbalance ratio
-    if grad_norms.get('attention_qkv_mean', 0) > 0 and grad_norms.get('action_net_mean', 0) > 0:
-        grad_norms['qkv_action_ratio'] = (
-            grad_norms['action_net_mean'] / grad_norms['attention_qkv_mean']
+    if (
+        grad_norms.get("attention_qkv_mean", 0) > 0
+        and grad_norms.get("action_net_mean", 0) > 0
+    ):
+        grad_norms["qkv_action_ratio"] = (
+            grad_norms["action_net_mean"] / grad_norms["attention_qkv_mean"]
         )
-    
+
     return grad_norms
 
 
@@ -648,7 +664,7 @@ if __name__ == "__main__":
         attention_num_heads=8,
         attention_num_layers=3,
     )
-    
+
     # Create dummy observation space
     obs_size = GLOBAL_FEATURES + MAX_CARDS * FEATURES_PER_CARD
     print(f"Observation size: {obs_size}")
@@ -660,7 +676,7 @@ if __name__ == "__main__":
     # Create extractor
     extractor = CardAttentionExtractor(observation_space, config=config)
     print(f"Features dim: {extractor.features_dim}")
-    
+
     # Count parameters
     n_params = sum(p.numel() for p in extractor.parameters())
     print(f"Parameters: {n_params:,}")
@@ -669,11 +685,13 @@ if __name__ == "__main__":
     dummy_obs = torch.rand(4, obs_size)
     features = extractor(dummy_obs, track_attention_stats=True)
     print(f"Output shape: {features.shape}")
-    
+
     # Check attention stats
     stats = extractor.get_attention_stats()
     for layer_name, layer_stats in stats.items():
-        print(f"{layer_name}: logit_std={layer_stats['attn_logit_std']:.3f}, "
-              f"entropy={layer_stats['attn_entropy']:.3f}")
+        print(
+            f"{layer_name}: logit_std={layer_stats['attn_logit_std']:.3f}, "
+            f"entropy={layer_stats['attn_entropy']:.3f}"
+        )
 
     print("✓ CardAttentionExtractor V2 works!")

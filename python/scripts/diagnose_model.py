@@ -120,23 +120,25 @@ def analyze_attention_layers(model):
     obs = torch.randn(1, model.observation_space.shape[0]).to(model.device)
     with torch.no_grad():
         model.policy.features_extractor(obs, track_attention_stats=True)
-    
+
     stats = model.policy.features_extractor.get_attention_stats()
-    
+
     print("\n  Forward Pass Statistics (Tracked):")
     for layer_name, layer_stats in stats.items():
-        logit_std = layer_stats['attn_logit_std']
-        entropy = layer_stats['attn_entropy']
-        
+        logit_std = layer_stats["attn_logit_std"]
+        entropy = layer_stats["attn_entropy"]
+
         std_status = "✅"
         if logit_std > DIAG_ATTENTION_LOGIT_STD_WARNING:
             std_status = "⚠️  SATURATING (High Logits)"
-            
+
         entropy_status = "✅"
         if entropy < DIAG_ATTENTION_ENTROPY_WARNING:
             entropy_status = "⚠️  PEAKY (Low Entropy)"
-            
-        print(f"    {layer_name:10s}: Logit Std={logit_std:7.4f} {std_status}, Entropy={entropy:7.4f} {entropy_status}")
+
+        print(
+            f"    {layer_name:10s}: Logit Std={logit_std:7.4f} {std_status}, Entropy={entropy:7.4f} {entropy_status}"
+        )
 
     # Analyze attention weights
     print("\n  Attention Weights Analysis:")
