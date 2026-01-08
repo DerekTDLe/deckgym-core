@@ -777,24 +777,45 @@ def main():
 
     # Calibrate
     calib_p = subparsers.add_parser("calibrate", help="Calibrate baselines")
-    calib_p.add_argument("--games", type=int, default=EVAL_GAMES_PER_PAIR_CALIBRATE, help="Games per pair")
+    calib_p.add_argument(
+        "--games",
+        type=int,
+        default=EVAL_GAMES_PER_PAIR_CALIBRATE,
+        help="Games per pair",
+    )
 
     # Audit
     audit_p = subparsers.add_parser("audit", help="Audit model")
     audit_p.add_argument("model", help="Path to .zip model")
-    audit_p.add_argument("--games", type=int, default=EVAL_GAMES_PER_PAIR_AUDIT, help=f"Games per baseline (default: {EVAL_GAMES_PER_PAIR_AUDIT})")
-    audit_p.add_argument("--device", default=EVAL_DEFAULT_DEVICE, help=f"Device for ONNX (default: {EVAL_DEFAULT_DEVICE})")
+    audit_p.add_argument(
+        "--games",
+        type=int,
+        default=EVAL_GAMES_PER_PAIR_AUDIT,
+        help=f"Games per baseline (default: {EVAL_GAMES_PER_PAIR_AUDIT})",
+    )
+    audit_p.add_argument(
+        "--device",
+        default=EVAL_DEFAULT_DEVICE,
+        help=f"Device for ONNX (default: {EVAL_DEFAULT_DEVICE})",
+    )
 
     # Bench (Directory)
     bench_p = subparsers.add_parser("bench", help="Benchmark directory")
     bench_p.add_argument("dir", help="Directory containing .zip models")
     bench_p.add_argument(
-        "--games", type=int, default=EVAL_GAMES_PER_PAIR_BENCH, help=f"Games per matchup (default: {EVAL_GAMES_PER_PAIR_BENCH})"
+        "--games",
+        type=int,
+        default=EVAL_GAMES_PER_PAIR_BENCH,
+        help=f"Games per matchup (default: {EVAL_GAMES_PER_PAIR_BENCH})",
     )
     bench_p.add_argument(
         "--no-baselines", action="store_true", help="Exclude baselines from tournament"
     )
-    bench_p.add_argument("--device", default=EVAL_DEFAULT_DEVICE, help=f"Device for ONNX (default: {EVAL_DEFAULT_DEVICE})")
+    bench_p.add_argument(
+        "--device",
+        default=EVAL_DEFAULT_DEVICE,
+        help=f"Device for ONNX (default: {EVAL_DEFAULT_DEVICE})",
+    )
 
     args = parser.parse_args()
 
@@ -810,7 +831,10 @@ def main():
             evaluate_single_model(args.model, args.games, device=args.device)
     elif args.command == "bench":
         benchmark_directory(
-            args.dir, args.games, include_baselines=not args.no_baselines, device=args.device
+            args.dir,
+            args.games,
+            include_baselines=not args.no_baselines,
+            device=args.device,
         )
 
 

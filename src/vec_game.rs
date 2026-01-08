@@ -330,7 +330,7 @@ impl VecGame {
         if self.onnx_pool_names.contains(&name.to_string()) {
             return Err(format!("Opponent '{}' already in pool", name));
         }
-        
+
         let inference = BatchedOnnxInference::new(model_path, deterministic, device)?;
         self.onnx_pool.push(inference);
         self.onnx_pool_names.push(name.to_string());
@@ -350,11 +350,12 @@ impl VecGame {
     #[cfg(feature = "onnx")]
     pub fn set_env_opponent(&mut self, env_idx: usize, opponent_name: &str) -> Result<(), String> {
         // Find opponent index by name
-        let opp_idx = self.onnx_pool_names
+        let opp_idx = self
+            .onnx_pool_names
             .iter()
             .position(|n| n == opponent_name)
             .ok_or_else(|| format!("Opponent '{}' not in pool", opponent_name))?;
-        
+
         if env_idx >= self.n_envs {
             return Err(format!(
                 "env_idx {} out of range (n_envs={})",
@@ -381,7 +382,7 @@ impl VecGame {
     }
 
     /// Remove a specific opponent from the pool (frees GPU memory)
-    /// 
+    ///
     /// Returns true if opponent was found and removed, false otherwise.
     /// If any environment was using this opponent, its assignment is cleared.
     #[cfg(feature = "onnx")]
@@ -951,8 +952,7 @@ impl VecGame {
 
                 let active: Vec<usize> = self.opponent_groups[opp_idx].clone();
 
-                let mut obs_batch: Vec<f32> =
-                    Vec::with_capacity(active.len() * OBSERVATION_SIZE);
+                let mut obs_batch: Vec<f32> = Vec::with_capacity(active.len() * OBSERVATION_SIZE);
                 let mut mask_batch: Vec<bool> =
                     Vec::with_capacity(active.len() * ACTION_SPACE_SIZE);
 

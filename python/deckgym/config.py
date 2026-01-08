@@ -224,7 +224,9 @@ class TrainingConfig:
     device: str = "auto"  # "auto", "cuda", "cpu"
     onnx_device: str = "trt"  # "auto", "cuda", "trt", "cpu"
     pfsp_opponent_device: str = "trt"  # "auto", "cuda", "trt", "cpu"
-    use_gradient_checkpointing: bool = False  # Trade compute for memory (~30% slower, ~60% less VRAM)
+    use_gradient_checkpointing: bool = (
+        False  # Trade compute for memory (~30% slower, ~60% less VRAM)
+    )
     use_tf32: bool = True  # Enable TF32 for faster matmuls on Ampere+ GPUs
 
     # -------------------------------------------------------------------------

@@ -21,8 +21,8 @@ mod tests {
         println!("Loading ONNX model from {}...", model_path);
 
         // Test BatchedOnnxInference
-        let mut inference =
-            BatchedOnnxInference::new(model_path, false, "auto").expect("Failed to load ONNX model");
+        let mut inference = BatchedOnnxInference::new(model_path, false, "auto")
+            .expect("Failed to load ONNX model");
 
         let mut rng = StdRng::seed_from_u64(42);
 
