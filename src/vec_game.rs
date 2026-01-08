@@ -5,7 +5,6 @@
 //! overhead from O(n_envs) calls per step to O(1) calls per batch step.
 
 use rand::{rngs::StdRng, SeedableRng};
-use std::collections::HashMap;
 
 use log::warn;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -216,12 +215,18 @@ pub struct VecGame {
     /// ONNX opponent for self-play (single model, legacy mode)
     #[cfg(feature = "onnx")]
     onnx_opponent: Option<BatchedOnnxInference>,
-    /// ONNX opponent pool for per-episode selection (name -> model)
+    /// ONNX opponent pool for per-episode selection (indexed by pool position)
     #[cfg(feature = "onnx")]
-    onnx_pool: HashMap<String, BatchedOnnxInference>,
-    /// Per-env opponent name (if None, use onnx_opponent; if Some, use from pool)
+    onnx_pool: Vec<BatchedOnnxInference>,
+    /// Pool opponent names (for external API), index matches onnx_pool
     #[cfg(feature = "onnx")]
-    env_opponent_names: Vec<Option<String>>,
+    onnx_pool_names: Vec<String>,
+    /// Per-env opponent index into onnx_pool (None = use onnx_opponent legacy mode)
+    #[cfg(feature = "onnx")]
+    env_opponent_indices: Vec<Option<usize>>,
+    /// Pre-allocated grouping buffer: one Vec per pool opponent
+    #[cfg(feature = "onnx")]
+    opponent_groups: Vec<Vec<usize>>,
     /// RNG for ONNX opponent sampling
     #[cfg(feature = "onnx")]
     onnx_rng: StdRng,
@@ -255,9 +260,13 @@ impl VecGame {
             #[cfg(feature = "onnx")]
             onnx_opponent: None,
             #[cfg(feature = "onnx")]
-            onnx_pool: HashMap::new(),
+            onnx_pool: Vec::new(),
             #[cfg(feature = "onnx")]
-            env_opponent_names: vec![None; n_envs],
+            onnx_pool_names: Vec::new(),
+            #[cfg(feature = "onnx")]
+            env_opponent_indices: vec![None; n_envs],
+            #[cfg(feature = "onnx")]
+            opponent_groups: Vec::new(),
             #[cfg(feature = "onnx")]
             onnx_rng: StdRng::seed_from_u64(base_seed.wrapping_add(999)),
         }
@@ -317,8 +326,16 @@ impl VecGame {
         deterministic: bool,
         device: &str,
     ) -> Result<(), String> {
+        // Check if already exists
+        if self.onnx_pool_names.contains(&name.to_string()) {
+            return Err(format!("Opponent '{}' already in pool", name));
+        }
+        
         let inference = BatchedOnnxInference::new(model_path, deterministic, device)?;
-        self.onnx_pool.insert(name.to_string(), inference);
+        self.onnx_pool.push(inference);
+        self.onnx_pool_names.push(name.to_string());
+        // Add corresponding grouping buffer with capacity for all envs
+        self.opponent_groups.push(Vec::with_capacity(self.n_envs));
         Ok(())
     }
 
@@ -332,9 +349,12 @@ impl VecGame {
     /// * `opponent_name` - Name of opponent in pool (must exist)
     #[cfg(feature = "onnx")]
     pub fn set_env_opponent(&mut self, env_idx: usize, opponent_name: &str) -> Result<(), String> {
-        if !self.onnx_pool.contains_key(opponent_name) {
-            return Err(format!("Opponent '{}' not in pool", opponent_name));
-        }
+        // Find opponent index by name
+        let opp_idx = self.onnx_pool_names
+            .iter()
+            .position(|n| n == opponent_name)
+            .ok_or_else(|| format!("Opponent '{}' not in pool", opponent_name))?;
+        
         if env_idx >= self.n_envs {
             return Err(format!(
                 "env_idx {} out of range (n_envs={})",
@@ -342,7 +362,7 @@ impl VecGame {
             ));
         }
 
-        self.env_opponent_names[env_idx] = Some(opponent_name.to_string());
+        self.env_opponent_indices[env_idx] = Some(opp_idx);
         self.envs[env_idx].opponent_type = Some("onnx".to_string());
         self.envs[env_idx].players = None;
 
@@ -353,15 +373,17 @@ impl VecGame {
     #[cfg(feature = "onnx")]
     pub fn clear_onnx_pool(&mut self) {
         self.onnx_pool.clear();
-        for name in &mut self.env_opponent_names {
-            *name = None;
+        self.onnx_pool_names.clear();
+        self.opponent_groups.clear();
+        for idx in &mut self.env_opponent_indices {
+            *idx = None;
         }
     }
 
     /// Get list of opponent names in the pool
     #[cfg(feature = "onnx")]
     pub fn get_pool_opponent_names(&self) -> Vec<String> {
-        self.onnx_pool.keys().cloned().collect()
+        self.onnx_pool_names.clone()
     }
 
     /// Check if using per-env opponents (pool mode) vs single opponent (legacy mode)
@@ -687,80 +709,87 @@ impl VecGame {
     /// Groups environments by their assigned opponent and runs batched inference per group
     #[cfg(feature = "onnx")]
     fn play_pool_opponent_turns(&mut self, rewards: &mut [f32], dones: &mut [bool]) {
-        use std::collections::HashMap as StdHashMap;
-
         const MAX_OPPONENT_TURNS: usize = 50;
 
         for _ in 0..MAX_OPPONENT_TURNS {
-            // Group envs by opponent name
-            let mut opponent_groups: StdHashMap<String, Vec<usize>> = StdHashMap::new();
+            // Clear grouping buffers (keeps capacity)
+            for group in &mut self.opponent_groups {
+                group.clear();
+            }
 
+            // Group envs by opponent index (no String operations!)
             for (i, env) in self.envs.iter().enumerate() {
                 if !dones[i] && env.state.current_player == 1 && !env.state.is_game_over() {
-                    if let Some(ref opp_name) = self.env_opponent_names[i] {
-                        opponent_groups
-                            .entry(opp_name.clone())
-                            .or_insert_with(Vec::new)
-                            .push(i);
+                    if let Some(opp_idx) = self.env_opponent_indices[i] {
+                        if opp_idx < self.opponent_groups.len() {
+                            self.opponent_groups[opp_idx].push(i);
+                        }
                     }
                 }
             }
 
-            if opponent_groups.is_empty() {
+            // Check if any groups have work
+            let has_work = self.opponent_groups.iter().any(|g| !g.is_empty());
+            if !has_work {
                 break;
             }
 
-            // Process each opponent group
-            for (opponent_name, env_indices) in opponent_groups {
-                if let Some(onnx) = self.onnx_pool.get_mut(&opponent_name) {
-                    // Collect observations and masks for this group
-                    let mut obs_batch: Vec<f32> =
-                        Vec::with_capacity(env_indices.len() * OBSERVATION_SIZE);
-                    let mut mask_batch: Vec<bool> =
-                        Vec::with_capacity(env_indices.len() * ACTION_SPACE_SIZE);
+            // Process each opponent group by index
+            for opp_idx in 0..self.onnx_pool.len() {
+                if self.opponent_groups[opp_idx].is_empty() {
+                    continue;
+                }
 
-                    for &i in &env_indices {
-                        obs_batch.extend(get_observation_tensor(&self.envs[i].state, 1));
-                        mask_batch.extend(get_action_mask(&self.envs[i].state));
-                    }
+                // Collect env indices for this opponent
+                let env_indices: Vec<usize> = self.opponent_groups[opp_idx].clone();
 
-                    // Run batched inference for this opponent
-                    let actions = onnx.predict_batch(
-                        &obs_batch,
-                        &mask_batch,
-                        env_indices.len(),
-                        &mut self.onnx_rng,
-                    );
+                // Collect observations and masks for this group
+                let mut obs_batch: Vec<f32> =
+                    Vec::with_capacity(env_indices.len() * OBSERVATION_SIZE);
+                let mut mask_batch: Vec<bool> =
+                    Vec::with_capacity(env_indices.len() * ACTION_SPACE_SIZE);
 
-                    // Apply actions
-                    for (j, &env_idx) in env_indices.iter().enumerate() {
-                        let action_idx = actions[j];
-                        let _ = catch_unwind(AssertUnwindSafe(|| {
-                            let env = &mut self.envs[env_idx];
+                for &i in &env_indices {
+                    obs_batch.extend(get_observation_tensor(&self.envs[i].state, 1));
+                    mask_batch.extend(get_action_mask(&self.envs[i].state));
+                }
 
-                            let indexed_actions = get_indexed_actions(&env.state);
-                            if let Some((_, action)) =
-                                indexed_actions.iter().find(|(idx, _)| *idx == action_idx)
-                            {
-                                apply_action(&mut env.rng, &mut env.state, action);
-                            } else if let Some((_, action)) = indexed_actions.first() {
-                                apply_action(&mut env.rng, &mut env.state, action);
-                            }
+                // Run batched inference for this opponent
+                let actions = self.onnx_pool[opp_idx].predict_batch(
+                    &obs_batch,
+                    &mask_batch,
+                    env_indices.len(),
+                    &mut self.onnx_rng,
+                );
 
-                            if env.state.is_game_over() {
-                                dones[env_idx] = true;
-                                rewards[env_idx] = env.calculate_reward(0);
-                            }
-                        }))
-                        .map_err(|_| {
-                            warn!(
-                                "Panic caught in environment {} during pool ONNX action! Marking done.",
-                                env_idx
-                            );
+                // Apply actions
+                for (j, &env_idx) in env_indices.iter().enumerate() {
+                    let action_idx = actions[j];
+                    let _ = catch_unwind(AssertUnwindSafe(|| {
+                        let env = &mut self.envs[env_idx];
+
+                        let indexed_actions = get_indexed_actions(&env.state);
+                        if let Some((_, action)) =
+                            indexed_actions.iter().find(|(idx, _)| *idx == action_idx)
+                        {
+                            apply_action(&mut env.rng, &mut env.state, action);
+                        } else if let Some((_, action)) = indexed_actions.first() {
+                            apply_action(&mut env.rng, &mut env.state, action);
+                        }
+
+                        if env.state.is_game_over() {
                             dones[env_idx] = true;
-                            rewards[env_idx] = 0.0;
-                        });
-                    }
+                            rewards[env_idx] = env.calculate_reward(0);
+                        }
+                    }))
+                    .map_err(|_| {
+                        warn!(
+                            "Panic caught in environment {} during pool ONNX action! Marking done.",
+                            env_idx
+                        );
+                        dones[env_idx] = true;
+                        rewards[env_idx] = 0.0;
+                    });
                 }
             }
         }
@@ -844,8 +873,6 @@ impl VecGame {
     /// Play initial opponent turns for reset envs in pool mode
     #[cfg(feature = "onnx")]
     fn play_pool_initial_turns(&mut self, was_done: &[bool], observations: &mut Vec<f32>) {
-        use std::collections::HashMap as StdHashMap;
-
         // Find reset envs where opponent goes first
         let mut needs_initial: Vec<usize> = Vec::new();
         for (i, env) in self.envs.iter().enumerate() {
@@ -861,65 +888,73 @@ impl VecGame {
         // Play opponent turns until agent's turn
         const MAX_TURNS: usize = 50;
         for _ in 0..MAX_TURNS {
-            // Group active envs by opponent
-            let mut opponent_groups: StdHashMap<String, Vec<usize>> = StdHashMap::new();
+            // Clear grouping buffers (keeps capacity)
+            for group in &mut self.opponent_groups {
+                group.clear();
+            }
 
+            // Group active envs by opponent index
             for &i in &needs_initial {
                 if self.envs[i].state.current_player == 1 && !self.envs[i].state.is_game_over() {
-                    if let Some(ref opp_name) = self.env_opponent_names[i] {
-                        opponent_groups
-                            .entry(opp_name.clone())
-                            .or_insert_with(Vec::new)
-                            .push(i);
+                    if let Some(opp_idx) = self.env_opponent_indices[i] {
+                        if opp_idx < self.opponent_groups.len() {
+                            self.opponent_groups[opp_idx].push(i);
+                        }
                     }
                 }
             }
 
-            if opponent_groups.is_empty() {
+            // Check if any groups have work
+            let has_work = self.opponent_groups.iter().any(|g| !g.is_empty());
+            if !has_work {
                 break;
             }
 
-            // Process each opponent group
-            for (opponent_name, active) in opponent_groups {
-                if let Some(onnx) = self.onnx_pool.get_mut(&opponent_name) {
-                    let mut obs_batch: Vec<f32> =
-                        Vec::with_capacity(active.len() * OBSERVATION_SIZE);
-                    let mut mask_batch: Vec<bool> =
-                        Vec::with_capacity(active.len() * ACTION_SPACE_SIZE);
+            // Process each opponent group by index
+            for opp_idx in 0..self.onnx_pool.len() {
+                if self.opponent_groups[opp_idx].is_empty() {
+                    continue;
+                }
 
-                    for &i in &active {
-                        obs_batch.extend(get_observation_tensor(&self.envs[i].state, 1));
-                        mask_batch.extend(get_action_mask(&self.envs[i].state));
-                    }
+                let active: Vec<usize> = self.opponent_groups[opp_idx].clone();
 
-                    let actions = onnx.predict_batch(
-                        &obs_batch,
-                        &mask_batch,
-                        active.len(),
-                        &mut self.onnx_rng,
-                    );
+                let mut obs_batch: Vec<f32> =
+                    Vec::with_capacity(active.len() * OBSERVATION_SIZE);
+                let mut mask_batch: Vec<bool> =
+                    Vec::with_capacity(active.len() * ACTION_SPACE_SIZE);
 
-                    for (j, &env_idx) in active.iter().enumerate() {
-                        let action_idx = actions[j];
-                        let _ = catch_unwind(AssertUnwindSafe(|| {
-                            let env = &mut self.envs[env_idx];
+                for &i in &active {
+                    obs_batch.extend(get_observation_tensor(&self.envs[i].state, 1));
+                    mask_batch.extend(get_action_mask(&self.envs[i].state));
+                }
 
-                            let indexed_actions = get_indexed_actions(&env.state);
-                            if let Some((_, action)) =
-                                indexed_actions.iter().find(|(idx, _)| *idx == action_idx)
-                            {
-                                apply_action(&mut env.rng, &mut env.state, action);
-                            } else if let Some((_, action)) = indexed_actions.first() {
-                                apply_action(&mut env.rng, &mut env.state, action);
-                            }
-                        }))
-                        .map_err(|_| {
-                            warn!(
-                                "Panic caught in environment {} during pool initial turn!",
-                                env_idx
-                            );
-                        });
-                    }
+                let actions = self.onnx_pool[opp_idx].predict_batch(
+                    &obs_batch,
+                    &mask_batch,
+                    active.len(),
+                    &mut self.onnx_rng,
+                );
+
+                for (j, &env_idx) in active.iter().enumerate() {
+                    let action_idx = actions[j];
+                    let _ = catch_unwind(AssertUnwindSafe(|| {
+                        let env = &mut self.envs[env_idx];
+
+                        let indexed_actions = get_indexed_actions(&env.state);
+                        if let Some((_, action)) =
+                            indexed_actions.iter().find(|(idx, _)| *idx == action_idx)
+                        {
+                            apply_action(&mut env.rng, &mut env.state, action);
+                        } else if let Some((_, action)) = indexed_actions.first() {
+                            apply_action(&mut env.rng, &mut env.state, action);
+                        }
+                    }))
+                    .map_err(|_| {
+                        warn!(
+                            "Panic caught in environment {} during pool initial turn!",
+                            env_idx
+                        );
+                    });
                 }
             }
         }
