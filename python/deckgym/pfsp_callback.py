@@ -431,16 +431,18 @@ class PFSPCallback(BaseCallback):
                     opp_wr = data["wins"] / total
                 else:
                     opp_wr = 0.5  # Untested opponents get neutral priority
-                
+
                 # We store (name, winrate, added_at_step)
                 candidates.append((name, opp_wr, data.get("added_at_step", 0)))
 
             if candidates:
                 # Remove the opponent with LOWEST winrate (easiest to beat)
                 # If winrates are tied, remove the OLDEST one (lowest added_at_step)
-                weakest_name, weakest_wr, _ = min(candidates, key=lambda x: (x[1], x[2]))
+                weakest_name, weakest_wr, _ = min(
+                    candidates, key=lambda x: (x[1], x[2])
+                )
                 weakest_path = Path(self.opponent_pool[weakest_name]["path"])
-                
+
                 # 1. Remove from selectable pool IMMEDIATELY
                 del self.opponent_pool[weakest_name]
 
@@ -460,13 +462,15 @@ class PFSPCallback(BaseCallback):
                         self.env.vec_game.remove_onnx_from_pool(weakest_name)
                     except Exception as e:
                         if self.verbose > 0:
-                            print(f"[PFSP WARNING] Failed to remove from Rust pool: {e}")
-                
+                            print(
+                                f"[PFSP WARNING] Failed to remove from Rust pool: {e}"
+                            )
+
                 if self.verbose > 0:
                     print(
                         f"[PFSP] Evicted weakest opponent: {weakest_name} (WR: {weakest_wr:.1%})"
                     )
-                
+
                 gc.collect()
             else:
                 if self.verbose > 0:

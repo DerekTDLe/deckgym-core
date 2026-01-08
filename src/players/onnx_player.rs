@@ -106,7 +106,6 @@ impl OnnxPlayer {
             .commit_from_file(model_path)
             .map_err(|e| format!("Failed to load ONNX model from '{}': {}", model_path, e))?;
 
-
         Ok(Self {
             session,
             deterministic,
@@ -247,7 +246,6 @@ impl BatchedOnnxInference {
             .map_err(|e| format!("Failed to set thread count: {}", e))?
             .commit_from_file(model_path)
             .map_err(|e| format!("Failed to load ONNX model: {}", e))?;
-
 
         Ok(Self {
             session,
