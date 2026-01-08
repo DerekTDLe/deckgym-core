@@ -51,7 +51,7 @@ const MAX_RETREAT_COST: f32 = 4.0;
 // --- Feature Dimensions ---
 
 /// Card features (intrinsic properties)
-pub const CARD_INTRINSIC_FEATURES: usize = 110;
+pub const CARD_INTRINSIC_FEATURES: usize = 113;
 // Breakdown:
 // 1 (is_pokemon) + 1 (stage) + 10 (energy type) + 2 (hp) + 10 (weakness) + 1 (ko)
 // + 10 (attached en) + 4 (atk1) + 13 (atk1 cat) + 4 (atk2) + 13 (atk2 cat)
