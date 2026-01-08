@@ -50,16 +50,16 @@ ppo:
 training:
   total_timesteps: 30000000
   checkpoint_freq: 10000
-  n_envs: 20 # Sweet spot for current architecture
+  n_envs: 12 # Maybe less overheads? Doesn't change much the FPS
   use_batched_env: true
   device: "auto"
   onnx_device: "auto"
-  pfsp_opponent_device: "cpu"
+  pfsp_opponent_device: "trt" # GPU wont OOM with current settings
   frozen_opponent_update_rollouts: 8
 
   # PFSP settings
   use_pfsp: true
-  pfsp_pool_size: 10
+  pfsp_pool_size: 8 # Avoid OOM
   pfsp_add_every_n_rollouts: 8
   pfsp_select_every_n_rollouts: 2
   pfsp_priority_exponent: 2.0
