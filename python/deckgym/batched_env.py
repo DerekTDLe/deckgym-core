@@ -19,6 +19,8 @@ from stable_baselines3.common.vec_env.base_vec_env import (
     VecEnvStepReturn,
 )
 
+from deckgym.config import DEFAULT_CONFIG
+
 
 class BatchedDeckGymEnv(VecEnv):
     """
@@ -36,6 +38,7 @@ class BatchedDeckGymEnv(VecEnv):
         deck_loader,
         opponent_type: Optional[str] = "e2",
         seed: Optional[int] = None,
+        config=None,
     ):
         """
         Initialize the batched environment.
@@ -45,6 +48,7 @@ class BatchedDeckGymEnv(VecEnv):
             deck_loader: Object with sample_pair() method returning (deck_a_str, deck_b_str)
             opponent_type: Bot opponent type ("e2", "e3", etc.) or None for self-play
             seed: Optional random seed
+            config: Optional TrainingConfig object
         """
         import deckgym
 
@@ -56,6 +60,11 @@ class BatchedDeckGymEnv(VecEnv):
         deck_pairs = [self._sample_deck_pair() for _ in range(n_envs)]
 
         # Create the Rust-side vectorized game
+        if config is not None:
+            self.config = config
+        else:
+            self.config = getattr(deck_loader, "config", DEFAULT_CONFIG)
+
         self.vec_game = deckgym.VecGame(
             deck_pairs,
             base_seed=seed,
