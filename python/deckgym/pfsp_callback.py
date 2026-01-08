@@ -211,6 +211,7 @@ class PFSPCallback(BaseCallback):
             else:
                 opp_winrate = data["wins"] / total
             priorities[name] = opp_winrate**self.priority_exponent
+        total_priority = sum(priorities.values())
 
         if total_priority <= 0:
             return np.random.choice(list(self.opponent_pool.keys()))

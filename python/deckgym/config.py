@@ -81,6 +81,11 @@ DIAG_LARGE_GRADIENT_THRESHOLD = 100  # Flag gradients > 100
 DIAG_WEIGHT_STD_MIN = 0.001  # Unusual if std < 0.001
 DIAG_WEIGHT_STD_MAX = 1.0  # Unusual if std > 1.0
 
+# Attention-specific diagnostics
+DIAG_ATTENTION_LOGIT_STD_WARNING = 10.0  # Softmax saturation if > 10
+DIAG_ATTENTION_ENTROPY_WARNING = 0.5  # Attention too peaky if < 0.5
+
+
 # =============================================================================
 # MODEL ARCHITECTURE DEFAULTS (attention_policy.py)
 # =============================================================================
@@ -89,23 +94,23 @@ DIAG_WEIGHT_STD_MAX = 1.0  # Unusual if std > 1.0
 MODEL_EMBED_DIM_DEFAULT = 256  # Transformer embedding dimension
 MODEL_NUM_HEADS_DEFAULT = 8  # Multi-head attention heads
 MODEL_NUM_LAYERS_DEFAULT = 3  # Number of transformer layers
-MODEL_ATTENTION_DROPOUT = 0.15  # Dropout in attention layers
+MODEL_ATTENTION_DROPOUT = 0.1  # Dropout in attention layers (reduced from 0.15)
 MODEL_ATTENTION_POOL_QUERIES = 4  # Number of learnable queries for pooling
 
+# Attention stability parameters (NEW)
+MODEL_ATTENTION_TEMPERATURE = 1.0  # Softmax temperature (increase if saturating)
+MODEL_INIT_RESIDUAL_SCALE = True  # Scale residual branch outputs for stability
+
 # Policy/Value network architecture (MLP heads after attention/pooling)
-MODEL_POLICY_LAYERS_DEFAULT = (512, 256, 128)
-MODEL_VALUE_LAYERS_DEFAULT = (512, 256)
+# Reduced depth to improve gradient flow from loss to attention
+MODEL_POLICY_LAYERS_DEFAULT = (256, 128)  # Was (512, 256, 128)
+MODEL_VALUE_LAYERS_DEFAULT = (256, 128)  # Was (512, 256)
 
 # Internal architecture scaling and thresholds
-# These control the dimensionality and behavior of the CardAttentionExtractor
 MODEL_GLOBAL_PROJ_DIM = 128  # Projection size for non-card (global) features
-MODEL_FF_EXPANSION_FACTOR = (
-    4  # Transformer FF block expansion ratio (e.g., 256 -> 1024)
-)
-MODEL_OUTPUT_PROJ_FACTOR = (
-    2  # Reduces pooled features output size relative to embed_dim
-)
-MODEL_MASK_THRESHOLD = 1e-6  # Threshold to detect all-zero padding in card slots
+MODEL_FF_EXPANSION_FACTOR = 4  # Transformer FF block expansion ratio
+MODEL_OUTPUT_PROJ_FACTOR = 2  # Output size = embed_dim * this factor
+MODEL_MASK_THRESHOLD = 1e-6  # Threshold to detect all-zero padding
 
 
 # =============================================================================
@@ -162,16 +167,22 @@ class TrainingConfig:
     # Network Architecture
     # -------------------------------------------------------------------------
     use_attention: bool = True
-    attention_embed_dim: int = 256  # Transformer embedding dimension
-    attention_num_heads: int = 8  # Multi-head attention heads
-    attention_num_layers: int = 3  # Number of transformer layers
+    attention_embed_dim: int = MODEL_EMBED_DIM_DEFAULT
+    attention_num_heads: int = MODEL_NUM_HEADS_DEFAULT
+    attention_num_layers: int = MODEL_NUM_LAYERS_DEFAULT
     use_silu: bool = True  # Use SiLU activation (vs ReLU)
     attention_global_proj_dim: int = MODEL_GLOBAL_PROJ_DIM
     attention_ff_expansion_factor: int = MODEL_FF_EXPANSION_FACTOR
     attention_output_proj_factor: int = MODEL_OUTPUT_PROJ_FACTOR
     attention_mask_threshold: float = MODEL_MASK_THRESHOLD
+    
+    # Attention stability parameters (NEW)
+    attention_dropout: float = MODEL_ATTENTION_DROPOUT
+    attention_pool_queries: int = MODEL_ATTENTION_POOL_QUERIES
+    attention_temperature: float = MODEL_ATTENTION_TEMPERATURE
+    attention_init_residual_scale: bool = MODEL_INIT_RESIDUAL_SCALE
 
-    # Policy/Value head architecture [512, 256, 128] means 3 layers
+    # Policy/Value head architecture
     policy_layers: Tuple[int, ...] = MODEL_POLICY_LAYERS_DEFAULT
     value_layers: Tuple[int, ...] = MODEL_VALUE_LAYERS_DEFAULT
 
@@ -213,6 +224,72 @@ class TrainingConfig:
     # -------------------------------------------------------------------------
     # Methods
     # -------------------------------------------------------------------------
+
+    def __post_init__(self):
+        """Perform type casting to ensure robustness after YAML loading or manual init."""
+        # Numeric fields that MUST be float
+        float_fields = [
+            "base_learning_rate",
+            "min_learning_rate",
+            "warmup_ratio",
+            "gamma",
+            "gae_lambda",
+            "ent_coef",
+            "vf_coef",
+            "clip_range",
+            "max_grad_norm",
+            "target_kl",
+            "attention_mask_threshold",
+            "attention_dropout",
+            "attention_temperature",
+            "pfsp_priority_exponent",
+            "pfsp_min_winrate_to_add",
+        ]
+        for field_name in float_fields:
+            val = getattr(self, field_name)
+            if val is not None:
+                try:
+                    setattr(self, field_name, float(val))
+                except (ValueError, TypeError):
+                    pass
+
+        # Numeric fields that MUST be int
+        int_fields = [
+            "total_timesteps",
+            "checkpoint_freq",
+            "n_steps",
+            "batch_size",
+            "n_epochs",
+            "attention_embed_dim",
+            "attention_num_heads",
+            "attention_num_layers",
+            "attention_global_proj_dim",
+            "attention_ff_expansion_factor",
+            "attention_output_proj_factor",
+            "attention_pool_queries",
+            "frozen_opponent_update_rollouts",
+            "pfsp_pool_size",
+            "pfsp_add_every_n_rollouts",
+            "pfsp_select_every_n_rollouts",
+            "pfsp_winrate_window",
+            "n_envs",
+            "max_turns",
+            "max_actions_per_turn",
+            "max_total_actions",
+        ]
+        for field_name in int_fields:
+            val = getattr(self, field_name)
+            if val is not None:
+                try:
+                    setattr(self, field_name, int(val))
+                except (ValueError, TypeError):
+                    pass
+
+        # Ensure tuples/lists
+        if isinstance(self.policy_layers, list):
+            self.policy_layers = tuple(self.policy_layers)
+        if isinstance(self.value_layers, list):
+            self.value_layers = tuple(self.value_layers)
 
     def get_learning_rate_schedule(self, total_timesteps: Optional[int] = None):
         """
@@ -276,6 +353,13 @@ model:
   attention_ff_expansion_factor: {self.attention_ff_expansion_factor}
   attention_output_proj_factor: {self.attention_output_proj_factor}
   attention_mask_threshold: {self.attention_mask_threshold}
+  
+  # Stability parameters
+  attention_dropout: {self.attention_dropout}
+  attention_pool_queries: {self.attention_pool_queries}
+  attention_temperature: {self.attention_temperature}
+  attention_init_residual_scale: {str(self.attention_init_residual_scale).lower()}
+  
   use_silu: {str(self.use_silu).lower()}
 
   net_arch:
@@ -355,6 +439,11 @@ environment:
                 "attention_ff_expansion_factor",
                 "attention_output_proj_factor",
                 "attention_mask_threshold",
+                # New stability params
+                "attention_dropout",
+                "attention_pool_queries",
+                "attention_temperature",
+                "attention_init_residual_scale",
                 "use_silu",
             ]:
                 if key in model:
@@ -415,6 +504,7 @@ environment:
                 if key in env:
                     flat_config[key] = env[key]
 
+        # Use class initializer to trigger __post_init__ casting
         return cls(**flat_config)
 
     def save_yaml(self, path: str):
@@ -422,10 +512,78 @@ environment:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
             f.write(self.to_yaml())
+    
+    def validate(self) -> list:
+        """
+        Validate configuration and return list of warnings.
+        
+        Returns empty list if all good.
+        """
+        warnings = []
+        
+        # Architecture checks
+        if self.attention_embed_dim % self.attention_num_heads != 0:
+            warnings.append(
+                f"attention_embed_dim ({self.attention_embed_dim}) must be divisible by "
+                f"attention_num_heads ({self.attention_num_heads})"
+            )
+        
+        if self.attention_embed_dim < 64:
+            warnings.append(f"attention_embed_dim ({self.attention_embed_dim}) is very small, may underfit")
+        
+        if self.attention_embed_dim > 1024:
+            warnings.append(f"attention_embed_dim ({self.attention_embed_dim}) is very large, may be slow")
+        
+        if self.attention_num_layers > 6:
+            warnings.append(
+                f"attention_num_layers ({self.attention_num_layers}) is high, "
+                "consider gradient checkpointing"
+            )
+        
+        # Stability checks
+        if self.attention_temperature < 0.5:
+            warnings.append(
+                f"attention_temperature ({self.attention_temperature}) is low, "
+                "may cause gradient issues"
+            )
+        
+        if self.attention_dropout > 0.3:
+            warnings.append(
+                f"attention_dropout ({self.attention_dropout}) is high, "
+                "may slow learning"
+            )
+        
+        if not self.attention_init_residual_scale and self.attention_num_layers > 2:
+            warnings.append(
+                "attention_init_residual_scale=False with >2 layers may cause instability"
+            )
+        
+        # Head checks
+        if len(self.policy_layers) > 4:
+            warnings.append(
+                f"policy_layers has {len(self.policy_layers)} layers, "
+                "may dilute gradients from attention"
+            )
+        
+        return warnings
 
 
 # Default configuration
 DEFAULT_CONFIG = TrainingConfig()
+
+# Conservative config for unstable training
+CONSERVATIVE_CONFIG = TrainingConfig(
+    attention_embed_dim=256,
+    attention_num_heads=8,
+    attention_num_layers=2,  # Shallower
+    attention_ff_expansion_factor=2,  # Smaller FF
+    attention_temperature=1.5,  # Softer attention
+    attention_dropout=0.15,
+    attention_init_residual_scale=True,
+    policy_layers=(256, 128),
+    value_layers=(256,),
+    max_grad_norm=0.5,  # More aggressive clipping
+)
 
 
 # =============================================================================
@@ -445,16 +603,46 @@ def main():
         help="Generate a YAML template at the specified path",
     )
     parser.add_argument(
+        "--preset",
+        "-p",
+        type=str,
+        choices=["default", "conservative"],
+        default="default",
+        help="Which preset to use for generation",
+    )
+    parser.add_argument(
         "--print-constants",
         "-c",
         action="store_true",
         help="Print all observation/action space constants",
     )
+    parser.add_argument(
+        "--validate",
+        "-v",
+        type=str,
+        metavar="PATH",
+        help="Validate a YAML config file",
+    )
     args = parser.parse_args()
 
+    presets = {
+        "default": DEFAULT_CONFIG,
+        "conservative": CONSERVATIVE_CONFIG,
+    }
+
     if args.generate_template:
-        DEFAULT_CONFIG.save_yaml(args.generate_template)
-        print(f"Generated template: {args.generate_template}")
+        config = presets[args.preset]
+        config.save_yaml(args.generate_template)
+        print(f"Generated {args.preset} config at: {args.generate_template}")
+    elif args.validate:
+        config = TrainingConfig.from_yaml(args.validate)
+        warnings = config.validate()
+        if warnings:
+            print("Warnings:")
+            for w in warnings:
+                print(f"  ⚠ {w}")
+        else:
+            print("✓ Configuration is valid")
     elif args.print_constants:
         print("=== Observation Space ===")
         print(f"GLOBAL_FEATURES: {GLOBAL_FEATURES}")
@@ -467,6 +655,18 @@ def main():
         print(f"NUM_ATTACK_EFFECT_CATEGORIES: {NUM_ATTACK_EFFECT_CATEGORIES}")
         print(f"NUM_ABILITY_EFFECT_CATEGORIES: {NUM_ABILITY_EFFECT_CATEGORIES}")
         print(f"NUM_SUPPORTER_EFFECT_CATEGORIES: {NUM_SUPPORTER_EFFECT_CATEGORIES}")
+        print(f"\n=== Model Architecture ===")
+        print(f"MODEL_EMBED_DIM_DEFAULT: {MODEL_EMBED_DIM_DEFAULT}")
+        print(f"MODEL_NUM_HEADS_DEFAULT: {MODEL_NUM_HEADS_DEFAULT}")
+        print(f"MODEL_NUM_LAYERS_DEFAULT: {MODEL_NUM_LAYERS_DEFAULT}")
+        print(f"MODEL_ATTENTION_TEMPERATURE: {MODEL_ATTENTION_TEMPERATURE}")
+        print(f"MODEL_INIT_RESIDUAL_SCALE: {MODEL_INIT_RESIDUAL_SCALE}")
+        print(f"MODEL_POLICY_LAYERS_DEFAULT: {MODEL_POLICY_LAYERS_DEFAULT}")
+        print(f"MODEL_VALUE_LAYERS_DEFAULT: {MODEL_VALUE_LAYERS_DEFAULT}")
+        print(f"\n=== Diagnostic Thresholds ===")
+        print(f"DIAG_GRADIENT_IMBALANCE_WARNING: {DIAG_GRADIENT_IMBALANCE_WARNING}")
+        print(f"DIAG_ATTENTION_LOGIT_STD_WARNING: {DIAG_ATTENTION_LOGIT_STD_WARNING}")
+        print(f"DIAG_ATTENTION_ENTROPY_WARNING: {DIAG_ATTENTION_ENTROPY_WARNING}")
         print(f"\n=== Reward ===")
         print(f"REWARD_WIN_BASE: {REWARD_WIN_BASE}")
         print(f"REWARD_LOSS_BASE: {REWARD_LOSS_BASE}")
