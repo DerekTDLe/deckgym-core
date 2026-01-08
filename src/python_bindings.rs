@@ -1171,6 +1171,60 @@ impl PyVecGame {
         self.inner.clear_onnx_opponent();
     }
 
+    /// Add an ONNX model to the opponent pool for per-episode selection
+    ///
+    /// Models in the pool can be assigned to individual environments using set_env_opponent.
+    /// This enables AlphaStar-style PFSP where each episode can have a different opponent.
+    ///
+    /// Args:
+    ///     name: Unique name for this opponent (e.g., "pfsp_6815k")
+    ///     model_path: Path to the .onnx model file
+    ///     deterministic: If True, always pick best action; if False, sample
+    #[cfg(feature = "onnx")]
+    fn add_onnx_to_pool(
+        &mut self,
+        name: &str,
+        model_path: &str,
+        deterministic: bool,
+    ) -> PyResult<()> {
+        self.inner
+            .add_onnx_to_pool(name, model_path, deterministic)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))
+    }
+
+    /// Set the opponent for a specific environment (from the pool)
+    ///
+    /// Call this per-episode to implement PFSP opponent selection.
+    /// The opponent must have been added to the pool first.
+    ///
+    /// Args:
+    ///     env_idx: Environment index
+    ///     opponent_name: Name of opponent in pool
+    #[cfg(feature = "onnx")]
+    fn set_env_opponent(&mut self, env_idx: usize, opponent_name: &str) -> PyResult<()> {
+        self.inner
+            .set_env_opponent(env_idx, opponent_name)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))
+    }
+
+    /// Clear all opponents from pool and reset per-env assignments
+    #[cfg(feature = "onnx")]
+    fn clear_onnx_pool(&mut self) {
+        self.inner.clear_onnx_pool();
+    }
+
+    /// Get list of opponent names in the pool
+    #[cfg(feature = "onnx")]
+    fn get_pool_opponent_names(&self) -> Vec<String> {
+        self.inner.get_pool_opponent_names()
+    }
+
+    /// Check if using per-env opponents (pool mode) vs single opponent (legacy mode)
+    #[cfg(feature = "onnx")]
+    fn is_using_pool(&self) -> bool {
+        self.inner.is_using_pool()
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "PyVecGame(n_envs={}, obs_size={}, action_size={})",

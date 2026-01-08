@@ -13,7 +13,7 @@ paths:
   save_path: "models/rl_bot_pfsp_conservative"
   checkpoint_dir: "./checkpoints/pfsp_conservative/"
   tensorboard_dir: "./logs/pfsp_conservative/"
-  resume_path: "./checkpoints/pfsp_pool/pfsp_6815k.zip"  # Best from pool benchmark (1670 Elo)
+  resume_path: null # Model change
 
 model:
   # Same architecture as pfsp_optimal (proven to work)
@@ -29,7 +29,7 @@ model:
 
 ppo:
   # CONSERVATIVE hyperparameters (key changes)
-  learning_rate: 3e-5              # Was 1e-4 (÷3) - prevents KL explosion
+  learning_rate: 1e-5              # Was 1e-4 (÷3) - prevents KL explosion
   min_learning_rate: 5e-6          # Was 1e-5 (÷2)
   warmup_ratio: 0.02
 
@@ -75,7 +75,3 @@ environment:
 # - Clip fraction: ~0.10-0.15 (reduced from 0.20)
 # - Slower but monotonic improvement
 # - PFSP pool should continue growing past 7M steps
-#
-# Resume from best checkpoint:
-# python scripts/train.py --config configs/pfsp_conservative.yaml \
-#   --resume checkpoints/pfsp_training/rl_bot_6400000_steps.zip
