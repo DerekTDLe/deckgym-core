@@ -11,7 +11,10 @@ from deckgym.config import (
     DIAG_LARGE_GRADIENT_THRESHOLD,
     DIAG_WEIGHT_STD_MIN,
     DIAG_WEIGHT_STD_MAX,
+    DIAG_ATTENTION_LOGIT_STD_WARNING,
+    DIAG_ATTENTION_ENTROPY_WARNING,
 )
+from deckgym.attention_policy import diagnose_gradients
 
 
 def analyze_gradients(model):
@@ -64,6 +67,14 @@ def analyze_gradients(model):
         else:
             print("  ✅ Balanced")
 
+        # Use the internal group diagnostics
+        print("\n  Gradients by Component Group:")
+        group_stats = diagnose_gradients(model.policy)
+        for key, val in group_stats.items():
+            if "_max" in key:
+                name = key.replace("_max", "")
+                print(f"    {name:25s}: Max={val:10.6f}")
+
         return ratio
     return None
 
@@ -104,7 +115,31 @@ def analyze_attention_layers(model):
 
     print("  ✅ Attention layers present")
 
+    # Perform a forward pass with tracking ENABLED
+    model.policy.eval()
+    obs = torch.randn(1, model.observation_space.shape[0]).to(model.device)
+    with torch.no_grad():
+        model.policy.features_extractor(obs, track_attention_stats=True)
+    
+    stats = model.policy.features_extractor.get_attention_stats()
+    
+    print("\n  Forward Pass Statistics (Tracked):")
+    for layer_name, layer_stats in stats.items():
+        logit_std = layer_stats['attn_logit_std']
+        entropy = layer_stats['attn_entropy']
+        
+        std_status = "✅"
+        if logit_std > DIAG_ATTENTION_LOGIT_STD_WARNING:
+            std_status = "⚠️  SATURATING (High Logits)"
+            
+        entropy_status = "✅"
+        if entropy < DIAG_ATTENTION_ENTROPY_WARNING:
+            entropy_status = "⚠️  PEAKY (Low Entropy)"
+            
+        print(f"    {layer_name:10s}: Logit Std={logit_std:7.4f} {std_status}, Entropy={entropy:7.4f} {entropy_status}")
+
     # Analyze attention weights
+    print("\n  Attention Weights Analysis:")
     for name, param in model.policy.named_parameters():
         if (
             "attention" in name.lower()
@@ -113,7 +148,7 @@ def analyze_attention_layers(model):
             or "v_proj" in name
         ):
             weights = param.data.cpu().numpy().flatten()
-            print(f"  {name:55s}: μ={weights.mean():7.4f}, σ={weights.std():6.4f}")
+            print(f"    {name:55s}: μ={weights.mean():7.4f}, σ={weights.std():6.4f}")
 
 
 def main():
