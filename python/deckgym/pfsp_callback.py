@@ -167,9 +167,9 @@ class PFSPCallback(BaseCallback):
 
             # Add to Rust pool
             device = (
-                getattr(self.env.config, "pfsp_opponent_device", "cpu")
+                getattr(self.env.config, "pfsp_opponent_device", "trt")
                 if hasattr(self.env, "config")
-                else "cpu"
+                else "trt"
             )
             self.env.vec_game.add_onnx_to_pool(
                 opp_name, opp_data["onnx_path"], False, device
@@ -402,9 +402,9 @@ class PFSPCallback(BaseCallback):
 
                 # Add to Rust pool
                 device = (
-                    getattr(self.env.config, "pfsp_opponent_device", "cpu")
+                    getattr(self.env.config, "pfsp_opponent_device", "trt")
                     if hasattr(self.env, "config")
-                    else "cpu"
+                    else "trt"
                 )
                 self.env.vec_game.add_onnx_to_pool(
                     checkpoint_name, onnx_path, False, device
@@ -552,9 +552,9 @@ class PFSPCallback(BaseCallback):
 
                 # Set in VecGame
                 device = (
-                    getattr(self.env.config, "pfsp_opponent_device", "cpu")
+                    getattr(self.env.config, "pfsp_opponent_device", "trt")
                     if hasattr(self.env, "config")
-                    else "cpu"
+                    else "trt"
                 )
                 self.env.vec_game.set_onnx_opponent(
                     onnx_path, deterministic=False, device=device

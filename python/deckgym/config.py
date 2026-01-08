@@ -70,6 +70,7 @@ EVAL_GAMES_PER_PAIR_CALIBRATE = 50
 EVAL_GAMES_PER_PAIR_AUDIT = 40
 EVAL_GAMES_PER_PAIR_BENCH = 20
 EVAL_REPORTS_DIR = "eval_reports"
+EVAL_DEFAULT_DEVICE = "trt"
 
 
 # =============================================================================

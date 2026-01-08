@@ -243,6 +243,8 @@ impl BatchedOnnxInference {
             .map_err(|e| format!("Failed to set execution providers: {}", e))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| format!("Failed to set optimization level: {}", e))?
+            .with_intra_threads(1)
+            .map_err(|e| format!("Failed to set thread count: {}", e))?
             .commit_from_file(model_path)
             .map_err(|e| format!("Failed to load ONNX model: {}", e))?;
 
