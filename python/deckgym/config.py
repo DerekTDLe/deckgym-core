@@ -222,6 +222,8 @@ class TrainingConfig:
     device: str = "auto"  # "auto", "cuda", "cpu"
     onnx_device: str = "auto"  # "auto", "cuda", "trt", "cpu"
     pfsp_opponent_device: str = "cpu"  # Force pool opponents to CPU to save VRAM
+    use_gradient_checkpointing: bool = False  # Trade compute for memory (~30% slower, ~60% less VRAM)
+    use_tf32: bool = True  # Enable TF32 for faster matmuls on Ampere+ GPUs
 
     # -------------------------------------------------------------------------
     # Methods

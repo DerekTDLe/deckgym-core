@@ -215,10 +215,7 @@ class BatchedDeckGymEnv(VecEnv):
                 self._episode_actions_since_end_turn[i] = 0
                 self._episode_turn_count[i] = 0
                 self._episode_total_actions_per_turn[i] = 0
-
-                # Sample new decks
-                deck_a, deck_b = self._sample_deck_pair()
-                self.vec_game.reset_single(i, deck_a, deck_b)
+                # Note: Rust step_batch already auto-resets on done, no need for reset_single
 
         return obs, rewards_arr, dones, infos
 
