@@ -15,6 +15,7 @@ import os
 import shutil
 import tempfile
 import sys
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,6 +46,7 @@ from deckgym.config import (
     EVAL_GAMES_PER_PAIR_CALIBRATE,
     EVAL_GAMES_PER_PAIR_AUDIT,
     EVAL_GAMES_PER_PAIR_BENCH,
+    EVAL_REPORTS_DIR,
 )
 
 # Try importing ONNX export tools (required for audit/bench)
@@ -191,6 +193,32 @@ class TrueSkillTracker:
         )
 
 
+def save_report(data: dict, mode: str, name: Optional[str] = None):
+    """Save evaluation results to a JSON file."""
+    os.makedirs(EVAL_REPORTS_DIR, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{mode}_"
+    if name:
+        # Sanitize name for filename
+        safe_name = "".join(c for c in name if c.isalnum() or c in ("-", "_")).rstrip()
+        filename += f"{safe_name}_"
+    filename += f"{timestamp}.json"
+
+    report_path = os.path.join(EVAL_REPORTS_DIR, filename)
+
+    report_data = {
+        "timestamp": datetime.now().isoformat(),
+        "mode": mode,
+        **data,
+    }
+
+    with open(report_path, "w") as f:
+        json.dump(report_data, f, indent=2)
+
+    console.print(f"\n[bold green]Report saved to:[/bold green] {report_path}")
+
+
 def run_rust_match(
     deck_a_json: str,
     deck_b_json: str,
@@ -315,13 +343,20 @@ def calibrate(n_games_per_pair: int = EVAL_GAMES_PER_PAIR_CALIBRATE):
     print_ratings(tracker)
 
 
-def evaluate_single_model(model_path: str, n_games: int = EVAL_GAMES_PER_PAIR_AUDIT):
+def evaluate_single_model(
+    model_path: str,
+    n_games: int = EVAL_GAMES_PER_PAIR_AUDIT,
+    tracker: Optional[TrueSkillTracker] = None,
+    show_table: bool = True,
+) -> Optional[dict]:
     """Evaluate a single model against baselines."""
     if not ONNX_AVAILABLE:
         console.print("[red]ONNX tools not installed. Cannot evaluate model.[/red]")
         return
 
-    tracker = TrueSkillTracker()
+    if tracker is None:
+        tracker = TrueSkillTracker()
+
     loader = MetaDeckLoader("meta_deck.json")
 
     model_name = Path(model_path).stem
@@ -344,10 +379,6 @@ def evaluate_single_model(model_path: str, n_games: int = EVAL_GAMES_PER_PAIR_AU
 
         # 2. Run against baselines
         baselines = DEFAULT_BASELINES_TO_CALIBRATE
-
-        # Add model to tracker temporarily (or permanently?)
-        # For single audit, we can just print stats. Or update a separate file?
-        # Let's use a temporary Rating object for the model
         model_rating = TRUESKILL_ENV.create_rating()
 
         for bl in baselines:
@@ -356,25 +387,13 @@ def evaluate_single_model(model_path: str, n_games: int = EVAL_GAMES_PER_PAIR_AU
             wins, losses, draws = 0, 0, 0
             bl_rating = tracker.get(bl).to_trueskill()
 
-            # Simple loop for now (could parallelize)
             for _ in range(n_games):
                 d1 = loader.sample_deck()
                 d2 = loader.sample_deck()
 
-                # Ensure JSON strings
                 d1_s = d1.to_string() if hasattr(d1, "to_string") else str(d1)
                 d2_s = d2.to_string() if hasattr(d2, "to_string") else str(d2)
 
-                # Agent (A) vs Baseline (B)
-                # Note: Rust load ONNX is somewhat expensive per match if reload?
-                # Does `OnnxPlayer::new` reload session every time? Yes.
-                # Is it fast enough? Hopefully. Loading 5MB ONNX is ~10ms.
-
-                # To optimize: use `py_simulate` with num_simulations=10 and same decks?
-                # No, TrueSkill needs diversity.
-                # We accept the overhead for accuracy.
-
-                # Agent (A) vs Baseline (B)
                 res = run_rust_match(d1_s, d2_s, onnx_code, bl)
                 if res == 1:
                     model_rating, bl_rating = TRUESKILL_ENV.rate_1vs1(
@@ -394,9 +413,81 @@ def evaluate_single_model(model_path: str, n_games: int = EVAL_GAMES_PER_PAIR_AU
 
             console.print(f"[green]{wins}W {losses}L {draws}D[/green]")
 
-        console.print(
-            f"\nFinal Rating: [bold green]mu={model_rating.mu:.2f} sigma={model_rating.sigma:.2f}[/bold green] (Expose: {model_rating.mu - 3*model_rating.sigma:.2f})"
+        # Add to tracker for table display
+        tracker.ratings[model_name] = Rating.from_trueskill(model_rating)
+
+        if show_table:
+            print_ratings(tracker)
+        else:
+            console.print(
+                f"Done. Rating: [bold green]mu={model_rating.mu:.2f} sigma={model_rating.sigma:.2f}[/bold green] (Expose: {expose:.2f})\n"
+            )
+
+        # Build results for storage
+        results = {
+            "meta": {
+                "model_name": model_name,
+                "model_path": str(model_path),
+                "games_per_match": n_games,
+            },
+            "ratings": {
+                model_name: {
+                    "mu": model_rating.mu,
+                    "sigma": model_rating.sigma,
+                    "expose": model_rating.mu - 3 * model_rating.sigma,
+                }
+            },
+            "stats": {},
+        }
+
+        # Add baseline ratings to report
+        for bl in baselines:
+            bl_r = tracker.get(bl)
+            results["ratings"][BOT_NAMES[bl]] = {
+                "mu": bl_r.mu,
+                "sigma": bl_r.sigma,
+                "expose": bl_r.expose,
+            }
+
+        if tracker is None or show_table:  # Only save if it's a direct audit
+            save_report(results, "audit", name=model_name)
+
+        return results
+
+
+def audit_directory(directory: str, n_games: int = EVAL_GAMES_PER_PAIR_AUDIT):
+    """Evaluate all models in a directory against baselines."""
+    model_dir = Path(directory)
+    if not model_dir.exists():
+        console.print(f"[red]Directory not found: {directory}[/red]")
+        return
+
+    model_files = sorted(model_dir.glob("*.zip"))
+    if not model_files:
+        console.print(f"[red]No .zip files found in {directory}[/red]")
+        return
+
+    console.print(f"[bold]Auditing {len(model_files)} models in {directory}[/bold]\n")
+
+    tracker = TrueSkillTracker()
+    all_results = []
+    for mf in model_files:
+        res = evaluate_single_model(
+            str(mf), n_games=n_games, tracker=tracker, show_table=False
         )
+        if res:
+            all_results.append(res)
+
+    console.print("\n[bold cyan]Final Audit Results:[/bold cyan]")
+    print_ratings(tracker)
+
+    # Save summary report for the whole directory
+    summary = {
+        "directory": str(directory),
+        "model_count": len(all_results),
+        "results": all_results,
+    }
+    save_report(summary, "audit_dir", name=model_dir.name)
 
 
 def benchmark_directory(
@@ -571,6 +662,32 @@ def benchmark_directory(
         # Print results
         print_bench_results(ratings, wins, losses, draws, participants)
 
+        # Save benchmark report
+        bench_results = {
+            "meta": {
+                "directory": str(directory),
+                "games_per_match": n_games_per_pair,
+                "participants": list(participants.keys()),
+            },
+            "ratings": {
+                name: {
+                    "mu": r.mu,
+                    "sigma": r.sigma,
+                    "expose": r.mu - 3 * r.sigma,
+                }
+                for name, r in ratings.items()
+            },
+            "stats": {
+                name: {
+                    "wins": wins[name],
+                    "losses": losses[name],
+                    "draws": draws[name],
+                }
+                for name in participants
+            },
+        }
+        save_report(bench_results, "bench", name=model_dir.name)
+
     finally:
         # Cleanup temp ONNX files
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -653,18 +770,18 @@ def main():
 
     # Calibrate
     calib_p = subparsers.add_parser("calibrate", help="Calibrate baselines")
-    calib_p.add_argument("--games", type=int, default=50, help="Games per pair")
+    calib_p.add_argument("--games", type=int, default=EVAL_GAMES_PER_PAIR_CALIBRATE, help="Games per pair")
 
     # Audit
     audit_p = subparsers.add_parser("audit", help="Audit model")
     audit_p.add_argument("model", help="Path to .zip model")
-    audit_p.add_argument("--games", type=int, default=30)
+    audit_p.add_argument("--games", type=int, default=EVAL_GAMES_PER_PAIR_AUDIT, help=f"Games per baseline (default: {EVAL_GAMES_PER_PAIR_AUDIT})")
 
     # Bench (Directory)
     bench_p = subparsers.add_parser("bench", help="Benchmark directory")
     bench_p.add_argument("dir", help="Directory containing .zip models")
     bench_p.add_argument(
-        "--games", type=int, default=20, help="Games per matchup (default: 20)"
+        "--games", type=int, default=EVAL_GAMES_PER_PAIR_BENCH, help=f"Games per matchup (default: {EVAL_GAMES_PER_PAIR_BENCH})"
     )
     bench_p.add_argument(
         "--no-baselines", action="store_true", help="Exclude baselines from tournament"
@@ -677,7 +794,11 @@ def main():
     if args.command == "calibrate":
         calibrate(args.games)
     elif args.command == "audit":
-        evaluate_single_model(args.model, args.games)
+        path = Path(args.model)
+        if path.is_dir():
+            audit_directory(args.model, args.games)
+        else:
+            evaluate_single_model(args.model, args.games)
     elif args.command == "bench":
         benchmark_directory(
             args.dir,
