@@ -5,6 +5,7 @@
 //! overhead from O(n_envs) calls per step to O(1) calls per batch step.
 
 use rand::{rngs::StdRng, SeedableRng};
+use std::collections::HashMap;
 
 use log::warn;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -211,9 +212,15 @@ pub struct VecGame {
     n_envs: usize,
     /// Seed counter for generating unique seeds
     seed_counter: u64,
-    /// ONNX opponent for self-play (optional, requires 'onnx' feature)
+    /// ONNX opponent for self-play (single model, legacy mode)
     #[cfg(feature = "onnx")]
     onnx_opponent: Option<BatchedOnnxInference>,
+    /// ONNX opponent pool for per-episode selection (name -> model)
+    #[cfg(feature = "onnx")]
+    onnx_pool: HashMap<String, BatchedOnnxInference>,
+    /// Per-env opponent name (if None, use onnx_opponent; if Some, use from pool)
+    #[cfg(feature = "onnx")]
+    env_opponent_names: Vec<Option<String>>,
     /// RNG for ONNX opponent sampling
     #[cfg(feature = "onnx")]
     onnx_rng: StdRng,
@@ -246,6 +253,10 @@ impl VecGame {
             seed_counter: base_seed + n_envs as u64,
             #[cfg(feature = "onnx")]
             onnx_opponent: None,
+            #[cfg(feature = "onnx")]
+            onnx_pool: HashMap::new(),
+            #[cfg(feature = "onnx")]
+            env_opponent_names: vec![None; n_envs],
             #[cfg(feature = "onnx")]
             onnx_rng: StdRng::seed_from_u64(base_seed.wrapping_add(999)),
         }
@@ -285,6 +296,75 @@ impl VecGame {
             env.opponent_type = None;
             env.players = None;
         }
+    }
+
+    /// Add an ONNX model to the opponent pool
+    ///
+    /// Models in the pool can be assigned to individual environments using set_env_opponent.
+    /// This enables per-episode opponent selection (AlphaStar-style PFSP).
+    ///
+    /// # Arguments
+    /// * `name` - Unique name for this opponent (e.g., "pfsp_6815k")
+    /// * `model_path` - Path to the .onnx model file
+    /// * `deterministic` - If true, always pick best action; if false, sample from distribution
+    #[cfg(feature = "onnx")]
+    pub fn add_onnx_to_pool(
+        &mut self,
+        name: &str,
+        model_path: &str,
+        deterministic: bool,
+    ) -> Result<(), String> {
+        let inference = BatchedOnnxInference::new(model_path, deterministic)?;
+        self.onnx_pool.insert(name.to_string(), inference);
+        Ok(())
+    }
+
+    /// Set the opponent for a specific environment (from the pool)
+    ///
+    /// The environment will use this opponent until changed again.
+    /// This is called per-episode to implement PFSP opponent selection.
+    ///
+    /// # Arguments
+    /// * `env_idx` - Environment index
+    /// * `opponent_name` - Name of opponent in pool (must exist)
+    #[cfg(feature = "onnx")]
+    pub fn set_env_opponent(&mut self, env_idx: usize, opponent_name: &str) -> Result<(), String> {
+        if !self.onnx_pool.contains_key(opponent_name) {
+            return Err(format!("Opponent '{}' not in pool", opponent_name));
+        }
+        if env_idx >= self.n_envs {
+            return Err(format!(
+                "env_idx {} out of range (n_envs={})",
+                env_idx, self.n_envs
+            ));
+        }
+
+        self.env_opponent_names[env_idx] = Some(opponent_name.to_string());
+        self.envs[env_idx].opponent_type = Some("onnx".to_string());
+        self.envs[env_idx].players = None;
+
+        Ok(())
+    }
+
+    /// Clear all opponents from pool and reset per-env assignments
+    #[cfg(feature = "onnx")]
+    pub fn clear_onnx_pool(&mut self) {
+        self.onnx_pool.clear();
+        for name in &mut self.env_opponent_names {
+            *name = None;
+        }
+    }
+
+    /// Get list of opponent names in the pool
+    #[cfg(feature = "onnx")]
+    pub fn get_pool_opponent_names(&self) -> Vec<String> {
+        self.onnx_pool.keys().cloned().collect()
+    }
+
+    /// Check if using per-env opponents (pool mode) vs single opponent (legacy mode)
+    #[cfg(feature = "onnx")]
+    pub fn is_using_pool(&self) -> bool {
+        !self.onnx_pool.is_empty()
     }
 
     /// Get number of environments
@@ -448,10 +528,15 @@ impl VecGame {
             }
         }
 
-        // ONNX opponent turns (batched) - take onnx temporarily to avoid borrow issues
+        // ONNX opponent turns (batched)
+        // Two modes: legacy single-opponent OR pool with per-env opponents
         #[cfg(feature = "onnx")]
         {
-            if let Some(mut onnx) = self.onnx_opponent.take() {
+            if self.is_using_pool() {
+                // Pool mode: group by opponent and run batched inference per group
+                self.play_pool_opponent_turns(&mut rewards, &mut dones);
+            } else if let Some(mut onnx) = self.onnx_opponent.take() {
+                // Legacy mode: single opponent for all envs
                 self.play_onnx_opponent_turns_internal(&mut onnx, &mut rewards, &mut dones);
                 self.onnx_opponent = Some(onnx);
             }
@@ -459,7 +544,7 @@ impl VecGame {
 
         // Handle resets and collect observations
         #[cfg(feature = "onnx")]
-        let has_onnx = self.onnx_opponent.is_some();
+        let has_onnx = self.onnx_opponent.is_some() || self.is_using_pool();
         #[cfg(not(feature = "onnx"))]
         let has_onnx = false;
 
@@ -502,7 +587,9 @@ impl VecGame {
         // ONNX opponent initial turns for newly reset envs
         #[cfg(feature = "onnx")]
         {
-            if let Some(mut onnx) = self.onnx_opponent.take() {
+            if self.is_using_pool() {
+                self.play_pool_initial_turns(&dones, &mut observations);
+            } else if let Some(mut onnx) = self.onnx_opponent.take() {
                 self.play_onnx_initial_turns(&mut onnx, &dones, &mut observations);
                 self.onnx_opponent = Some(onnx);
             }
@@ -593,6 +680,89 @@ impl VecGame {
         }
     }
 
+    /// Play opponent turns using pool mode (per-env opponent assignment)
+    /// Groups environments by their assigned opponent and runs batched inference per group
+    #[cfg(feature = "onnx")]
+    fn play_pool_opponent_turns(&mut self, rewards: &mut [f32], dones: &mut [bool]) {
+        use std::collections::HashMap as StdHashMap;
+
+        const MAX_OPPONENT_TURNS: usize = 50;
+
+        for _ in 0..MAX_OPPONENT_TURNS {
+            // Group envs by opponent name
+            let mut opponent_groups: StdHashMap<String, Vec<usize>> = StdHashMap::new();
+
+            for (i, env) in self.envs.iter().enumerate() {
+                if !dones[i] && env.state.current_player == 1 && !env.state.is_game_over() {
+                    if let Some(ref opp_name) = self.env_opponent_names[i] {
+                        opponent_groups
+                            .entry(opp_name.clone())
+                            .or_insert_with(Vec::new)
+                            .push(i);
+                    }
+                }
+            }
+
+            if opponent_groups.is_empty() {
+                break;
+            }
+
+            // Process each opponent group
+            for (opponent_name, env_indices) in opponent_groups {
+                if let Some(onnx) = self.onnx_pool.get_mut(&opponent_name) {
+                    // Collect observations and masks for this group
+                    let mut obs_batch: Vec<f32> =
+                        Vec::with_capacity(env_indices.len() * OBSERVATION_SIZE);
+                    let mut mask_batch: Vec<bool> =
+                        Vec::with_capacity(env_indices.len() * ACTION_SPACE_SIZE);
+
+                    for &i in &env_indices {
+                        obs_batch.extend(get_observation_tensor(&self.envs[i].state, 1));
+                        mask_batch.extend(get_action_mask(&self.envs[i].state));
+                    }
+
+                    // Run batched inference for this opponent
+                    let actions = onnx.predict_batch(
+                        &obs_batch,
+                        &mask_batch,
+                        env_indices.len(),
+                        &mut self.onnx_rng,
+                    );
+
+                    // Apply actions
+                    for (j, &env_idx) in env_indices.iter().enumerate() {
+                        let action_idx = actions[j];
+                        let _ = catch_unwind(AssertUnwindSafe(|| {
+                            let env = &mut self.envs[env_idx];
+
+                            let indexed_actions = get_indexed_actions(&env.state);
+                            if let Some((_, action)) =
+                                indexed_actions.iter().find(|(idx, _)| *idx == action_idx)
+                            {
+                                apply_action(&mut env.rng, &mut env.state, action);
+                            } else if let Some((_, action)) = indexed_actions.first() {
+                                apply_action(&mut env.rng, &mut env.state, action);
+                            }
+
+                            if env.state.is_game_over() {
+                                dones[env_idx] = true;
+                                rewards[env_idx] = env.calculate_reward(0);
+                            }
+                        }))
+                        .map_err(|_| {
+                            warn!(
+                                "Panic caught in environment {} during pool ONNX action! Marking done.",
+                                env_idx
+                            );
+                            dones[env_idx] = true;
+                            rewards[env_idx] = 0.0;
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     /// Play ONNX initial turns for newly reset envs where opponent goes first
     #[cfg(feature = "onnx")]
     fn play_onnx_initial_turns(
@@ -656,6 +826,98 @@ impl VecGame {
                     warn!("Panic caught in environment {} during ONNX initial turn! Forcing end of turns.", env_idx);
                     // Just let it be, the agent will handle it in the main loop if still cur_player 1
                 });
+            }
+        }
+
+        // Update observations for reset envs
+        for &i in &needs_initial {
+            let start = i * OBSERVATION_SIZE;
+            let end = start + OBSERVATION_SIZE;
+            let new_obs = self.envs[i].get_observation();
+            observations[start..end].copy_from_slice(&new_obs);
+        }
+    }
+
+    /// Play initial opponent turns for reset envs in pool mode
+    #[cfg(feature = "onnx")]
+    fn play_pool_initial_turns(&mut self, was_done: &[bool], observations: &mut Vec<f32>) {
+        use std::collections::HashMap as StdHashMap;
+
+        // Find reset envs where opponent goes first
+        let mut needs_initial: Vec<usize> = Vec::new();
+        for (i, env) in self.envs.iter().enumerate() {
+            if was_done[i] && env.state.current_player == 1 && !env.state.is_game_over() {
+                needs_initial.push(i);
+            }
+        }
+
+        if needs_initial.is_empty() {
+            return;
+        }
+
+        // Play opponent turns until agent's turn
+        const MAX_TURNS: usize = 50;
+        for _ in 0..MAX_TURNS {
+            // Group active envs by opponent
+            let mut opponent_groups: StdHashMap<String, Vec<usize>> = StdHashMap::new();
+
+            for &i in &needs_initial {
+                if self.envs[i].state.current_player == 1 && !self.envs[i].state.is_game_over() {
+                    if let Some(ref opp_name) = self.env_opponent_names[i] {
+                        opponent_groups
+                            .entry(opp_name.clone())
+                            .or_insert_with(Vec::new)
+                            .push(i);
+                    }
+                }
+            }
+
+            if opponent_groups.is_empty() {
+                break;
+            }
+
+            // Process each opponent group
+            for (opponent_name, active) in opponent_groups {
+                if let Some(onnx) = self.onnx_pool.get_mut(&opponent_name) {
+                    let mut obs_batch: Vec<f32> =
+                        Vec::with_capacity(active.len() * OBSERVATION_SIZE);
+                    let mut mask_batch: Vec<bool> =
+                        Vec::with_capacity(active.len() * ACTION_SPACE_SIZE);
+
+                    for &i in &active {
+                        obs_batch.extend(get_observation_tensor(&self.envs[i].state, 1));
+                        mask_batch.extend(get_action_mask(&self.envs[i].state));
+                    }
+
+                    let actions = onnx.predict_batch(
+                        &obs_batch,
+                        &mask_batch,
+                        active.len(),
+                        &mut self.onnx_rng,
+                    );
+
+                    for (j, &env_idx) in active.iter().enumerate() {
+                        let action_idx = actions[j];
+                        let _ = catch_unwind(AssertUnwindSafe(|| {
+                            let env = &mut self.envs[env_idx];
+
+                            let indexed_actions = get_indexed_actions(&env.state);
+                            if let Some((_, action)) =
+                                indexed_actions.iter().find(|(idx, _)| *idx == action_idx)
+                            {
+                                apply_action(&mut env.rng, &mut env.state, action);
+                            } else if let Some((_, action)) = indexed_actions.first() {
+                                apply_action(&mut env.rng, &mut env.state, action);
+                            }
+                        }))
+                        .map_err(|_| {
+                            warn!(
+                                "Panic caught in environment {} during pool initial turn!",
+                                env_idx
+                            );
+                        });
+                    }
+                }
             }
         }
 
