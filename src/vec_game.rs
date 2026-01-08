@@ -186,16 +186,17 @@ impl EnvInstance {
                 let point_diff = my_points - opp_points;
                 let turn_count = self.state.turn_count as f32;
 
-                // Speed factor: 1 + (13 - turns) / 13
-                let speed_factor = 1.0 + ((13.0 - turn_count) / 13.0);
+                // Speed factor: bonus for fast games (< 13 turns), clamped to min 1.0
+                // At 13 turns: factor = 1.0, at 6 turns: factor = 1.54
+                let speed_factor = (1.0 + ((13.0 - turn_count) / 13.0)).max(1.0);
 
                 if winner == agent_player {
                     // Victory: (1.0 + diff/6) * speed [1.0 to 1.5 * speed]
                     let base = 1.0 + (point_diff / 6.0);
-                    base * speed_factor.max(1.0)
+                    base * speed_factor
                 } else {
                     // Loss: (-1.0 + diff/6) * speed [-1.5 to -1.0 * speed]
-                    // Remember point_diff is negative here
+                    // speed_factor is already clamped to >= 1.0, so loss stays negative
                     let base = -1.0 + (point_diff / 6.0);
                     base * speed_factor
                 }

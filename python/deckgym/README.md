@@ -16,6 +16,20 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 ```
 
+## Building
+
+Build and install the Rust extension in development mode:
+
+```bash
+# Standard build
+maturin develop --release
+
+# With ONNX support (required for PFSP self-play training)
+maturin develop --release --features onnx
+```
+
+> **Note**: The `--features onnx` flag enables ONNX inference for frozen opponent models in self-play training. This is required for the PFSP (Prioritized Fictitious Self-Play) training mode.
+
 ## Usage Example
 
 Run a simulation between two decks:
