@@ -152,7 +152,7 @@ class OnnxSafeAttention(nn.Module):
             attn_logits = attn_logits.masked_fill(mask, float("-inf"))
 
         # Track attention statistics for debugging (saturation detection)
-        if track_stats and self.training:
+        if track_stats:
             with torch.no_grad():
                 # Logit std - if too high, softmax saturates
                 valid_logits = attn_logits[~attn_logits.isinf()]
