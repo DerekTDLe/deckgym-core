@@ -590,7 +590,10 @@ impl PyState {
     /// Convert state to JSON string
     fn to_json(&self) -> PyResult<String> {
         serde_json::to_string(&self.state).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("JSON serialization error: {}", e))
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "JSON serialization error: {}",
+                e
+            ))
         })
     }
 
@@ -969,14 +972,17 @@ pub fn py_simulate(
             let players = create_players(deck_a.clone(), deck_b.clone(), cli_players.clone());
             let game_seed = seed.unwrap_or_else(rand::random::<u64>);
             let mut game = Game::new(players, game_seed);
-            
+
             // Safety: limit to 2000 ticks OR 99 turns to avoid infinite loops/cycles
             let mut total_ticks = 0;
-            while !game.is_game_over() && game.get_state_clone().turn_count < 99 && total_ticks < 2000 {
+            while !game.is_game_over()
+                && game.get_state_clone().turn_count < 99
+                && total_ticks < 2000
+            {
                 game.play_tick();
                 total_ticks += 1;
             }
-            
+
             let outcome = game.get_state_clone().winner;
 
             match outcome {

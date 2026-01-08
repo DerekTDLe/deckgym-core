@@ -316,8 +316,12 @@ impl VecGame {
                 if env.opponent_type.is_some() {
                     env.play_bot_turns();
                 }
-            })).map_err(|_| {
-                warn!("Panic caught in environment {} during reset_all! Forcing secondary reset.", i);
+            }))
+            .map_err(|_| {
+                warn!(
+                    "Panic caught in environment {} during reset_all! Forcing secondary reset.",
+                    i
+                );
                 self.seed_counter += 1;
                 let _ = catch_unwind(AssertUnwindSafe(|| env.reset(self.seed_counter)));
             });
@@ -341,8 +345,12 @@ impl VecGame {
             if self.envs[env_idx].opponent_type.is_some() {
                 self.envs[env_idx].play_bot_turns();
             }
-        })).map_err(|_| {
-            warn!("Panic caught in environment {} during reset_single!", env_idx);
+        }))
+        .map_err(|_| {
+            warn!(
+                "Panic caught in environment {} during reset_single!",
+                env_idx
+            );
         });
     }
 
@@ -369,8 +377,8 @@ impl VecGame {
         let mut observations = Vec::with_capacity(self.n_envs * OBSERVATION_SIZE);
 
         for (i, env) in self.envs.iter().enumerate() {
-            let obs = catch_unwind(AssertUnwindSafe(|| env.get_observation()))
-                .unwrap_or_else(|_| {
+            let obs =
+                catch_unwind(AssertUnwindSafe(|| env.get_observation())).unwrap_or_else(|_| {
                     warn!("Panic caught in environment {} during get_observation!", i);
                     vec![0.0; OBSERVATION_SIZE]
                 });
@@ -430,7 +438,10 @@ impl VecGame {
                     dones.push(done);
                 }
                 Err(_) => {
-                    warn!("Panic caught in environment {} during step! Forcing reset.", i);
+                    warn!(
+                        "Panic caught in environment {} during step! Forcing reset.",
+                        i
+                    );
                     rewards.push(0.0);
                     dones.push(true); // Force reset in next loop
                 }
@@ -467,8 +478,12 @@ impl VecGame {
                     if env.opponent_type.is_some() && !has_onnx {
                         env.play_bot_turns();
                     }
-                })).map_err(|_| {
-                    warn!("Panic caught in environment {} during reset! Forcing a secondary reset.", i);
+                }))
+                .map_err(|_| {
+                    warn!(
+                        "Panic caught in environment {} during reset! Forcing a secondary reset.",
+                        i
+                    );
                     // If reset itself panics, we try one more time or just hope next one works
                     self.seed_counter += 1;
                     let _ = catch_unwind(AssertUnwindSafe(|| {
@@ -565,8 +580,12 @@ impl VecGame {
                         dones[env_idx] = true;
                         rewards[env_idx] = env.calculate_reward(0); // Agent is player 0
                     }
-                })).map_err(|_| {
-                    warn!("Panic caught in environment {} during ONNX action! Marking done.", env_idx);
+                }))
+                .map_err(|_| {
+                    warn!(
+                        "Panic caught in environment {} during ONNX action! Marking done.",
+                        env_idx
+                    );
                     dones[env_idx] = true;
                     rewards[env_idx] = 0.0;
                 });
