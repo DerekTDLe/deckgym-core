@@ -208,16 +208,50 @@ def find_existing_report(mode: str, name: str) -> Optional[dict]:
 
     # Sanitize name
     safe_name = "".join(c for c in name if c.isalnum() or c in ("-", "_")).rstrip()
-    prefix = f"{mode}_{safe_name}_"
+    
+    # 1. Try stable filename first
+    stable_filename = f"{mode}_{safe_name}.json"
+    report_path = os.path.join(EVAL_REPORTS_DIR, stable_filename)
+    if os.path.exists(report_path):
+        try:
+            with open(report_path, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
 
+    # 2. Fall back to timestamped files for backward compatibility
+    prefix = f"{mode}_{safe_name}_"
+    candidates = []
     for filename in os.listdir(EVAL_REPORTS_DIR):
         if filename.startswith(prefix) and filename.endswith(".json"):
-            report_path = os.path.join(EVAL_REPORTS_DIR, filename)
-            try:
-                with open(report_path, "r") as f:
-                    return json.load(f)
-            except Exception:
-                continue
+            candidates.append(filename)
+    
+    # Sort by timestamp (descending) to get the most recent
+    candidates.sort(reverse=True)
+
+    for filename in candidates:
+        r_path = os.path.join(EVAL_REPORTS_DIR, filename)
+        try:
+            with open(r_path, "r") as f:
+                return json.load(f)
+        except Exception:
+            continue
+    
+    # 3. If not found and we are looking for a single model audit, 
+    # check if it's contained in any audit_dir report
+    if mode == "audit":
+        for filename in os.listdir(EVAL_REPORTS_DIR):
+            if (filename.startswith("audit_dir_") or filename == f"audit_dir_{safe_name}.json") and filename.endswith(".json"):
+                try:
+                    with open(os.path.join(EVAL_REPORTS_DIR, filename), "r") as f:
+                        data = json.load(f)
+                        for res in data.get("results", []):
+                            if res.get("meta", {}).get("model_name") == name:
+                                # Return a compatible structure
+                                return res
+                except Exception:
+                    continue
+
     return None
 
 
@@ -225,13 +259,12 @@ def save_report(data: dict, mode: str, name: Optional[str] = None):
     """Save evaluation results to a JSON file."""
     os.makedirs(EVAL_REPORTS_DIR, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{mode}_"
+    filename = f"{mode}"
     if name:
         # Sanitize name for filename
         safe_name = "".join(c for c in name if c.isalnum() or c in ("-", "_")).rstrip()
-        filename += f"{safe_name}_"
-    filename += f"{timestamp}.json"
+        filename += f"_{safe_name}"
+    filename += ".json"
 
     report_path = os.path.join(EVAL_REPORTS_DIR, filename)
 
@@ -538,21 +571,51 @@ def audit_directory(
         console.print(f"[red]No .zip files found in {directory}[/red]")
         return
 
-    console.print(f"[bold]Auditing {len(model_files)} models in {directory}[/bold]\n")
+    # Check for existing directory report
+    existing_report = find_existing_report("audit_dir", model_dir.name)
+    audited_models_data = {}
+    if existing_report:
+        for res in existing_report.get("results", []):
+            m_name = res.get("meta", {}).get("model_name")
+            if m_name:
+                audited_models_data[m_name] = res
 
     tracker = TrueSkillTracker()
     all_results = []
-    for mf in model_files:
-        res = evaluate_single_model(
-            str(mf), n_games=n_games, tracker=tracker, show_table=False, device=device
-        )
-        if res:
+    
+    # Fill tracker with existing results
+    for m_name, res in audited_models_data.items():
+        if m_name in res.get("ratings", {}):
+            r_data = res["ratings"][m_name]
+            model_rating = trueskill.Rating(mu=r_data["mu"], sigma=r_data["sigma"])
+            tracker.ratings[m_name] = Rating.from_trueskill(model_rating)
             all_results.append(res)
+
+    # Determine which models still need auditing
+    to_audit = []
+    for mf in model_files:
+        if mf.stem not in audited_models_data:
+            to_audit.append(mf)
+    
+    if not to_audit:
+        console.print(f"[yellow]Full audit report for {directory} already exists. Skipping simulations.[/yellow]")
+    else:
+        if audited_models_data:
+            console.print(f"[bold]Resuming audit for {directory}: {len(to_audit)} new models found ({len(audited_models_data)} already audited)[/bold]\n")
+        else:
+            console.print(f"[bold]Auditing {len(model_files)} models in {directory}[/bold]\n")
+
+        for mf in to_audit:
+            res = evaluate_single_model(
+                str(mf), n_games=n_games, tracker=tracker, show_table=False, device=device
+            )
+            if res:
+                all_results.append(res)
 
     console.print("\n[bold cyan]Final Audit Results:[/bold cyan]")
     print_ratings(tracker)
 
-    # Save summary report for the whole directory
+    # Save summary report even if no new models were audited (to ensure latest timestamp/metadata)
     summary = {
         "directory": str(directory),
         "model_count": len(all_results),
