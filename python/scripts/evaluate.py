@@ -54,10 +54,21 @@ from deckgym.config import (
 try:
     from deckgym.onnx_export import export_policy_to_onnx
     from sb3_contrib import MaskablePPO
-
+    from deckgym.diagnostic_logger import get_logger
     ONNX_AVAILABLE = True
 except ImportError:
     ONNX_AVAILABLE = False
+    def get_logger():
+        class DummyLogger:
+            def log_error(self, *args, **kwargs): pass
+        return DummyLogger()
+
+# PanicException is often not importable directly but can be caught by name
+PanicException = None
+try:
+    from pyo3_runtime import PanicException
+except ImportError:
+    pass
 
 
 console = Console()
@@ -110,8 +121,6 @@ DEFAULT_BASELINES_TO_CALIBRATE = [
     "er",
     "e2",
     "e3",
-    "e4",
-    "e5",
 ]
 BOT_NAMES = {
     "r": "Random",
@@ -122,8 +131,6 @@ BOT_NAMES = {
     "er": "EvolutionRusher",
     "e2": "Expectiminimax(2)",
     "e3": "Expectiminimax(3)",
-    "e4": "Expectiminimax(4)",
-    "e5": "Expectiminimax(5)",
 }
 
 
@@ -192,6 +199,26 @@ class TrueSkillTracker:
         return self.ratings.get(
             code, Rating.from_trueskill(TRUESKILL_ENV.create_rating())
         )
+
+
+def find_existing_report(mode: str, name: str) -> Optional[dict]:
+    """Check if a matching report already exists in EVAL_REPORTS_DIR."""
+    if not os.path.exists(EVAL_REPORTS_DIR):
+        return None
+
+    # Sanitize name
+    safe_name = "".join(c for c in name if c.isalnum() or c in ("-", "_")).rstrip()
+    prefix = f"{mode}_{safe_name}_"
+
+    for filename in os.listdir(EVAL_REPORTS_DIR):
+        if filename.startswith(prefix) and filename.endswith(".json"):
+            report_path = os.path.join(EVAL_REPORTS_DIR, filename)
+            try:
+                with open(report_path, "r") as f:
+                    return json.load(f)
+            except Exception:
+                continue
+    return None
 
 
 def save_report(data: dict, mode: str, name: Optional[str] = None):
@@ -263,8 +290,31 @@ def run_rust_match(
             else:
                 return 0
         except Exception as e:
-            console.print(f"[red]Error in simulation: {e}[/red]")
-            return 0  # Treat error as draw/void
+            if (PanicException and isinstance(e, PanicException)) or type(e).__name__ == "PanicException":
+                # Try to log the state if it was a panic
+                console.print(f"[bold red]CRITICAL: Rust Panic during simulation![/bold red]")
+                console.print(f"[red]{e}[/red]")
+
+                try:
+                    # We can't easily get the last state from deckgym.simulate yet
+                    # but we can log that it happened
+                    get_logger().log_error(
+                        "evaluation_panic",
+                        0,
+                        None,  # State not available during simulate() crash
+                        {
+                            "p1": player_a_code,
+                            "p2": player_b_code,
+                            "error": str(e),
+                        },
+                    )
+                except Exception:
+                    pass
+
+                return 0  # Treat as draw/void
+            else:
+                console.print(f"[red]Error in simulation: {e}[/red]")
+                return 0  # Treat error as draw/void
 
 
 def calibrate(n_games_per_pair: int = EVAL_GAMES_PER_PAIR_CALIBRATE):
@@ -362,6 +412,21 @@ def evaluate_single_model(
     loader = MetaDeckLoader("meta_deck.json")
 
     model_name = Path(model_path).stem
+
+    # Check for existing report to skip
+    existing = find_existing_report("audit", model_name)
+    if existing:
+        console.print(
+            f"  [yellow]Matching report found, skipping simulations for {model_name}...[/yellow]"
+        )
+        if model_name in existing.get("ratings", {}):
+            r_data = existing["ratings"][model_name]
+            model_rating = trueskill.Rating(mu=r_data["mu"], sigma=r_data["sigma"])
+            tracker.ratings[model_name] = Rating.from_trueskill(model_rating)
+            if show_table:
+                print_ratings(tracker)
+            return existing
+
     console.print(f"Evaluating [bold cyan]{model_name}[/bold cyan] via ONNX/Rust...")
 
     # 1. Convert to ONNX
