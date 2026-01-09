@@ -136,6 +136,9 @@ class PFSPCallback(BaseCallback):
         # Initialize baseline curriculum (add initial baselines to pool)
         self._update_baseline_curriculum()
 
+        # Add current (untrained) model to pool as initial opponent
+        self._add_to_pool()
+
         # Ensure we are in pool mode (BatchedDeckGymEnv with ONNX support)
         if isinstance(self.env, BatchedDeckGymEnv):
             try:
@@ -232,6 +235,7 @@ class PFSPCallback(BaseCallback):
                 "baseline_code": bl_code,  # Store the actual code (e.g., "e2", "v")
                 "wins": 0,
                 "losses": 0,
+                "draws": 0,
                 "added_at_step": current_step,
                 "is_baseline": True,  # Mark as baseline (never evicted)
             }
@@ -300,7 +304,7 @@ class PFSPCallback(BaseCallback):
         """Calculate PFSP priorities for a given set of opponents."""
         priorities = {}
         for name, data in pool.items():
-            total = data["wins"] + data["losses"]
+            total = data["wins"] + data["losses"] + data["draws"]
             opp_winrate = data["wins"] / total if total > 0 else PFSP_NEUTRAL_WINRATE
             priorities[name] = float(opp_winrate**self.priority_exponent)
         return priorities
@@ -349,16 +353,30 @@ class PFSPCallback(BaseCallback):
             len(self.episode_results) >= PFSP_MIN_EPISODES_FOR_UPDATE
         ):  # Update every N episodes minimum
             if self.verbose > 0:
-                # Count wins/losses per opponent
-                wins = Counter(name for name, won in self.episode_results if won)
-                losses = Counter(name for name, won in self.episode_results if not won)
-                
                 print(f"[PFSP Debug] Rollout {self.rollout_count}: {len(self.episode_results)} episodes tracked")
                 
-                for name in sorted(set(wins.keys()) | set(losses.keys())):
-                    w, l = wins[name], losses[name]
-                    wr = l / (w + l) if (w + l) > 0 else 0
-                    print(f"  {name:15}: agent WR {wr:5.1%}, wins {l:2}, losses {w:2}")
+                # Rollout-specific stats (from opponent perspective)
+                r_wins = Counter(name for name, res in self.episode_results if res == "opp_win")
+                r_losses = Counter(name for name, res in self.episode_results if res == "agent_win")
+                r_draws = Counter(name for name, res in self.episode_results if res == "draw")
+
+                for name in sorted(set(r_wins.keys()) | set(r_losses.keys()) | set(r_draws.keys())):
+                    data = self.opponent_pool.get(name)
+                    if not data: continue
+                    
+                    # Rollout stats
+                    w, l, d = r_wins[name], r_losses[name], r_draws[name]
+                    tot = w + l + d
+                    wr = w / tot if tot > 0 else 0
+                    
+                    # Total stats (after update below, we calculate it here for display)
+                    tw = data["wins"] + w
+                    tl = data["losses"] + l
+                    td = data["draws"] + d
+                    ttot = tw + tl + td
+                    twr = tw / ttot if ttot > 0 else 0
+                    
+                    print(f"  {name:15} : Rollout : {wr:5.1%} ({w}-{l}-{d}) | Total : {twr:5.1%} ({tw}-{tl}-{td})")
             
             self._update_winrates()
             self.episode_results.clear()
@@ -396,9 +414,9 @@ class PFSPCallback(BaseCallback):
         total_wins = 0
         total_games = 0
         for data in self.opponent_pool.values():
-            games = data["wins"] + data["losses"]
+            games = data["wins"] + data["losses"] + data["draws"]
             if games > 0:
-                # Agent winrate = opponent losses / total
+                # Agent winrate = Opponent losses / Total
                 total_wins += data["losses"]
                 total_games += games
 
@@ -418,8 +436,17 @@ class PFSPCallback(BaseCallback):
             if not info or "episode" not in info:
                 continue
 
-            # Episode ended: check if agent won
-            agent_won = info["episode"].get("r", 0) > 0
+            # Episode ended: check outcome
+            reward = info["episode"].get("r", 0)
+            draw_reward = getattr(self.env.config, "draw_reward", -0.5)
+            
+            if reward > 0:
+                result = "agent_win"
+            elif abs(reward - draw_reward) < 1e-4:
+                result = "draw"
+            else:
+                result = "opp_win"
+            
             opp_name = self.env_opponent_names[env_idx]
 
             if opp_name:
@@ -429,7 +456,7 @@ class PFSPCallback(BaseCallback):
                     if self.verbose > 1:
                         print(f"[PFSP Refresh] Skipping result for env {env_idx} (reassigned mid-game)")
                 else:
-                    self.episode_results.append((opp_name, agent_won))
+                    self.episode_results.append((opp_name, result))
 
             # Reassign opponent for this env on episode end
             self._assign_opponent_to_env(env_idx)
@@ -439,18 +466,21 @@ class PFSPCallback(BaseCallback):
     def _update_winrates(self):
         """Update opponent win rates based on recent episode results."""
         # First, accumulate all results
-        for opp_name, agent_won in self.episode_results:
+        for opp_name, result in self.episode_results:
             if opp_name in self.opponent_pool:
-                if agent_won:
-                    self.opponent_pool[opp_name]["losses"] += 1  # Opponent lost
-                else:
-                    self.opponent_pool[opp_name]["wins"] += 1  # Opponent won
+                if result == "agent_win":
+                    self.opponent_pool[opp_name]["losses"] += 1
+                elif result == "opp_win":
+                    self.opponent_pool[opp_name]["wins"] += 1
+                elif result == "draw":
+                    self.opponent_pool[opp_name]["draws"] += 1
 
         # Then, apply decay ONCE per opponent (not per episode!)
         for opp_name in self.opponent_pool:
             total = (
                 self.opponent_pool[opp_name]["wins"]
                 + self.opponent_pool[opp_name]["losses"]
+                + self.opponent_pool[opp_name]["draws"]
             )
             if total > self.winrate_window:
                 # Scale down to keep within window
@@ -461,6 +491,9 @@ class PFSPCallback(BaseCallback):
                 )
                 self.opponent_pool[opp_name]["losses"] = round(
                     self.opponent_pool[opp_name]["losses"] * scale
+                )
+                self.opponent_pool[opp_name]["draws"] = round(
+                    self.opponent_pool[opp_name]["draws"] * scale
                 )
 
     def _add_to_pool(self):
@@ -476,6 +509,7 @@ class PFSPCallback(BaseCallback):
             "path": str(checkpoint_path),
             "wins": 0,
             "losses": 0,
+            "draws": 0,
             "added_at_step": self.num_timesteps,
         }
 
@@ -561,6 +595,7 @@ class PFSPCallback(BaseCallback):
         for data in self.opponent_pool.values():
             data["wins"] = 0
             data["losses"] = 0
+            data["draws"] = 0
         
         if self.verbose > 0:
             print(f"[PFSP Refresh] Pool size: {len(self.opponent_pool)}, statistics reset")
@@ -576,7 +611,7 @@ class PFSPCallback(BaseCallback):
 
         winrates = {}
         for name, data in self.opponent_pool.items():
-            total = data["wins"] + data["losses"]
+            total = data["wins"] + data["losses"] + data["draws"]
             winrates[name] = data["wins"] / total if total > 0 else PFSP_NEUTRAL_WINRATE
 
         return {
