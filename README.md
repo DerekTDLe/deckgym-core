@@ -228,8 +228,8 @@ The agent learns through continuous self-play against its own previous versions 
 |------|--------|-----------|
 | 1 | Expectiminimax(5) | 2014 |
 | 2 | Expectiminimax(3) | 2009 |
-| 3 | Expectiminimax(4) | 1925 |
-| 4 | Expectiminimax(2) | 1939 |
+| 3 | Expectiminimax(2) | 1939 |
+| 4 | Expectiminimax(4) | 1925 |
 | 5 | **RL Agent 12.8M (Run #9)** | **1807** |
 | 6 | EvolutionRusher | 1480 |
 | 7 | WeightedRandom | 1432 |
