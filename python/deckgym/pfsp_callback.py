@@ -331,11 +331,14 @@ class PFSPCallback(BaseCallback):
                     )
 
     def _get_pool_priorities(self, pool: Dict[str, Dict]) -> Dict[str, float]:
-        """Calculate PFSP priorities for a given set of opponents."""
+        """Calculate PFSP priorities for a given set of opponents.
+        Uses Laplace smoothing to ensure every model has a non-zero selection priority.
+        """
         priorities = {}
         for name, data in pool.items():
             total = data["wins"] + data["losses"] + data["draws"]
-            opp_winrate = data["wins"] / total if total > 0 else PFSP_NEUTRAL_WINRATE
+            # Laplace smoothing: (wins + 1) / (total + 2)
+            opp_winrate = (data["wins"] + 1) / (total + 2)
             priorities[name] = float(opp_winrate**self.priority_exponent)
         return priorities
 
@@ -421,23 +424,41 @@ class PFSPCallback(BaseCallback):
                     twr = tw / ttot if ttot > 0 else 0
 
                     print(
-                        f"  {name:15} : Rollout : {wr:5.1%} ({w}-{l}-{d}) | Total : {twr:5.1%} ({tw}-{tl}-{td})"
+                        f"  {name:15} : Rollout : {wr:5.1%}({w}-{l}-{d}) | Total : {twr:5.1%}({tw}-{tl}-{td})"
                     )
 
+            # Calculate metrics BEFORE updating and clearing results
+            self_play_wr = self._get_self_play_winrate()
+            baseline_wr = self._get_baseline_winrate()
+
+            # Update and clear
             self._update_winrates()
             self.episode_results.clear()
+
+            # Log to TensorBoard
+            if self.logger:
+                self.logger.record("pfsp/winrate_self_play", self_play_wr)
+                if baseline_wr is not None:
+                    self.logger.record("pfsp/winrate_baselines", baseline_wr)
+                self.logger.record("pfsp/pool_size", len(self.opponent_pool))
+
+            if self.verbose > 0:
+                bl_str = f", Baselines: {baseline_wr:.1%}" if baseline_wr is not None else ""
+                print(f"[PFSP Summary] Self-Play WR: {self_play_wr:.1%}{bl_str}")
+
         elif self.verbose > 0 and self.rollout_count % 5 == 0:
             print(
                 f"[PFSP Debug] Rollout {self.rollout_count}: only {len(self.episode_results)} episodes (need 10+)"
             )
 
-        # Calculate average agent winrate against pool for adaptive decisions
-        avg_agent_winrate = self._get_avg_agent_winrate()
+        # Calculate average agent winrate against self-play pool for addition decisions
+        # We use unweighted mean to avoid bias toward hard opponents (which are played more often)
+        self_play_winrate = self._get_self_play_winrate()
 
-        # Adaptive add frequency: if agent is dominating, add more frequently (Refresh period decreased by 2)
+        # Adaptive add frequency: if agent is dominating, add more frequently
         effective_add_freq = (
             max(1, self.add_to_pool_every_n_rollouts // 2)
-            if avg_agent_winrate > PFSP_ADAPTIVE_DOMINATION_THRESHOLD
+            if self_play_winrate > PFSP_ADAPTIVE_DOMINATION_THRESHOLD
             else self.add_to_pool_every_n_rollouts
         )
 
@@ -450,22 +471,65 @@ class PFSPCallback(BaseCallback):
 
         if self.rollout_count % effective_add_freq == 0:
             # Add to pool FIRST (eviction uses accumulated stats)
-            if avg_agent_winrate >= min_wr_to_add or len(self.opponent_pool) < 2:
-                if self.verbose > 0 and avg_agent_winrate >= min_wr_to_add:
+            if self_play_winrate >= min_wr_to_add or len(self.opponent_pool) < 2:
+                if self.verbose > 0 and self_play_winrate >= min_wr_to_add:
                     print(
-                        f"[PFSP] Agent winrate {avg_agent_winrate:.1%} >= {min_wr_to_add:.0%}, adding to pool"
+                        f"[PFSP] Agent self-play winrate {self_play_winrate:.1%} >= {min_wr_to_add:.0%}, adding to pool"
                     )
                 self._add_to_pool()
             elif self.verbose > 0:
                 print(
-                    f"[PFSP] Agent winrate {avg_agent_winrate:.1%} < {min_wr_to_add:.0%}, skipping pool add"
+                    f"[PFSP] Agent self-play winrate {self_play_winrate:.1%} < {min_wr_to_add:.0%}, skipping pool add"
                 )
 
             # Reset stats AFTER eviction (so next period starts fresh)
             self._reset_pool_stats()
 
+    def _get_self_play_winrate(self) -> float:
+        """
+        Calculate unweighted average agent winrate against non-baseline opponents in pool.
+        This provides a fair assessment of progress that isn't biased by selection frequencies
+        or difficult training baselines.
+        """
+        self_play_opps = [
+            d for n, d in self.opponent_pool.items() if not d.get("is_baseline")
+        ]
+        if not self_play_opps:
+            return 0.5
+
+        winrates = []
+        for d in self_play_opps:
+            total = d["wins"] + d["losses"] + d["draws"]
+            if total > 0:
+                # Agent winrate = Opponent losses / Total
+                winrates.append(d["losses"] / total)
+            else:
+                winrates.append(PFSP_NEUTRAL_WINRATE)
+
+        return float(np.mean(winrates))
+
+    def _get_baseline_winrate(self) -> Optional[float]:
+        """
+        Calculate unweighted average agent winrate against baseline opponents.
+        """
+        baseline_opps = [
+            d for n, d in self.opponent_pool.items() if d.get("is_baseline")
+        ]
+        if not baseline_opps:
+            return None
+
+        winrates = []
+        for d in baseline_opps:
+            total = d["wins"] + d["losses"] + d["draws"]
+            if total > 0:
+                winrates.append(d["losses"] / total)
+            else:
+                winrates.append(PFSP_NEUTRAL_WINRATE)
+
+        return float(np.mean(winrates))
+
     def _get_avg_agent_winrate(self) -> float:
-        """Calculate average agent winrate across all opponents in pool."""
+        """Calculate weighted average agent winrate across all opponents (including baselines)."""
         if not self.opponent_pool:
             return PFSP_NEUTRAL_WINRATE
 
