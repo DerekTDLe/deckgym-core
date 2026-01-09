@@ -865,10 +865,84 @@ Modified `pfsp_callback.py`:
 
 ## Run #9: Stabilized Attention Model (V2 Revamp)
 
-**Date**: 2026-01-08 (Ongoing)
+**Date**: 2026-01-08 → 2026-01-09
 **Model**: Revamped Attention (Pre-norm, GELU, 4 queries, Bias-free)
 **Config**: `configs/attention_baseline.yaml`
-**Status**: [IN PROGRESS] Excellent gradient health confirmed at 786k steps.
+**Status**: [STOPPED] Elo plateau + PFSP echo chamber identified at 16M steps
+
+### Final Metrics (@ 16M steps)
+
+| Metric | Value | Peak Value | Status |
+|--------|-------|------------|--------|
+| Elo (Mu) | ~1900 | **1952** (@ 12.8M) | [REGRESSED] -50 Mu |
+| Expose | ~1750 | **1807** (@ 12.8M) | [REGRESSED] |
+| Episode Reward | 0.04 | **0.44** (@ 8M) | [COLLAPSED] |
+| Explained Variance | 0.71-0.76 | - | [OK] Still learning |
+| Entropy | -0.42 | -1.04 (@ 8M) | [INCREASING] Policy getting chaotic |
+| Value Loss | Increasing | - | [WARNING] Instability |
+
+### TensorBoard Analysis
+
+1. **Episode Reward Collapse**
+   - Peaked at 0.44 (8M steps) → collapsed to 0.04 (16M steps)
+   - Agent stopped winning against its own pool
+
+2. **Entropy Paradox**
+   - Entropy increased from -1.04 to -0.42 (policy becoming LESS deterministic)
+   - Unusual: typically entropy decreases as policy converges
+   - Interpretation: Agent is "thrashing" between strategies, no clear improvement direction
+
+3. **Explained Variance Stable**
+   - Remained high (0.71-0.76) throughout
+   - Model is still learning *something*, but not overall game strength
+   - Likely overfitting to self-play patterns
+
+### Root Cause: PFSP Echo Chamber
+
+**Diagnosis**: Pool homogeneity causing stagnation
+
+```
+Pool Analysis (@ 16M steps):
+- Pool size: 10 opponents
+- All opponents: 15M+ steps checkpoints
+- Oldest checkpoints: EVICTED (low winrate against current agent)
+- Diversity: ZERO (all opponents are slight variations of same policy)
+```
+
+**Problem Mechanism**:
+1. Agent dominates pool → adds itself → old opponents evicted
+2. Pool becomes homogeneous (all recent self-copies)
+3. Agent only learns to exploit its own weaknesses
+4. No signal from diverse strategies → local optima
+5. Win rate against pool stays high, but absolute strength stagnates
+
+### Solution Implemented: Baseline Curriculum
+
+Added permanent baseline slots with progressive difficulty:
+
+| Step Range | Baselines | Rationale |
+|------------|-----------|-----------|
+| 0 - 500k | `v`, `w` | Easy warmup (ValueFunction, WeightedRandom) |
+| 500k - 2M | `aa`, `er` | Medium (AttachAttack, EvolutionRusher) |
+| 2M+ | `e2`, `er` | Hard + Medium (Expectiminimax(2), EvolutionRusher) |
+
+**Key Changes**:
+- `pfsp_baseline_slots = 2` - 2 permanent baseline slots
+- `pfsp_baseline_max_allocation = 0.20` - Max 20% of envs for baselines
+- Baselines **cannot be evicted** from pool
+- Baselines provide **diversity signal** outside self-play bubble
+
+### Code Changes
+
+1. **`config.py`**: Added `pfsp_baseline_*` options
+2. **`pfsp_callback.py`**: 
+   - `_update_baseline_curriculum()` - Stage transitions
+   - `_assign_opponent_to_env()` - Reserves first N envs for baselines
+   - Eviction logic protects baselines
+3. **`vec_game.rs`**: 
+   - `add_baseline_to_pool()` - Adds built-in bots to pool
+   - `set_env_opponent()` - Handles both ONNX and baselines
+4. **`python_bindings.rs`**: Python binding for `add_baseline_to_pool`
 
 ### Gradient Health Analysis (@ 786k steps)
 
@@ -891,11 +965,19 @@ Diagnostic Results:
     Status: ✅ Well balanced across all layers
 ```
 
-### Key Improvements ✅
+### Key Learnings
 
-1. **Architecture Revamp**: Bias-free projections and multi-head pooling (4 queries) have completely resolved the feature bottleneck.
-2. **Stable Learning**: Gradients are now perfectly balanced between the feature extractor and the action head.
-3. **Training Speed**: ~400 it/s on RTX 3050.
+1. **PFSP needs diversity injection** - Pure self-play creates echo chambers
+2. **Win rate vs pool ≠ absolute strength** - High self-play WR can mask stagnation  
+3. **Entropy increase = red flag** - Usually indicates policy confusion
+4. **Fixed baselines = diversity anchor** - Prevent pool homogeneity
+
+### Next Steps → Run #10
+
+1. Resume from best checkpoint (12.8M steps, Elo 1952)
+2. Enable baseline curriculum
+3. Monitor win rate **per opponent** (not just aggregate)
+4. Expected: Elo should resume climbing once diversity signal restored
 
 ---
 
@@ -907,7 +989,8 @@ Diagnostic Results:
 | Run #4-5 | Attention Fixes | 1825 Elo | High variance, architecture bottlenecks |
 | Run #6 | Multi-Head Pool | - | Validated architecture improvements |
 | Run #7 | Pure Self-Play | - | Modern RL Regime |
-| **Run #8** | **PFSP Optimal** | **1644 Elo** | **❌ KL explosion, catastrophic forgetting** |
+| Run #8 | PFSP Optimal | 1644 Elo | ❌ KL explosion, catastrophic forgetting |
+| **Run #9** | **PFSP V2 Revamp** | **1952 Elo** | **⚠️ Echo chamber stagnation. Fixed with baseline curriculum** |
 
 ---
 
