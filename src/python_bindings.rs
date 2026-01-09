@@ -865,7 +865,7 @@ impl PyGame {
                                 base * speed_factor
                             }
                         }
-                        Some(crate::state::GameOutcome::Tie) => 0.0,
+                        Some(crate::state::GameOutcome::Tie) => -0.5,
                         None => 0.0,
                     }
                 } else {

@@ -290,7 +290,7 @@ class SelfPlayEnv(gym.Env):
                                     -1.0 + (point_diff / 6.0)
                                 ) * speed_factor
                         else:
-                            final_reward = 0.0  # Tie
+                            final_reward = self.config.draw_reward  # Tie
 
                 if done:
                     break

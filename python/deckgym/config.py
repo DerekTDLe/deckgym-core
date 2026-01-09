@@ -50,6 +50,7 @@ NUM_TOOL_TYPES = 8
 
 REWARD_WIN_BASE = 1.0
 REWARD_LOSS_BASE = -1.0
+REWARD_DRAW_BASE = -0.5
 REWARD_POINT_DIFF_SCALE = 6.0  # point_diff / 6 for scaling
 REWARD_SPEED_REFERENCE_TURNS = 13  # speed_factor = 1 + (13 - turns) / 13
 REWARD_SPEED_FACTOR_MIN = 1.0  # speed_factor is clamped to >= 1.0
@@ -162,6 +163,7 @@ class TrainingConfig:
     ent_coef: float = 0.02  # Entropy coefficient (exploration)
     vf_coef: float = 0.5  # Value function coefficient
     clip_range: float = 0.2  # PPO clipping range
+    draw_reward: float = REWARD_DRAW_BASE  # Reward for a tie
     max_grad_norm: float = 1.0  # Gradient clipping
     target_kl: float = 0.015  # Early stopping if KL > target
 
@@ -258,6 +260,7 @@ class TrainingConfig:
             "ent_coef",
             "vf_coef",
             "clip_range",
+            "draw_reward",
             "max_grad_norm",
             "target_kl",
             "attention_mask_threshold",
@@ -401,6 +404,7 @@ ppo:
   ent_coef: {self.ent_coef}
   vf_coef: {self.vf_coef}
   clip_range: {self.clip_range}
+  draw_reward: {self.draw_reward}
   max_grad_norm: {self.max_grad_norm}
   target_kl: {self.target_kl}
 
@@ -493,6 +497,7 @@ environment:
                 "ent_coef",
                 "vf_coef",
                 "clip_range",
+                "draw_reward",
                 "max_grad_norm",
                 "target_kl",
             ]:

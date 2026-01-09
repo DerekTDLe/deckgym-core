@@ -24,6 +24,9 @@ use crate::{
 #[cfg(feature = "onnx")]
 use crate::players::BatchedOnnxInference;
 
+/// Reward for a tie game
+const REWARD_DRAW_BASE: f32 = -0.5;
+
 /// Result of a batch step operation
 pub struct BatchStepResult {
     /// Observations for all environments (n_envs × obs_size), flattened
@@ -200,7 +203,7 @@ impl EnvInstance {
                     base * speed_factor
                 }
             }
-            Some(GameOutcome::Tie) => 0.0,
+            Some(GameOutcome::Tie) => REWARD_DRAW_BASE,
             None => 0.0,
         }
     }
@@ -217,7 +220,7 @@ pub struct VecGame {
     onnx_opponent: Option<BatchedOnnxInference>,
     /// ONNX opponent pool for per-episode selection (indexed by pool position)
     #[cfg(feature = "onnx")]
-    onnx_pool: Vec<BatchedOnnxInference>,
+    onnx_pool: Vec<Option<BatchedOnnxInference>>,
     /// Pool opponent names (for external API), index matches onnx_pool
     #[cfg(feature = "onnx")]
     onnx_pool_names: Vec<String>,
@@ -336,7 +339,7 @@ impl VecGame {
         }
 
         let inference = BatchedOnnxInference::new(model_path, deterministic, device)?;
-        self.onnx_pool.push(inference);
+        self.onnx_pool.push(Some(inference));
         self.onnx_pool_names.push(name.to_string());
         // Add corresponding grouping buffer with capacity for all envs
         self.opponent_groups.push(Vec::with_capacity(self.n_envs));
@@ -371,6 +374,7 @@ impl VecGame {
         // Also add to pool names for unified lookup (but NOT to onnx_pool itself)
         #[cfg(feature = "onnx")]
         {
+            self.onnx_pool.push(None); // Placeholder for baseline
             self.onnx_pool_names.push(name.to_string());
             // Add a placeholder for opponent_groups to keep indices aligned
             self.opponent_groups.push(Vec::with_capacity(self.n_envs));
@@ -479,19 +483,7 @@ impl VecGame {
             None => return false,
         };
 
-        // Count baselines before this index (they're in names but not in onnx_pool)
-        let baselines_before = self.onnx_pool_names[..opp_idx]
-            .iter()
-            .filter(|n| self.baseline_codes.contains_key(*n))
-            .count();
-        
-        // The actual ONNX pool index is opp_idx minus baselines before it
-        let onnx_pool_idx = opp_idx - baselines_before;
-        
-        // Remove from ONNX pool (this drops the Session, freeing GPU memory)
-        if onnx_pool_idx < self.onnx_pool.len() {
-            self.onnx_pool.remove(onnx_pool_idx);
-        }
+        self.onnx_pool.remove(opp_idx);
         self.onnx_pool_names.remove(opp_idx);
         self.opponent_groups.remove(opp_idx);
 
@@ -890,6 +882,12 @@ impl VecGame {
                     continue;
                 }
 
+                // Skip if this index corresponds to a baseline (no ONNX model)
+                let onnx_model = match &mut self.onnx_pool[opp_idx] {
+                    Some(m) => m,
+                    None => continue,
+                };
+
                 // Collect env indices for this opponent
                 let env_indices: Vec<usize> = self.opponent_groups[opp_idx].clone();
 
@@ -905,7 +903,7 @@ impl VecGame {
                 }
 
                 // Run batched inference for this opponent
-                let actions = self.onnx_pool[opp_idx].predict_batch(
+                let actions = onnx_model.predict_batch(
                     &obs_batch,
                     &mask_batch,
                     env_indices.len(),
@@ -1077,6 +1075,12 @@ impl VecGame {
                     continue;
                 }
 
+                // Skip if this index corresponds to a baseline (no ONNX model)
+                let onnx_model = match &mut self.onnx_pool[opp_idx] {
+                    Some(m) => m,
+                    None => continue,
+                };
+
                 let active: Vec<usize> = self.opponent_groups[opp_idx].clone();
 
                 let mut obs_batch: Vec<f32> = Vec::with_capacity(active.len() * OBSERVATION_SIZE);
@@ -1088,7 +1092,7 @@ impl VecGame {
                     mask_batch.extend(get_action_mask(&self.envs[i].state));
                 }
 
-                let actions = self.onnx_pool[opp_idx].predict_batch(
+                let actions = onnx_model.predict_batch(
                     &obs_batch,
                     &mask_batch,
                     active.len(),
@@ -1195,8 +1199,8 @@ mod tests {
 
         assert_eq!(obs.len(), 2 * OBSERVATION_SIZE);
     }
-
     #[test]
+
     fn test_vec_game_get_masks() {
         let deck_pairs = vec![(test_deck_string(), test_deck_string())];
 
