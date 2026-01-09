@@ -63,13 +63,11 @@ REWARD_SPEED_FACTOR_MIN = 1.0  # speed_factor is clamped to >= 1.0
 TRUESKILL_MU = 1500  # Initial skill rating
 TRUESKILL_SIGMA = 500  # Initial uncertainty (large for new agents)
 TRUESKILL_BETA = 250  # Performance variance (sigma / 2)
-TRUESKILL_TAU = 5  # Dynamic factor
-TRUESKILL_DRAW_PROBABILITY = 0.02  # Probability of draw
+TRUESKILL_TAU = 0  # Dynamic factor
+TRUESKILL_DRAW_PROBABILITY = 0.01  # Probability of draw
 
 # Default evaluation games
-EVAL_GAMES_PER_PAIR_CALIBRATE = 50
-EVAL_GAMES_PER_PAIR_AUDIT = 40
-EVAL_GAMES_PER_PAIR_BENCH = 20
+N_ROBIN_ROUNDS = 20 # Brute force for precision
 EVAL_REPORTS_DIR = "eval_reports"
 EVAL_DEFAULT_DEVICE = "trt"
 

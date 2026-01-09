@@ -508,12 +508,35 @@ class PFSPCallback(BaseCallback):
 
         return float(np.mean(winrates))
 
-    def _get_baseline_winrate(self) -> Optional[float]:
+    def _is_fair_baseline(self, baseline_code: str) -> bool:
+        """
+        Check if a baseline is considered 'fair' (non-omniscient).
+
+        Omniscient bots (Expectiminimax 'e' and MCTS 'm') are excluded from
+        fair winrate metrics as they have access to hidden information.
+        """
+        lower = baseline_code.lower()
+        if lower in ["er", "et"]:
+            return True
+        if lower.startswith("e") or lower.startswith("m"):
+            return False
+        return True
+
+    def _get_baseline_winrate(self, only_fair: bool = True) -> Optional[float]:
         """
         Calculate unweighted average agent winrate against baseline opponents.
+
+        Args:
+            only_fair: If True, only include non-omniscient baselines (excludes 'e' and 'm').
         """
         baseline_opps = [
-            d for n, d in self.opponent_pool.items() if d.get("is_baseline")
+            d
+            for n, d in self.opponent_pool.items()
+            if d.get("is_baseline")
+            and (
+                not only_fair
+                or self._is_fair_baseline(d.get("baseline_code", ""))
+            )
         ]
         if not baseline_opps:
             return None

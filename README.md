@@ -137,6 +137,12 @@ python python/scripts/benchmark_players.py
 | **ONNX Neural Net (GPU)** | `o1g` | **~930** | Attention model (15MB), single inference |
 | **ONNX Neural Net (TensorRT)** | `o1t` | **~930** | Attention model (15MB), single inference |
 | ExpectiMiniMax (d=3) | `e3` | ~450 | Exponentially slower with depth |
+| **MCTSPlayer** | `m[n]` | Varies | Omniscient search (lookahead) |
+
+> [!NOTE]
+> **Omniscience & "Cheating"**: Currently, `ExpectiMiniMaxPlayer` and `MCTSPlayer` have access to the full `State` object during their search, including hidden information like the opponent's hand and deck order. This makes them extremely difficult to beat and explains why a ~30% winrate against `e2` is considered an excellent performance for a non-cheating agent.
+> 
+> **Heuristics**: `EvolutionRusher` (`er`) is currently the strongest non-cheating heuristic baseline.
 
 > **Note**: ONNX performance is limited by single-sample inference overhead. In batch mode (training with `VecGame`), throughput is much higher. The `o[n]` player loads the *n* newest `.onnx` model from `models/` directory.
 
@@ -231,7 +237,7 @@ The agent learns through continuous self-play against its own previous versions 
 
 ### TrueSkill Leaderboard (300 games/baseline)
 
-*Note : Newest and current model architecture did not finish training yet, this serves as a temporary demonstration of the agent level of play*
+*Note: Newest and current model architecture did not finish training yet, this serves as a temporary demonstration of the agent level of play. Expectiminimax players are included here for reference as "omniscient" baselines.*
 
 | Rank | Player | Expose |
 |------|--------|-----------|

@@ -3,9 +3,7 @@
 Unified Evaluation Script for DeckGym using TrueSkill and Rust-Native Execution.
 
 Modes:
-- calibrate: Run baselines against each other to establish ground truth ratings.
-- audit: Evaluate a single model (converts to ONNX + runs in Rust).
-- bench: Evaluate a directory of checkpoints.
+- bench: Evaluate a directory of checkpoints in a tournament.
 """
 
 import argparse
@@ -15,6 +13,9 @@ import os
 import shutil
 import tempfile
 import sys
+import threading
+import random
+from itertools import combinations
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -43,9 +44,7 @@ from deckgym.config import (
     TRUESKILL_BETA,
     TRUESKILL_TAU,
     TRUESKILL_DRAW_PROBABILITY,
-    EVAL_GAMES_PER_PAIR_CALIBRATE,
-    EVAL_GAMES_PER_PAIR_AUDIT,
-    EVAL_GAMES_PER_PAIR_BENCH,
+    N_ROBIN_ROUNDS,
     EVAL_REPORTS_DIR,
     EVAL_DEFAULT_DEVICE,
 )
@@ -112,16 +111,6 @@ TRUESKILL_ENV = trueskill.TrueSkill(
     draw_probability=TRUESKILL_DRAW_PROBABILITY,
 )
 BASELINES_FILE = Path("trueskill_baselines.json")
-DEFAULT_BASELINES_TO_CALIBRATE = [
-    "r",
-    "aa",
-    "et",
-    "w",
-    "v",
-    "er",
-    "e2",
-    "e3",
-]
 BOT_NAMES = {
     "r": "Random",
     "aa": "AttachAttack",
@@ -150,110 +139,29 @@ class Rating:
     def from_trueskill(r: trueskill.Rating) -> "Rating":
         return Rating(mu=r.mu, sigma=r.sigma)
 
+def assign_tier(percentile: float) -> Tuple[str, str]:
+    """Assign a tier and color based on percentile."""
+    if percentile >= 95:
+        return "S+", "bold magenta"
+    if percentile >= 80:
+        return "S", "magenta"
+    if percentile >= 60:
+        return "A", "green"
+    if percentile >= 40:
+        return "B", "yellow"
+    if percentile >= 20:
+        return "C", "orange"
+    return "D", "red"
 
-import threading
-
-
-class TrueSkillTracker:
-    def __init__(self, storage_file: Path = BASELINES_FILE):
-        self.storage_file = storage_file
-        self.ratings: Dict[str, Rating] = {}
-        self.lock = threading.Lock()
-        self.load()
-
-    def load(self):
-        if self.storage_file.exists():
-            with open(self.storage_file) as f:
-                data = json.load(f)
-                for name, r in data.items():
-                    self.ratings[name] = Rating(mu=r["mu"], sigma=r["sigma"])
-
-        # Initialize missing defaults
-        for code in BOT_NAMES:
-            if code not in self.ratings:
-                self.ratings[code] = Rating.from_trueskill(
-                    TRUESKILL_ENV.create_rating()
-                )
-
-    def save(self):
-        data = {
-            name: {"mu": r.mu, "sigma": r.sigma} for name, r in self.ratings.items()
-        }
-        with open(self.storage_file, "w") as f:
-            json.dump(data, f, indent=2)
-
-    def update(self, winner_code: str, loser_code: str, draw: bool = False):
-        with self.lock:
-            r_winner = self.get(winner_code).to_trueskill()
-            r_loser = self.get(loser_code).to_trueskill()
-
-            if draw:
-                new_w, new_l = TRUESKILL_ENV.rate_1vs1(r_winner, r_loser, drawn=True)
-            else:
-                new_w, new_l = TRUESKILL_ENV.rate_1vs1(r_winner, r_loser)
-
-            self.ratings[winner_code] = Rating.from_trueskill(new_w)
-            self.ratings[loser_code] = Rating.from_trueskill(new_l)
-
-    def get(self, code: str) -> Rating:
-        return self.ratings.get(
-            code, Rating.from_trueskill(TRUESKILL_ENV.create_rating())
-        )
-
-
-def find_existing_report(mode: str, name: str) -> Optional[dict]:
-    """Check if a matching report already exists in EVAL_REPORTS_DIR."""
-    if not os.path.exists(EVAL_REPORTS_DIR):
-        return None
-
-    # Sanitize name
-    safe_name = "".join(c for c in name if c.isalnum() or c in ("-", "_")).rstrip()
-    
-    # 1. Try stable filename first
-    stable_filename = f"{mode}_{safe_name}.json"
-    report_path = os.path.join(EVAL_REPORTS_DIR, stable_filename)
-    if os.path.exists(report_path):
-        try:
-            with open(report_path, "r") as f:
-                return json.load(f)
-        except Exception:
-            pass
-
-    # 2. Fall back to timestamped files for backward compatibility
-    prefix = f"{mode}_{safe_name}_"
-    candidates = []
-    for filename in os.listdir(EVAL_REPORTS_DIR):
-        if filename.startswith(prefix) and filename.endswith(".json"):
-            candidates.append(filename)
-    
-    # Sort by timestamp (descending) to get the most recent
-    candidates.sort(reverse=True)
-
-    for filename in candidates:
-        r_path = os.path.join(EVAL_REPORTS_DIR, filename)
-        try:
-            with open(r_path, "r") as f:
-                return json.load(f)
-        except Exception:
-            continue
-    
-    # 3. If not found and we are looking for a single model audit, 
-    # check if it's contained in any audit_dir report
-    if mode == "audit":
-        for filename in os.listdir(EVAL_REPORTS_DIR):
-            if (filename.startswith("audit_dir_") or filename == f"audit_dir_{safe_name}.json") and filename.endswith(".json"):
-                try:
-                    with open(os.path.join(EVAL_REPORTS_DIR, filename), "r") as f:
-                        data = json.load(f)
-                        for res in data.get("results", []):
-                            if res.get("meta", {}).get("model_name") == name:
-                                # Return a compatible structure
-                                return res
-                except Exception:
-                    continue
-
-    return None
-
+def get_reliability(sigma: float) -> str:
+    """Return a descriptive reliability string based on sigma."""
+    if sigma < 40:
+        return "[green]Highly Reliable 🟢[/green]"
+    if sigma < 80:
+        return "[yellow]Stable 🟡[/yellow]"
+    if sigma < 150:
+        return "[orange3]Estimating 🟠[/orange3]"
+    return "[red]Initial 🔴[/red]"
 
 def save_report(data: dict, mode: str, name: Optional[str] = None):
     """Save evaluation results to a JSON file."""
@@ -350,283 +258,9 @@ def run_rust_match(
                 return 0  # Treat error as draw/void
 
 
-def calibrate(n_games_per_pair: int = EVAL_GAMES_PER_PAIR_CALIBRATE):
-    """Run round-robin tournament between baselines."""
-    tracker = TrueSkillTracker()
-    loader = MetaDeckLoader("meta_deck.json")
-
-    bots = DEFAULT_BASELINES_TO_CALIBRATE
-    pairs = []
-    for i in range(len(bots)):
-        for j in range(i + 1, len(bots)):
-            pairs.append((bots[i], bots[j]))
-
-    total_games = len(pairs) * n_games_per_pair
-    console.print(
-        f"[bold]Starting Calibration: {len(pairs)} pairs, {n_games_per_pair} games each ({total_games} total).[/bold]"
-    )
-
-    from rich.progress import TimeRemainingColumn, MofNCompleteColumn
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        MofNCompleteColumn(),
-        TaskProgressColumn(),
-        TimeRemainingColumn(),
-        console=console,
-    ) as progress:
-        overall_task = progress.add_task(
-            "[bold cyan]Total Progress[/bold cyan]", total=total_games
-        )
-
-        # Track active sub-tasks for each pair to show what's happening
-        pair_tasks = {}
-        for p1, p2 in pairs:
-            name = f"{BOT_NAMES.get(p1, p1)} vs {BOT_NAMES.get(p2, p2)}"
-            pair_tasks[(p1, p2)] = progress.add_task(
-                f"  {name}", total=n_games_per_pair, visible=False
-            )
-
-        def play_pair_game(p1, p2):
-            d1 = loader.sample_deck()
-            d2 = loader.sample_deck()
-            d1_s = d1 if isinstance(d1, str) else d1.deck_string
-            d2_s = d2 if isinstance(d2, str) else d2.deck_string
-
-            res = run_rust_match(d1_s, d2_s, p1, p2)
-
-            if res == 1:
-                tracker.update(p1, p2, draw=False)
-            elif res == -1:
-                tracker.update(p2, p1, draw=False)
-            else:
-                tracker.update(p1, p2, draw=True)
-
-            progress.update(overall_task, advance=1)
-            progress.update(pair_tasks[(p1, p2)], advance=1, visible=True)
-
-            # Hide task when finished to avoid clutter
-            if progress.tasks[pair_tasks[(p1, p2)]].finished:
-                progress.update(pair_tasks[(p1, p2)], visible=False)
-
-        # Use ThreadPoolExecutor for parallel simulations
-        # Since Rust simulation releases GIL, this is very effective.
-        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-            futures = []
-            for p1, p2 in pairs:
-                for _ in range(n_games_per_pair):
-                    futures.append(executor.submit(play_pair_game, p1, p2))
-
-            # Wait for all to finish
-            for future in futures:
-                future.result()
-
-    tracker.save()
-    print_ratings(tracker)
-
-
-def evaluate_single_model(
-    model_path: str,
-    n_games: int = EVAL_GAMES_PER_PAIR_AUDIT,
-    tracker: Optional[TrueSkillTracker] = None,
-    show_table: bool = True,
-    device: str = EVAL_DEFAULT_DEVICE,
-) -> Optional[dict]:
-    """Evaluate a single model against baselines."""
-    if not ONNX_AVAILABLE:
-        console.print("[red]ONNX tools not installed. Cannot evaluate model.[/red]")
-        return
-
-    if tracker is None:
-        tracker = TrueSkillTracker()
-
-    loader = MetaDeckLoader("meta_deck.json")
-
-    model_name = Path(model_path).stem
-
-    # Check for existing report to skip
-    existing = find_existing_report("audit", model_name)
-    if existing:
-        console.print(
-            f"  [yellow]Matching report found, skipping simulations for {model_name}...[/yellow]"
-        )
-        if model_name in existing.get("ratings", {}):
-            r_data = existing["ratings"][model_name]
-            model_rating = trueskill.Rating(mu=r_data["mu"], sigma=r_data["sigma"])
-            tracker.ratings[model_name] = Rating.from_trueskill(model_rating)
-            if show_table:
-                print_ratings(tracker)
-            return existing
-
-    console.print(f"Evaluating [bold cyan]{model_name}[/bold cyan] via ONNX/Rust...")
-
-    # 1. Convert to ONNX
-    with tempfile.TemporaryDirectory() as tmpdir:
-        onnx_path = os.path.join(tmpdir, "model.onnx")
-        try:
-            model = MaskablePPO.load(model_path, device="cpu")
-            obs_size = model.observation_space.shape[0]
-            export_policy_to_onnx(
-                model, onnx_path, observation_size=obs_size, validate=False
-            )
-        except Exception as e:
-            console.print(f"[red]Failed to export ONNX: {e}[/red]")
-            return
-
-        onnx_code = f"onnx:{onnx_path}:{device}"
-
-        # 2. Run against baselines
-        baselines = DEFAULT_BASELINES_TO_CALIBRATE
-        model_rating = TRUESKILL_ENV.create_rating()
-
-        for bl in baselines:
-            console.print(f"  vs {BOT_NAMES[bl]}...", end=" ")
-
-            wins, losses, draws = 0, 0, 0
-            bl_rating = tracker.get(bl).to_trueskill()
-
-            for _ in range(n_games):
-                d1 = loader.sample_deck()
-                d2 = loader.sample_deck()
-
-                d1_s = d1.to_string() if hasattr(d1, "to_string") else str(d1)
-                d2_s = d2.to_string() if hasattr(d2, "to_string") else str(d2)
-
-                res = run_rust_match(d1_s, d2_s, onnx_code, bl)
-                if res == 1:
-                    model_rating, bl_rating = TRUESKILL_ENV.rate_1vs1(
-                        model_rating, bl_rating
-                    )
-                    wins += 1
-                elif res == -1:
-                    bl_rating, model_rating = TRUESKILL_ENV.rate_1vs1(
-                        bl_rating, model_rating
-                    )
-                    losses += 1
-                else:
-                    model_rating, bl_rating = TRUESKILL_ENV.rate_1vs1(
-                        model_rating, bl_rating, drawn=True
-                    )
-                    draws += 1
-
-            console.print(f"[green]{wins}W {losses}L {draws}D[/green]")
-
-        # Add to tracker for table display
-        tracker.ratings[model_name] = Rating.from_trueskill(model_rating)
-
-        if show_table:
-            print_ratings(tracker)
-        else:
-            console.print(
-                f"Done. Rating: [bold green]mu={model_rating.mu:.2f} sigma={model_rating.sigma:.2f}[/bold green] (Expose: {model_rating.mu - 3 * model_rating.sigma:.2f})\n"
-            )
-
-        # Build results for storage
-        results = {
-            "meta": {
-                "model_name": model_name,
-                "model_path": str(model_path),
-                "games_per_match": n_games,
-            },
-            "ratings": {
-                model_name: {
-                    "mu": model_rating.mu,
-                    "sigma": model_rating.sigma,
-                    "expose": model_rating.mu - 3 * model_rating.sigma,
-                }
-            },
-            "stats": {},
-        }
-
-        # Add baseline ratings to report
-        for bl in baselines:
-            bl_r = tracker.get(bl)
-            results["ratings"][BOT_NAMES[bl]] = {
-                "mu": bl_r.mu,
-                "sigma": bl_r.sigma,
-                "expose": bl_r.expose,
-            }
-
-        if tracker is None or show_table:  # Only save if it's a direct audit
-            save_report(results, "audit", name=model_name)
-
-        return results
-
-
-def audit_directory(
-    directory: str,
-    n_games: int = EVAL_GAMES_PER_PAIR_AUDIT,
-    device: str = EVAL_DEFAULT_DEVICE,
-):
-    """Evaluate all models in a directory against baselines."""
-    model_dir = Path(directory)
-    if not model_dir.exists():
-        console.print(f"[red]Directory not found: {directory}[/red]")
-        return
-
-    model_files = sorted(model_dir.glob("*.zip"))
-    if not model_files:
-        console.print(f"[red]No .zip files found in {directory}[/red]")
-        return
-
-    # Check for existing directory report
-    existing_report = find_existing_report("audit_dir", model_dir.name)
-    audited_models_data = {}
-    if existing_report:
-        for res in existing_report.get("results", []):
-            m_name = res.get("meta", {}).get("model_name")
-            if m_name:
-                audited_models_data[m_name] = res
-
-    tracker = TrueSkillTracker()
-    all_results = []
-    
-    # Fill tracker with existing results
-    for m_name, res in audited_models_data.items():
-        if m_name in res.get("ratings", {}):
-            r_data = res["ratings"][m_name]
-            model_rating = trueskill.Rating(mu=r_data["mu"], sigma=r_data["sigma"])
-            tracker.ratings[m_name] = Rating.from_trueskill(model_rating)
-            all_results.append(res)
-
-    # Determine which models still need auditing
-    to_audit = []
-    for mf in model_files:
-        if mf.stem not in audited_models_data:
-            to_audit.append(mf)
-    
-    if not to_audit:
-        console.print(f"[yellow]Full audit report for {directory} already exists. Skipping simulations.[/yellow]")
-    else:
-        if audited_models_data:
-            console.print(f"[bold]Resuming audit for {directory}: {len(to_audit)} new models found ({len(audited_models_data)} already audited)[/bold]\n")
-        else:
-            console.print(f"[bold]Auditing {len(model_files)} models in {directory}[/bold]\n")
-
-        for mf in to_audit:
-            res = evaluate_single_model(
-                str(mf), n_games=n_games, tracker=tracker, show_table=False, device=device
-            )
-            if res:
-                all_results.append(res)
-
-    console.print("\n[bold cyan]Final Audit Results:[/bold cyan]")
-    print_ratings(tracker)
-
-    # Save summary report even if no new models were audited (to ensure latest timestamp/metadata)
-    summary = {
-        "directory": str(directory),
-        "model_count": len(all_results),
-        "results": all_results,
-    }
-    save_report(summary, "audit_dir", name=model_dir.name)
-
-
 def benchmark_directory(
     directory: str,
-    n_games_per_pair: int = EVAL_GAMES_PER_PAIR_BENCH,
+    n_robin_rounds: int = N_ROBIN_ROUNDS,
     include_baselines: bool = True,
     device: str = EVAL_DEFAULT_DEVICE,
 ):
@@ -694,39 +328,30 @@ def benchmark_directory(
 
         # Add baselines
         if include_baselines:
-            baselines_to_test = ["e2", "e3", "e4"]  # Main baselines
+            baselines_to_test = ["er", "aa", "w"]  # Strongest non-cheating baselines
             for bl in baselines_to_test:
                 participants[BOT_NAMES[bl]] = bl
 
         console.print(f"\n[bold]Participants: {len(participants)}[/bold]")
 
-        # Build all matchup pairs
+        # Build all matchup pairs (All-play-all)
         names = list(participants.keys())
-        pairs = []
-        for i in range(len(names)):
-            for j in range(i + 1, len(names)):
-                pairs.append((names[i], names[j]))
+        base_pairs = list(combinations(names, 2))
+        
+        # Multiply by repetitions and shuffle GLOBALLY
+        # This improves TrueSkill convergence by interleaving participants
+        matchups = base_pairs * n_robin_rounds
+        random.shuffle(matchups)
 
-        total_games = len(pairs) * n_games_per_pair
+        total_games = len(matchups)
         console.print(
-            f"[bold]Running {len(pairs)} matchups × {n_games_per_pair} games = {total_games} total games[/bold]\n"
+            f"[bold]Running {len(base_pairs)} matchups × {n_robin_rounds} reps = {total_games} total games[/bold]\n"
         )
 
         # Initialize ratings
         ratings: Dict[str, trueskill.Rating] = {}
         for name in participants:
             ratings[name] = TRUESKILL_ENV.create_rating()
-
-        # Load calibrated baselines for initial ratings
-        if include_baselines and BASELINES_FILE.exists():
-            tracker = TrueSkillTracker()
-            for bl_code in ["e2", "e3", "e4"]:
-                bl_name = BOT_NAMES[bl_code]
-                if bl_name in participants:
-                    rating = tracker.get(bl_code)
-                    ratings[bl_name] = trueskill.Rating(
-                        mu=rating.mu, sigma=rating.sigma
-                    )
 
         # Statistics tracking
         wins: Dict[str, int] = {name: 0 for name in participants}
@@ -786,11 +411,12 @@ def benchmark_directory(
 
             # Run games in parallel
             with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-                futures = []
-                for name_a, name_b in pairs:
-                    for _ in range(n_games_per_pair):
-                        futures.append(executor.submit(play_game, name_a, name_b))
+                futures = [
+                    executor.submit(play_game, p[0], p[1])
+                    for p in matchups
+                ]
 
+                # Wait for all to finish
                 for future in futures:
                     future.result()
 
@@ -802,7 +428,7 @@ def benchmark_directory(
         bench_results = {
             "meta": {
                 "directory": str(directory),
-                "games_per_match": n_games_per_pair,
+                "games_per_match": n_robin_rounds,
                 "model_count": len(model_names),
                 "participants": list(participants.keys()),
             },
@@ -831,6 +457,64 @@ def benchmark_directory(
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def print_leaderboard(
+    ratings: Dict[str, trueskill.Rating],
+    wins: Dict[str, int],
+    losses: Dict[str, int],
+    draws: Dict[str, int],
+    participants: Dict[str, str],
+    title: str = "Tournament Standings",
+):
+    """Print a production-grade leaderboard using rich."""
+    from rich.panel import Panel
+    
+    # Sort by expose rating (mu - 3*sigma)
+    sorted_items = sorted(
+        ratings.items(), key=lambda x: x[1].mu - 3 * x[1].sigma, reverse=True
+    )
+    
+    # Calculate percentiles for tiers
+    n = len(sorted_items)
+    
+    table = Table(show_lines=True, header_style="bold cyan")
+    table.add_column("Rank", style="dim", width=4, justify="center")
+    table.add_column("Tier", justify="center")
+    table.add_column("Participant", min_width=20)
+    table.add_column("Rating (Mu/σ)", justify="right")
+    table.add_column("Expose", style="bold white", justify="right")
+    table.add_column("W-L-D", justify="center")
+    table.add_column("Win%", justify="right")
+    table.add_column("Reliability", justify="left")
+
+    for rank, (name, r) in enumerate(sorted_items, 1):
+        # Percentile: (n - rank) / (n - 1) * 100
+        percentile = ((n - rank) / (n - 1) * 100) if n > 1 else 100
+        tier_str, tier_style = assign_tier(percentile)
+        
+        expose = r.mu - 3 * r.sigma
+        w, l, d = wins[name], losses[name], draws[name]
+        total = w + l + d
+        win_pct = (w / total * 100) if total > 0 else 0
+        
+        # Style baselines differently
+        is_baseline = participants[name] in BOT_NAMES or participants[name] in BOT_NAMES.values()
+        display_name = f"[italic dim]{name}[/italic dim]" if is_baseline else f"[bold]{name}[/bold]"
+        
+        table.add_row(
+            str(rank),
+            f"[{tier_style}]{tier_str}[/{tier_style}]",
+            display_name,
+            f"{r.mu:.0f} [dim]±{r.sigma:.0f}[/dim]",
+            f"{expose:.1f}",
+            f"{w}-{l}-{d}",
+            f"{win_pct:.1f}%",
+            get_reliability(r.sigma)
+        )
+
+    console.print("\n")
+    console.print(Panel(table, title=f"[bold white]{title}[/bold white]", expand=False))
+    console.print("[dim]Expose = Mu - 3σ (Conservative Skill Estimate)[/dim]\n")
+
 def print_bench_results(
     ratings: Dict[str, trueskill.Rating],
     wins: Dict[str, int],
@@ -838,106 +522,23 @@ def print_bench_results(
     draws: Dict[str, int],
     participants: Dict[str, str],
 ):
-    """Print benchmark results as a rich table."""
-    console.print("\n")
-
-    table = Table(title="[bold]Benchmark Results[/bold]", show_lines=True)
-    table.add_column("Rank", style="dim", width=4)
-    table.add_column("Name", style="cyan")
-    table.add_column("Mu", style="green", justify="right")
-    table.add_column("Sigma", style="yellow", justify="right")
-    table.add_column("Expose", style="bold white", justify="right")
-    table.add_column("W-L-D", justify="center")
-    table.add_column("Win%", style="magenta", justify="right")
-
-    # Sort by expose rating
-    sorted_participants = sorted(
-        ratings.items(), key=lambda x: x[1].mu - 3 * x[1].sigma, reverse=True
-    )
-
-    for rank, (name, rating) in enumerate(sorted_participants, 1):
-        expose = rating.mu - 3 * rating.sigma
-        w, l, d = wins[name], losses[name], draws[name]
-        total = w + l + d
-        win_pct = (w / total * 100) if total > 0 else 0
-
-        # Highlight baselines differently
-        is_baseline = name in BOT_NAMES.values()
-        name_style = "[dim italic]" if is_baseline else ""
-        name_end = "[/dim italic]" if is_baseline else ""
-
-        table.add_row(
-            str(rank),
-            f"{name_style}{name}{name_end}",
-            f"{rating.mu:.1f}",
-            f"{rating.sigma:.1f}",
-            f"{expose:.1f}",
-            f"{w}-{l}-{d}",
-            f"{win_pct:.1f}%",
-        )
-
-    console.print(table)
-
-    # Summary
-    console.print(
-        "\n[dim]Legend: Mu=TrueSkill mean, Sigma=uncertainty, Expose=Mu-3σ (conservative rating)[/dim]"
-    )
+    print_leaderboard(ratings, wins, losses, draws, participants, "Benchmark Tournament Results")
 
 
-def print_ratings(tracker: TrueSkillTracker):
-    table = Table(title="TrueSkill Ratings")
-    table.add_column("Bot", style="cyan")
-    table.add_column("Mu", style="green")
-    table.add_column("Sigma", style="yellow")
-    table.add_column("Expose (Mu-3Sig)", style="bold white")
-
-    sorted_ratings = sorted(
-        tracker.ratings.items(), key=lambda x: x[1].expose, reverse=True
-    )
-
-    for code, r in sorted_ratings:
-        name = BOT_NAMES.get(code, code)
-        table.add_row(name, f"{r.mu:.2f}", f"{r.sigma:.2f}", f"{r.expose:.2f}")
-
-    console.print(table)
 
 
 def main():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Calibrate
-    calib_p = subparsers.add_parser("calibrate", help="Calibrate baselines")
-    calib_p.add_argument(
-        "--games",
-        type=int,
-        default=EVAL_GAMES_PER_PAIR_CALIBRATE,
-        help="Games per pair",
-    )
-
-    # Audit
-    audit_p = subparsers.add_parser("audit", help="Audit model")
-    audit_p.add_argument("model", help="Path to .zip model")
-    audit_p.add_argument(
-        "--games",
-        type=int,
-        default=EVAL_GAMES_PER_PAIR_AUDIT,
-        help=f"Games per baseline (default: {EVAL_GAMES_PER_PAIR_AUDIT})",
-    )
-    audit_p.add_argument(
-        "--device",
-        default=EVAL_DEFAULT_DEVICE,
-        help=f"Device for ONNX (default: {EVAL_DEFAULT_DEVICE})",
-    )
-
     # Bench (Directory)
-    bench_p = subparsers.add_parser("bench", help="Benchmark directory")
+    bench_p = subparsers.add_parser("bench", help="Benchmark directory (Tournament mode)")
     bench_p.add_argument("dir", help="Directory containing .zip models")
     bench_p.add_argument(
         "--games",
         type=int,
-        default=EVAL_GAMES_PER_PAIR_BENCH,
-        help=f"Games per matchup (default: {EVAL_GAMES_PER_PAIR_BENCH})",
+        default=N_ROBIN_ROUNDS,
+        help=f"Number of repetitions for the Round Robin tournament (default: {N_ROBIN_ROUNDS})",
     )
     bench_p.add_argument(
         "--no-baselines", action="store_true", help="Exclude baselines from tournament"
@@ -952,15 +553,7 @@ def main():
 
     print_system_info()
 
-    if args.command == "calibrate":
-        calibrate(args.games)
-    elif args.command == "audit":
-        path = Path(args.model)
-        if path.is_dir():
-            audit_directory(args.model, args.games, args.device)
-        else:
-            evaluate_single_model(args.model, args.games, device=args.device)
-    elif args.command == "bench":
+    if args.command == "bench":
         benchmark_directory(
             args.dir,
             args.games,
