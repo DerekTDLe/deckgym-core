@@ -358,7 +358,7 @@ impl VecGame {
     pub fn add_baseline_to_pool(&mut self, name: &str, bot_code: &str) -> Result<(), String> {
         // Validate bot code
         parse_player_code(bot_code)?;
-        
+
         // Check if already exists in baseline_codes or onnx pool
         if self.baseline_codes.contains_key(name) {
             return Err(format!("Baseline '{}' already in pool", name));
@@ -367,10 +367,11 @@ impl VecGame {
         if self.onnx_pool_names.contains(&name.to_string()) {
             return Err(format!("Opponent '{}' already in pool", name));
         }
-        
+
         // Store the baseline code mapping
-        self.baseline_codes.insert(name.to_string(), bot_code.to_string());
-        
+        self.baseline_codes
+            .insert(name.to_string(), bot_code.to_string());
+
         // Also add to pool names for unified lookup (but NOT to onnx_pool itself)
         #[cfg(feature = "onnx")]
         {
@@ -379,7 +380,7 @@ impl VecGame {
             // Add a placeholder for opponent_groups to keep indices aligned
             self.opponent_groups.push(Vec::with_capacity(self.n_envs));
         }
-        
+
         Ok(())
     }
 
@@ -408,16 +409,16 @@ impl VecGame {
                 .map_err(|e| format!("Failed to parse deck A: {}", e))?;
             let deck_b = Deck::from_string(&self.envs[env_idx].deck_b)
                 .map_err(|e| format!("Failed to parse deck B: {}", e))?;
-            
+
             let player_codes = vec![
                 parse_player_code("r").unwrap(), // Player 0: random (agent controls)
                 parse_player_code(bot_code).map_err(|e| e.to_string())?, // Player 1: baseline bot
             ];
-            
+
             self.envs[env_idx].opponent_type = Some(bot_code.clone());
             self.envs[env_idx].players = Some(create_players(deck_a, deck_b, player_codes));
             self.env_opponent_indices[env_idx] = None; // Not using ONNX pool index
-            
+
             return Ok(());
         }
 
@@ -456,19 +457,26 @@ impl VecGame {
     pub fn remove_onnx_from_pool(&mut self, opponent_name: &str) -> bool {
         // Check if it's a baseline first
         let is_baseline = self.baseline_codes.contains_key(opponent_name);
-        
+
         if is_baseline {
             // Remove baseline
             self.baseline_codes.remove(opponent_name);
-            
+
             // Also remove from pool names
             if let Some(opp_idx) = self.onnx_pool_names.iter().position(|n| n == opponent_name) {
                 self.onnx_pool_names.remove(opp_idx);
                 self.opponent_groups.remove(opp_idx);
-                
+
                 // Clear any env using this opponent (baselines use opponent_type, not indices)
                 for env in &mut self.envs {
-                    if env.opponent_type.as_deref() == Some(self.baseline_codes.get(opponent_name).map(|s| s.as_str()).unwrap_or(opponent_name)) {
+                    if env.opponent_type.as_deref()
+                        == Some(
+                            self.baseline_codes
+                                .get(opponent_name)
+                                .map(|s| s.as_str())
+                                .unwrap_or(opponent_name),
+                        )
+                    {
                         env.opponent_type = None;
                         env.players = None;
                     }
@@ -476,7 +484,7 @@ impl VecGame {
             }
             return true;
         }
-        
+
         // Find the ONNX opponent index
         let opp_idx = match self.onnx_pool_names.iter().position(|n| n == opponent_name) {
             Some(idx) => idx,
@@ -837,11 +845,11 @@ impl VecGame {
         // First, handle baseline opponents (they have env_opponent_indices[i] = None)
         // Baselines use built-in bots via play_bot_turns(), not ONNX
         for i in 0..self.n_envs {
-            if !dones[i] 
-                && self.env_opponent_indices[i].is_none() 
-                && self.envs[i].players.is_some() 
-                && self.envs[i].state.current_player == 1 
-                && !self.envs[i].state.is_game_over() 
+            if !dones[i]
+                && self.env_opponent_indices[i].is_none()
+                && self.envs[i].players.is_some()
+                && self.envs[i].state.current_player == 1
+                && !self.envs[i].state.is_game_over()
             {
                 // This is a baseline env - play bot turns until agent's turn or game over
                 let (bot_reward, bot_done) = self.envs[i].play_bot_turns();

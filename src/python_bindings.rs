@@ -971,7 +971,9 @@ pub fn py_simulate(
         for i in 0..num_simulations {
             let players = create_players(deck_a.clone(), deck_b.clone(), cli_players.clone());
             // Vary seed per game - if seed provided, use seed + game_index; otherwise random
-            let game_seed = seed.map(|s| s.wrapping_add(i as u64)).unwrap_or_else(rand::random::<u64>);
+            let game_seed = seed
+                .map(|s| s.wrapping_add(i as u64))
+                .unwrap_or_else(rand::random::<u64>);
             let mut game = Game::new(players, game_seed);
 
             // Safety: limit to 2000 ticks OR 99 turns to avoid infinite loops/cycles

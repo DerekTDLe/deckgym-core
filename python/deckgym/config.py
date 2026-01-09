@@ -214,11 +214,13 @@ class TrainingConfig:
     # Curriculum stages: list of (step_threshold, [baseline_codes])
     # At each stage, the baselines are replaced. Codes: v=ValueFunction, w=WeightedRandom,
     # aa=AttachAttack, er=EvolutionRusher, e2/e3/e4=Expectiminimax(depth)
-    pfsp_baseline_curriculum: List[Tuple[int, List[str]]] = field(default_factory=lambda: [
-        (0, ["v", "w"]),           # Stage 1: Easy opponents (0-500k steps)
-        (500_000, ["aa", "er"]),   # Stage 2: Medium opponents (500k-2M steps)
-        (2_000_000, ["e2", "er"]), # Stage 3: Hard opponent + medium (2M+ steps)
-    ])
+    pfsp_baseline_curriculum: List[Tuple[int, List[str]]] = field(
+        default_factory=lambda: [
+            (0, ["v", "w"]),  # Stage 1: Easy opponents (0-500k steps)
+            (500_000, ["aa", "er"]),  # Stage 2: Medium opponents (500k-2M steps)
+            (2_000_000, ["e2", "er"]),  # Stage 3: Hard opponent + medium (2M+ steps)
+        ]
+    )
 
     # -------------------------------------------------------------------------
     # Game Environment Limits
