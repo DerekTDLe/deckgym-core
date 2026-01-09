@@ -174,7 +174,20 @@ class PFSPCallback(BaseCallback):
 
         # Load all opponents into pool
         for opp_name, opp_data in self.opponent_pool.items():
-            # Export to ONNX if not already done
+            # Skip baselines - they use built-in bots, not ONNX
+            if opp_data.get("is_baseline", False):
+                # Add baseline to Rust pool using built-in bot code
+                baseline_code = opp_data.get("baseline_code", opp_name.replace("baseline_", ""))
+                try:
+                    self.env.vec_game.add_baseline_to_pool(opp_name, baseline_code)
+                    if self.verbose > 1:
+                        print(f"[PFSP] Added baseline {opp_name} ({baseline_code}) to pool")
+                except Exception as e:
+                    if self.verbose > 0:
+                        print(f"[PFSP WARNING] Failed to add baseline {opp_name}: {e}")
+                continue
+            
+            # Export ONNX opponents if not already done
             if "onnx_path" not in opp_data or not Path(opp_data["onnx_path"]).exists():
                 loaded_model = MaskablePPO.load(opp_data["path"], device="cpu")
                 onnx_path = os.path.join(
