@@ -1000,6 +1000,20 @@ Permanent baseline slots to prevent echo chamber:
 | 500k - 2M | `aa`, `er` | Medium |
 | 2M+ | `e2`, `er` | Hard + Medium |
 
+### Benchmark Results (TrueSkill Tournament)
+
+A full Round Robin tournament (5 reps) was conducted on all checkpoints in `attention_run_2`.
+
+| Metric | Value | Note |
+|--------|-------|------|
+| **Peak Expose (CRN)** | **1531.3** | Reached by `rl_bot_10752000_steps` |
+| **Baseline Rank** | **Rank 45/48** | `EvolutionRusher` (1247.9) |
+| **Growth Threshold** | **~500k steps** | Point where agent reliably beats `er` |
+| **Status** | **Stable** 🟡 | Ratings stabilized ($\sigma \approx 15$) |
+
+> [!IMPORTANT]
+> The model has decisively cleared the heuristic baseline (`EvolutionRusher`), justifying the attention architecture. The next milestone is 1900+ CR (rivaling `e2` even with omniscient rollouts).
+
 ```python
 pfsp_baseline_slots = 2              # Permanent slots (never evicted)
 pfsp_baseline_max_allocation = 0.20  # 20% of envs for baselines
@@ -1030,8 +1044,8 @@ pfsp_baseline_max_allocation = 0.20  # 20% of envs for baselines
 | Run #6 | Multi-Head Pool | - | Validated architecture improvements |
 | Run #7 | Pure Self-Play | - | Modern RL Regime |
 | Run #8 | PFSP Optimal | 1644 Elo | ❌ KL explosion, catastrophic forgetting |
-| Run #9 | PFSP V2 Revamp | 1807 Elo | ⚠️ Echo chamber stagnation |
-| **Run #10** | **PFSP + Baselines** | **TBD** | **Baseline curriculum + eviction fixes** |
+| Run #9 | PFSP V2 Revamp | 1807 CR | ⚠️ Echo chamber stagnation |
+| **Run #10** | **PFSP + Baselines** | **1531 CRN** | **Checkpoint 10.7M significantly beats EvolutionaryRusher (Rank 45/48)** |
 
 ---
 
@@ -1058,12 +1072,14 @@ Observed limitations are primarily due to **architectural and training issues**,
 | #6 | - | Multi-head pooling tested (architecture only) |
 | #7 | - | Pure self-play, modern refactoring |
 | #8 | 1644 | ❌ KL explosion → catastrophic forgetting |
-| #9 | 1807 | PFSP echo chamber, all opponents identical |
-| #10 | TBD | Baseline curriculum + eviction fix |
+| #9 | 1807 CR | PFSP echo chamber, all opponents identical |
+| #10 | 1531 CRN | Baseline curriculum + eviction fix (Revived climbing) |
 
 **No run has yet surpassed e2 (Conservative Rating (CR) ~1893).**
 
 > Note: rating system changed from standard Elo to TrueSkill Mu after Run #8, while the first run used standard Elo, it still reflect the general level of the agent. 1900 Elo is equivalent to e2 TrueSkill CR.
+CRN stands for Conservative Rating New, as the benchmark did not include e2 or e3, it is confusing but the best way to compare the agent's performance with fair benchmarks. Is it not really comparable with CR. However, there will be an unified rating system in the future with a common anchor.
+CRN only stands as a placeholder for now. The relative differences between model ratings are still valid and meaningful.
 
 ### Goal
 

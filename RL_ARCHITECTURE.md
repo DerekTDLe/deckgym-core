@@ -166,12 +166,33 @@ The default configuration uses the following values:
 
 *Note : current run uses n_steps = 64 to compensate for n_envs = 128, making full use of the GPU.*
 
-## Evaluation (TrueSkill)
+## Evaluation (Professional Tournament System)
 
-The evaluation system in `evaluate.py` has been revamped to use **TrueSkill** instead of traditional Elo. This provides:
-- **Faster Convergence**: Ratings stabilize with fewer matches.
-- **Uncertainty Tracking**: Models have a `mu` (mean) and `sigma` (uncertainty).
-- **Matchmaking**: More accurate assessment of model performance against baselines and other pool models.
+The evaluation system in `evaluate.py` has been simplified into a professional tournament tool using **TrueSkill** (revamped from Elo).
+
+### 1. Tournament Format
+- **Round Robin x5**: The `bench` command runs 5 full Round Robin cycles. Every participant plays every other participant, ensuring statistical significance.
+- **Unique Deck Sampling**: For every single match, two unique decks are sampled via `MetaDeckLoader`. This prevents models from over-fitting to specific matchups or deck variants.
+- **Fixed Model Environment**: TrueSkill parameters are tuned for rating static checkpoints:
+  - `mu=1500`, `sigma=500` (Initial state)
+  - `beta=250`, `tau=0.0` (Zero drift - assume models don't change during evaluation)
+  - `draw_probability=0.01`
+
+### 2. Leaderboard & Tiers
+Participants are ranked by their **Expose** rating ($Mu - 3 \times Sigma$) and classified into Tiers based on their **percentile** in the current pool:
+- **S+ Tier** (Top 5%): Elite performance.
+- **S/A/B Tiers**: High to Moderate skill levels.
+- **C/D Tiers**: Learning or underperforming models.
+
+### 3. Reliability Indicators
+A descriptive reliability status is calculated from the uncertainty ($Sigma$):
+- **Highly Reliable** ($\sigma < 40$): Stabilized rating (approx. 60+ matches).
+- **Stable** ($\sigma < 80$): Reliable estimate.
+- **Estimating** ($\sigma < 150$): Preliminary data.
+- **Initial** ($\sigma \ge 150$): Just started the tournament.
+
+### 4. Anchored Comparisons
+The `EvolutionRusher` (`er`) baseline is used as the standard anchor. Since it's a strong, non-cheating heuristic, it provides a stable reference point for evaluating the true progress of the models across different training runs.
 
 ## Training Performance
 

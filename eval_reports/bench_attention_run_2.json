@@ -1,0 +1,513 @@
+{
+  "timestamp": "2026-01-10T00:52:14.505806",
+  "mode": "bench",
+  "meta": {
+    "directory": "checkpoints/attention_run_2/",
+    "games_per_match": 20,
+    "model_count": 45,
+    "participants": [
+      "rl_bot_10240000_steps",
+      "rl_bot_1024000_steps",
+      "rl_bot_10496000_steps",
+      "rl_bot_10752000_steps",
+      "rl_bot_11008000_steps",
+      "rl_bot_11264000_steps",
+      "rl_bot_11520000_steps",
+      "rl_bot_1280000_steps",
+      "rl_bot_1536000_steps",
+      "rl_bot_1792000_steps",
+      "rl_bot_2048000_steps",
+      "rl_bot_2304000_steps",
+      "rl_bot_2560000_steps",
+      "rl_bot_256000_steps",
+      "rl_bot_2816000_steps",
+      "rl_bot_3072000_steps",
+      "rl_bot_3328000_steps",
+      "rl_bot_3584000_steps",
+      "rl_bot_3840000_steps",
+      "rl_bot_4096000_steps",
+      "rl_bot_4352000_steps",
+      "rl_bot_4608000_steps",
+      "rl_bot_4864000_steps",
+      "rl_bot_5120000_steps",
+      "rl_bot_512000_steps",
+      "rl_bot_5376000_steps",
+      "rl_bot_5632000_steps",
+      "rl_bot_5888000_steps",
+      "rl_bot_6144000_steps",
+      "rl_bot_6400000_steps",
+      "rl_bot_6656000_steps",
+      "rl_bot_6912000_steps",
+      "rl_bot_7168000_steps",
+      "rl_bot_7424000_steps",
+      "rl_bot_7680000_steps",
+      "rl_bot_768000_steps",
+      "rl_bot_7936000_steps",
+      "rl_bot_8192000_steps",
+      "rl_bot_8448000_steps",
+      "rl_bot_8704000_steps",
+      "rl_bot_8960000_steps",
+      "rl_bot_9216000_steps",
+      "rl_bot_9472000_steps",
+      "rl_bot_9728000_steps",
+      "rl_bot_9984000_steps",
+      "EvolutionRusher",
+      "AttachAttack",
+      "WeightedRandom"
+    ]
+  },
+  "ratings": {
+    "rl_bot_10240000_steps": {
+      "mu": 1511.2754591494056,
+      "sigma": 14.750859499272362,
+      "expose": 1467.0228806515886
+    },
+    "rl_bot_1024000_steps": {
+      "mu": 1458.6753586595062,
+      "sigma": 14.725569608535098,
+      "expose": 1414.4986498339008
+    },
+    "rl_bot_10496000_steps": {
+      "mu": 1516.5050029077115,
+      "sigma": 14.835256953197625,
+      "expose": 1471.9992320481188
+    },
+    "rl_bot_10752000_steps": {
+      "mu": 1576.0483227709249,
+      "sigma": 14.910735143419895,
+      "expose": 1531.3161173406652
+    },
+    "rl_bot_11008000_steps": {
+      "mu": 1568.9910235304394,
+      "sigma": 14.882421014822638,
+      "expose": 1524.3437604859714
+    },
+    "rl_bot_11264000_steps": {
+      "mu": 1553.1872652066602,
+      "sigma": 14.878174608507031,
+      "expose": 1508.5527413811392
+    },
+    "rl_bot_11520000_steps": {
+      "mu": 1551.5624261826808,
+      "sigma": 14.838856524215279,
+      "expose": 1507.0458566100351
+    },
+    "rl_bot_1280000_steps": {
+      "mu": 1445.9490702982525,
+      "sigma": 14.73865783105076,
+      "expose": 1401.7330968051003
+    },
+    "rl_bot_1536000_steps": {
+      "mu": 1454.0991003270974,
+      "sigma": 14.716466653844943,
+      "expose": 1409.9497003655626
+    },
+    "rl_bot_1792000_steps": {
+      "mu": 1462.6199950291914,
+      "sigma": 14.726197205472392,
+      "expose": 1418.4414034127742
+    },
+    "rl_bot_2048000_steps": {
+      "mu": 1467.1796706150208,
+      "sigma": 14.73375474523755,
+      "expose": 1422.9784063793081
+    },
+    "rl_bot_2304000_steps": {
+      "mu": 1473.0626863736234,
+      "sigma": 14.701738447281283,
+      "expose": 1428.9574710317795
+    },
+    "rl_bot_2560000_steps": {
+      "mu": 1483.5426174766546,
+      "sigma": 14.709338118948404,
+      "expose": 1439.4146031198095
+    },
+    "rl_bot_256000_steps": {
+      "mu": 1118.8909833845355,
+      "sigma": 18.01909632460572,
+      "expose": 1064.8336944107184
+    },
+    "rl_bot_2816000_steps": {
+      "mu": 1467.9176720909477,
+      "sigma": 14.688658436210215,
+      "expose": 1423.851696782317
+    },
+    "rl_bot_3072000_steps": {
+      "mu": 1448.3094908563855,
+      "sigma": 14.735515756886146,
+      "expose": 1404.1029435857272
+    },
+    "rl_bot_3328000_steps": {
+      "mu": 1507.460032165223,
+      "sigma": 14.801010661727211,
+      "expose": 1463.0570001800415
+    },
+    "rl_bot_3584000_steps": {
+      "mu": 1503.2749433197052,
+      "sigma": 14.714939456076051,
+      "expose": 1459.130124951477
+    },
+    "rl_bot_3840000_steps": {
+      "mu": 1481.0567912686824,
+      "sigma": 14.700073202259839,
+      "expose": 1436.956571661903
+    },
+    "rl_bot_4096000_steps": {
+      "mu": 1507.0941314659517,
+      "sigma": 14.762334230910465,
+      "expose": 1462.8071287732203
+    },
+    "rl_bot_4352000_steps": {
+      "mu": 1505.6684678805623,
+      "sigma": 14.691106229676075,
+      "expose": 1461.5951491915341
+    },
+    "rl_bot_4608000_steps": {
+      "mu": 1520.4218903239098,
+      "sigma": 14.762443953034406,
+      "expose": 1476.1345584648066
+    },
+    "rl_bot_4864000_steps": {
+      "mu": 1501.24980704137,
+      "sigma": 14.763987709861727,
+      "expose": 1456.957843911785
+    },
+    "rl_bot_5120000_steps": {
+      "mu": 1478.7695214708851,
+      "sigma": 14.715729211603259,
+      "expose": 1434.6223338360753
+    },
+    "rl_bot_512000_steps": {
+      "mu": 1301.7326808336006,
+      "sigma": 15.391660956217915,
+      "expose": 1255.5576979649468
+    },
+    "rl_bot_5376000_steps": {
+      "mu": 1496.304973814198,
+      "sigma": 14.735546089855996,
+      "expose": 1452.0983355446301
+    },
+    "rl_bot_5632000_steps": {
+      "mu": 1500.383123956767,
+      "sigma": 14.73385277531474,
+      "expose": 1456.1815656308227
+    },
+    "rl_bot_5888000_steps": {
+      "mu": 1509.036689060896,
+      "sigma": 14.768385181438534,
+      "expose": 1464.7315335165804
+    },
+    "rl_bot_6144000_steps": {
+      "mu": 1509.9931788179802,
+      "sigma": 14.7628803966908,
+      "expose": 1465.7045376279077
+    },
+    "rl_bot_6400000_steps": {
+      "mu": 1521.6302254117613,
+      "sigma": 14.703281848492141,
+      "expose": 1477.5203798662849
+    },
+    "rl_bot_6656000_steps": {
+      "mu": 1508.1050643728458,
+      "sigma": 14.75576971321012,
+      "expose": 1463.8377552332154
+    },
+    "rl_bot_6912000_steps": {
+      "mu": 1512.677200797919,
+      "sigma": 14.735863310875551,
+      "expose": 1468.4696108652925
+    },
+    "rl_bot_7168000_steps": {
+      "mu": 1539.856123113957,
+      "sigma": 14.793463299305403,
+      "expose": 1495.4757332160407
+    },
+    "rl_bot_7424000_steps": {
+      "mu": 1542.1091564968674,
+      "sigma": 14.843985155874758,
+      "expose": 1497.577201029243
+    },
+    "rl_bot_7680000_steps": {
+      "mu": 1529.1776528669109,
+      "sigma": 14.754702518332225,
+      "expose": 1484.9135453119143
+    },
+    "rl_bot_768000_steps": {
+      "mu": 1421.5876059342913,
+      "sigma": 14.843032341240491,
+      "expose": 1377.0585089105698
+    },
+    "rl_bot_7936000_steps": {
+      "mu": 1544.0538553636848,
+      "sigma": 14.827054446686029,
+      "expose": 1499.5726920236266
+    },
+    "rl_bot_8192000_steps": {
+      "mu": 1505.705607928695,
+      "sigma": 14.676710628333081,
+      "expose": 1461.6754760436957
+    },
+    "rl_bot_8448000_steps": {
+      "mu": 1536.098534858002,
+      "sigma": 14.782213654899397,
+      "expose": 1491.7518938933038
+    },
+    "rl_bot_8704000_steps": {
+      "mu": 1530.494612831692,
+      "sigma": 14.834963445183567,
+      "expose": 1485.9897224961412
+    },
+    "rl_bot_8960000_steps": {
+      "mu": 1542.900890839231,
+      "sigma": 14.804562372874507,
+      "expose": 1498.4872037206073
+    },
+    "rl_bot_9216000_steps": {
+      "mu": 1532.7444182172217,
+      "sigma": 14.788536761436275,
+      "expose": 1488.3788079329129
+    },
+    "rl_bot_9472000_steps": {
+      "mu": 1544.558093537739,
+      "sigma": 14.864468407960024,
+      "expose": 1499.964688313859
+    },
+    "rl_bot_9728000_steps": {
+      "mu": 1546.781242178226,
+      "sigma": 14.86260341207509,
+      "expose": 1502.1934319420006
+    },
+    "rl_bot_9984000_steps": {
+      "mu": 1544.6038032355088,
+      "sigma": 14.816436605391921,
+      "expose": 1500.154493419333
+    }
+  },
+  "stats": {
+    "rl_bot_2560000_steps": {
+      "wins": 472,
+      "losses": 459,
+      "draws": 9
+    },
+    "rl_bot_4096000_steps": {
+      "wins": 494,
+      "losses": 438,
+      "draws": 8
+    },
+    "rl_bot_10240000_steps": {
+      "wins": 499,
+      "losses": 434,
+      "draws": 7
+    },
+    "rl_bot_7424000_steps": {
+      "wins": 533,
+      "losses": 399,
+      "draws": 8
+    },
+    "rl_bot_1024000_steps": {
+      "wins": 448,
+      "losses": 487,
+      "draws": 5
+    },
+    "rl_bot_9728000_steps": {
+      "wins": 538,
+      "losses": 400,
+      "draws": 2
+    },
+    "rl_bot_5888000_steps": {
+      "wins": 499,
+      "losses": 433,
+      "draws": 8
+    },
+    "rl_bot_5632000_steps": {
+      "wins": 491,
+      "losses": 446,
+      "draws": 3
+    },
+    "rl_bot_6400000_steps": {
+      "wins": 508,
+      "losses": 421,
+      "draws": 11
+    },
+    "rl_bot_8192000_steps": {
+      "wins": 493,
+      "losses": 439,
+      "draws": 8
+    },
+    "rl_bot_8448000_steps": {
+      "wins": 524,
+      "losses": 409,
+      "draws": 7
+    },
+    "rl_bot_7168000_steps": {
+      "wins": 528,
+      "losses": 406,
+      "draws": 6
+    },
+    "rl_bot_1280000_steps": {
+      "wins": 436,
+      "losses": 500,
+      "draws": 4
+    },
+    "rl_bot_9472000_steps": {
+      "wins": 536,
+      "losses": 402,
+      "draws": 2
+    },
+    "rl_bot_10496000_steps": {
+      "wins": 507,
+      "losses": 424,
+      "draws": 9
+    },
+    "rl_bot_2048000_steps": {
+      "wins": 455,
+      "losses": 480,
+      "draws": 5
+    },
+    "rl_bot_11008000_steps": {
+      "wins": 563,
+      "losses": 377,
+      "draws": 0
+    },
+    "rl_bot_1536000_steps": {
+      "wins": 439,
+      "losses": 493,
+      "draws": 8
+    },
+    "rl_bot_4864000_steps": {
+      "wins": 491,
+      "losses": 445,
+      "draws": 4
+    },
+    "rl_bot_5120000_steps": {
+      "wins": 467,
+      "losses": 464,
+      "draws": 9
+    },
+    "rl_bot_3072000_steps": {
+      "wins": 434,
+      "losses": 496,
+      "draws": 10
+    },
+    "rl_bot_9984000_steps": {
+      "wins": 532,
+      "losses": 401,
+      "draws": 7
+    },
+    "rl_bot_11264000_steps": {
+      "wins": 546,
+      "losses": 392,
+      "draws": 2
+    },
+    "rl_bot_4608000_steps": {
+      "wins": 509,
+      "losses": 420,
+      "draws": 11
+    },
+    "rl_bot_256000_steps": {
+      "wins": 144,
+      "losses": 784,
+      "draws": 12
+    },
+    "rl_bot_6144000_steps": {
+      "wins": 498,
+      "losses": 435,
+      "draws": 7
+    },
+    "rl_bot_3840000_steps": {
+      "wins": 467,
+      "losses": 462,
+      "draws": 11
+    },
+    "rl_bot_7680000_steps": {
+      "wins": 519,
+      "losses": 418,
+      "draws": 3
+    },
+    "rl_bot_2816000_steps": {
+      "wins": 456,
+      "losses": 476,
+      "draws": 8
+    },
+    "rl_bot_9216000_steps": {
+      "wins": 525,
+      "losses": 411,
+      "draws": 4
+    },
+    "rl_bot_2304000_steps": {
+      "wins": 461,
+      "losses": 473,
+      "draws": 6
+    },
+    "rl_bot_6656000_steps": {
+      "wins": 497,
+      "losses": 431,
+      "draws": 12
+    },
+    "rl_bot_1792000_steps": {
+      "wins": 448,
+      "losses": 483,
+      "draws": 9
+    },
+    "rl_bot_7936000_steps": {
+      "wins": 532,
+      "losses": 402,
+      "draws": 6
+    },
+    "rl_bot_8960000_steps": {
+      "wins": 532,
+      "losses": 405,
+      "draws": 3
+    },
+    "rl_bot_512000_steps": {
+      "wins": 292,
+      "losses": 640,
+      "draws": 8
+    },
+    "rl_bot_4352000_steps": {
+      "wins": 496,
+      "losses": 439,
+      "draws": 5
+    },
+    "rl_bot_5376000_steps": {
+      "wins": 485,
+      "losses": 450,
+      "draws": 5
+    },
+    "rl_bot_8704000_steps": {
+      "wins": 523,
+      "losses": 410,
+      "draws": 7
+    },
+    "rl_bot_768000_steps": {
+      "wins": 406,
+      "losses": 526,
+      "draws": 8
+    },
+    "rl_bot_3584000_steps": {
+      "wins": 492,
+      "losses": 442,
+      "draws": 6
+    },
+    "rl_bot_3328000_steps": {
+      "wins": 496,
+      "losses": 439,
+      "draws": 5
+    },
+    "rl_bot_6912000_steps": {
+      "wins": 503,
+      "losses": 430,
+      "draws": 7
+    },
+    "rl_bot_11520000_steps": {
+      "wins": 542,
+      "losses": 392,
+      "draws": 6
+    },
+    "rl_bot_10752000_steps": {
+      "wins": 566,
+      "losses": 365,
+      "draws": 9
+    }
+  }
+}
