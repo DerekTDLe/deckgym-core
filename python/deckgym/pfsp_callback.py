@@ -399,15 +399,15 @@ class PFSPCallback(BaseCallback):
         min_wr_to_add = getattr(self.env.config, "pfsp_min_winrate_to_add", 0.50) if hasattr(self.env, "config") else 0.50
 
         if self.rollout_count % effective_add_freq == 0:
+            # Refreshes stats for the whole pool BEFORE adding (so eviction uses fresh stats)
+            self._reset_pool_stats()
+            
             if avg_agent_winrate >= min_wr_to_add or len(self.opponent_pool) < 2:
                 if self.verbose > 0 and avg_agent_winrate >= min_wr_to_add:
                     print(f"[PFSP] Agent winrate {avg_agent_winrate:.1%} >= {min_wr_to_add:.0%}, adding to pool")
                 self._add_to_pool()
             elif self.verbose > 0:
                 print(f"[PFSP] Agent winrate {avg_agent_winrate:.1%} < {min_wr_to_add:.0%}, skipping pool add")
-                
-            # Refreshes stats for the whole pool (including newly added model)
-            self._reset_pool_stats()
 
     def _get_avg_agent_winrate(self) -> float:
         """Calculate average agent winrate across all opponents in pool."""
@@ -564,12 +564,22 @@ class PFSPCallback(BaseCallback):
                 # If tied, remove oldest one
                 candidates.sort(key=lambda x: (x[1], x[2]))
                 weakest_name = candidates[0][0]
-                weakest_wr = candidates[0][1] ** (1/self.priority_exponent) if self.priority_exponent != 0 else 0
                 
-                # 1. Flag environments to skip next result and reassign
+                # Get actual winrate for log display (before stats were reset)
+                w_data = non_baseline_pool.get(weakest_name, {"wins": 0, "losses": 0, "draws": 0})
+                w_total = w_data["wins"] + w_data["losses"] + w_data["draws"]
+                weakest_wr = w_data["wins"] / w_total if w_total > 0 else PFSP_NEUTRAL_WINRATE
+                
+                # 1. Remove from Rust pool FIRST (this shifts indices)
+                try:
+                    self.env.vec_game.remove_onnx_from_pool(weakest_name)
+                except Exception as e:
+                    if self.verbose > 0: print(f"[PFSP WARNING] Failed to remove {weakest_name} from Rust: {e}")
+
+                # 2. Flag environments to skip next result and reassign
                 self._flag_reassigned_envs(weakest_name)
                 
-                # 2. Cleanup files and pool
+                # 3. Cleanup files and pool
                 weakest_data = self.opponent_pool.pop(weakest_name)
                 non_baseline_pool.pop(weakest_name)
 
@@ -577,12 +587,7 @@ class PFSPCallback(BaseCallback):
                     p = Path(weakest_data["path"])
                     if p.exists(): p.unlink()
 
-                try:
-                    self.env.vec_game.remove_onnx_from_pool(weakest_name)
-                except Exception as e:
-                    if self.verbose > 0: print(f"[PFSP WARNING] Failed to remove {weakest_name} from Rust: {e}")
-
-                # 3. Force reassign envs
+                # 4. Force reassign envs AFTER Rust removal
                 for env_idx, name in enumerate(self.env_opponent_names):
                     if name == weakest_name:
                         self._assign_opponent_to_env(env_idx)
