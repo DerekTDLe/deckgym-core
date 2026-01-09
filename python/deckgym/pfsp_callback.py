@@ -400,11 +400,14 @@ class PFSPCallback(BaseCallback):
 
         if self.rollout_count % effective_add_freq == 0:
             if avg_agent_winrate >= min_wr_to_add or len(self.opponent_pool) < 2:
-                self._add_to_pool()
                 if self.verbose > 0 and avg_agent_winrate >= min_wr_to_add:
                     print(f"[PFSP] Agent winrate {avg_agent_winrate:.1%} >= {min_wr_to_add:.0%}, adding to pool")
+                self._add_to_pool()
             elif self.verbose > 0:
                 print(f"[PFSP] Agent winrate {avg_agent_winrate:.1%} < {min_wr_to_add:.0%}, skipping pool add")
+                
+            # Refreshes stats for the whole pool (including newly added model)
+            self._reset_pool_stats()
 
     def _get_avg_agent_winrate(self) -> float:
         """Calculate average agent winrate across all opponents in pool."""
@@ -591,7 +594,11 @@ class PFSPCallback(BaseCallback):
             else:
                 break
 
-        # Refresh Logic: Reset WR stats for all models in the pool at each addition
+        if self.verbose > 0:
+            print(f"[PFSP \u2192Pool] Saved agent as {checkpoint_name}")
+
+    def _reset_pool_stats(self) -> None:
+        """Reset win/loss/draw statistics for all models in the pool."""
         for data in self.opponent_pool.values():
             data["wins"] = 0
             data["losses"] = 0
@@ -599,7 +606,6 @@ class PFSPCallback(BaseCallback):
         
         if self.verbose > 0:
             print(f"[PFSP Refresh] Pool size: {len(self.opponent_pool)}, statistics reset")
-            print(f"[PFSP →Pool] Saved agent as {checkpoint_name}")
 
     def get_pool_stats(self) -> Dict:
         """Return statistics about the opponent pool."""
