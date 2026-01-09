@@ -981,6 +981,46 @@ Diagnostic Results:
 
 ---
 
+## Run #10: PFSP with Baseline Curriculum
+
+**Date**: 2026-01-09  
+**Model**: Attention-based (256 embed, 8 heads, 3 layers)  
+**Config**: `configs/attention_run_2.yaml`  
+**Status**: [IN PROGRESS]
+
+### Key Changes from Run #9
+
+#### 1. Baseline Curriculum
+
+Permanent baseline slots to prevent echo chamber:
+
+| Step Range | Baselines | Rationale |
+|------------|-----------|-----------|
+| 0 - 500k | `v`, `w` | Easy warmup |
+| 500k - 2M | `aa`, `er` | Medium |
+| 2M+ | `e2`, `er` | Hard + Medium |
+
+```python
+pfsp_baseline_slots = 2              # Permanent slots (never evicted)
+pfsp_baseline_max_allocation = 0.20  # 20% of envs for baselines
+```
+
+#### 2. Draw Reward
+
+- Draws now receive **-0.5 reward** (previously neutral 0.0)
+- Tracked separately: `(W-L-D)` format in logs
+
+#### 3. Eviction Fix
+
+- **Bug**: Stats reset BEFORE eviction → all opponents had 50% priority → oldest evicted
+- **Fix**: Eviction now uses accumulated stats → correctly evicts lowest winrate
+
+### Training Metrics
+
+*To be filled during training*
+
+---
+
 ## Strategy Evolution
 
 | Stage | Approach | Result | Conclusion |
@@ -990,33 +1030,52 @@ Diagnostic Results:
 | Run #6 | Multi-Head Pool | - | Validated architecture improvements |
 | Run #7 | Pure Self-Play | - | Modern RL Regime |
 | Run #8 | PFSP Optimal | 1644 Elo | ❌ KL explosion, catastrophic forgetting |
-| **Run #9** | **PFSP V2 Revamp** | **1952 Elo** | **⚠️ Echo chamber stagnation. Fixed with baseline curriculum** |
+| Run #9 | PFSP V2 Revamp | 1807 Elo | ⚠️ Echo chamber stagnation |
+| **Run #10** | **PFSP + Baselines** | **TBD** | **Baseline curriculum + eviction fixes** |
 
 ---
 
 
 ## Notes & Insights
 
-### 2026-01-05
+### Key Insight
 
-#### Diagnostic Analysis (17M steps)
-- Initial diagnostic completed on Run #1 (17M steps)
-- Optimization metrics are healthy (entropy, KL, value loss stable)
-- Win rate peaked at 52.5% (11.2M steps), currently oscillating around 47%
-- Explained variance at 0.57 - unclear if due to game randomness or model limits
-- **Hypothesis**: Model capacity may be limiting, but not certain
-- **Decision**: Increase to 512 embed_dim (8-10M params) to test hypothesis
-- **Rationale**: Go big to definitively test capacity bottleneck (goal is to beat e3)
-- If no improvement after 5M steps → look elsewhere (reward shaping, curriculum, etc.)
+Observed limitations are primarily due to **architectural and training issues**, not insufficient model capacity or suboptimal hyperparameters:
 
-#### Configuration System
-- Created YAML-based config system for easy experiment management
-- Two configs available:
-  - `configs/baseline.yaml` - Run #1 settings (256 dim, 2-3M params)
-  - `configs/large_model.yaml` - Run #2 settings (512 dim, 8-10M params)
-- Added `--config` argument to `train.py` for loading YAML configs
-- CLI arguments override YAML values for quick experiments
-- Installed PyYAML dependency
+- Increasing `embed_dim` (256 → 512) did not improve performance
+- Tuning hyperparameters (LR, KL, entropy) stabilized training but didn't unlock gains
+- Real problems: dead gradients, homogeneous pool, incorrect eviction
+
+### Runs Summary
+
+| Run | Peak Elo | Main Problem |
+|-----|----------|--------------|
+| #1 | 1750 | Plateau at 47% WR, capacity suspected (wrong lead) |
+| #2 | 1746 | Post-norm attention → 26B gradient ratio |
+| #3 | 1760 | Large MLP, no better than #1, 2849 dim observation useless |
+| #4 | 1825 | Pre-norm OK but K-proj bias dead, ±80 Elo variance |
+| #5 | ~1800 | GELU+bias-free OK, pooling bottleneck identified |
+| #6 | - | Multi-head pooling tested (architecture only) |
+| #7 | - | Pure self-play, modern refactoring |
+| #8 | 1644 | ❌ KL explosion → catastrophic forgetting |
+| #9 | 1807 | PFSP echo chamber, all opponents identical |
+| #10 | TBD | Baseline curriculum + eviction fix |
+
+**No run has yet surpassed e2 (Conservative Rating (CR) ~1893).**
+
+> Note: rating system changed from standard Elo to TrueSkill Mu after Run #8, while the first run used standard Elo, it still reflect the general level of the agent. 1900 Elo is equivalent to e2 TrueSkill CR.
+
+### Goal
+
+> **Achieve CR higher than e2 (Expectiminimax depth 2)**
+
+The difference between e2 and higher depths (e3, e4) is minimal. If the RL model beats e2, it would justify:
+1. Using learned model vs search
+2. Attention architecture vs MLP
+
+### MLP Baseline Required
+
+To validate the attention architecture's contribution, an MLP run without attention should be conducted in parallel with the same configuration (PFSP + baselines) for direct comparison. Last MLP was disapointing and a new one could benefit from the recent improvements.
 
 ---
 
