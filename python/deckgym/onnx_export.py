@@ -232,12 +232,22 @@ def cleanup_old_onnx_files(directory: str, keep_latest: int = 1) -> None:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Convert SB3 MaskablePPO (.zip) to ONNX")
+    parser = argparse.ArgumentParser(
+        description="Convert SB3 MaskablePPO (.zip) to ONNX"
+    )
     parser.add_argument("model_path", help="Path to SB3 checkpoint (.zip)")
-    parser.add_argument("output_path", nargs="?", default=None, help="Output ONNX path (default: same dir as model with .onnx ext)")
-    parser.add_argument("--no-validate", action="store_true", help="Skip ONNX validation")
+    parser.add_argument(
+        "output_path",
+        nargs="?",
+        default=None,
+        help="Output ONNX path (default: same dir as model with .onnx ext)",
+    )
+    parser.add_argument(
+        "--no-validate", action="store_true", help="Skip ONNX validation"
+    )
     args = parser.parse_args()
 
-    output = convert_zip_to_onnx(args.model_path, args.output_path, validate=not args.no_validate)
+    output = convert_zip_to_onnx(
+        args.model_path, args.output_path, validate=not args.no_validate
+    )
     print(f"Done! Saved to {output}")
-

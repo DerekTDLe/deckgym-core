@@ -312,9 +312,7 @@ class BatchedDeckGymEnv(VecEnv):
             import deckgym
 
             deck_pairs = [self._sample_deck_pair() for _ in range(self.n_envs)]
-            self.vec_game = deckgym.VecGame(
-                deck_pairs, opponent_type=opponent_type
-            )
+            self.vec_game = deckgym.VecGame(deck_pairs, opponent_type=opponent_type)
             # Automatically reset since the internal state in Rust is now fresh
             self.reset()
 

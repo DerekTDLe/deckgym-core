@@ -34,13 +34,12 @@ use std::fmt::Debug;
 
 // Global session cache to avoid reloading ONNX models for every game
 #[cfg(feature = "onnx")]
-use std::sync::{Arc, Mutex, OnceLock};
-#[cfg(feature = "onnx")]
 use std::collections::HashMap;
+#[cfg(feature = "onnx")]
+use std::sync::{Arc, Mutex, OnceLock};
 
 #[cfg(feature = "onnx")]
 type SessionCache = Mutex<HashMap<String, Arc<Mutex<Session>>>>;
-
 
 #[cfg(feature = "onnx")]
 static ONNX_SESSION_CACHE: OnceLock<SessionCache> = OnceLock::new();
@@ -115,10 +114,12 @@ impl OnnxPlayer {
         // Check cache first
         let cache = get_session_cache();
         let cache_key = format!("{}:{}", model_path, device);
-        
+
         let session = {
-            let mut guard = cache.lock().map_err(|e| format!("Cache lock poisoned: {}", e))?;
-            
+            let mut guard = cache
+                .lock()
+                .map_err(|e| format!("Cache lock poisoned: {}", e))?;
+
             if let Some(cached) = guard.get(&cache_key) {
                 // Reuse cached session
                 Arc::clone(cached)
@@ -134,8 +135,10 @@ impl OnnxPlayer {
                     .with_intra_threads(1)
                     .map_err(|e| format!("Failed to set thread count: {}", e))?
                     .commit_from_file(model_path)
-                    .map_err(|e| format!("Failed to load ONNX model from '{}': {}", model_path, e))?;
-                
+                    .map_err(|e| {
+                        format!("Failed to load ONNX model from '{}': {}", model_path, e)
+                    })?;
+
                 let arc_session = Arc::new(Mutex::new(new_session));
                 guard.insert(cache_key, Arc::clone(&arc_session));
                 arc_session
