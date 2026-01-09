@@ -55,6 +55,10 @@ class PFSPCallback(BaseCallback):
         priority_exponent: float = DEFAULT_CONFIG.pfsp_priority_exponent,
         winrate_window: int = DEFAULT_CONFIG.pfsp_winrate_window,
         checkpoint_dir: str = DEFAULT_CONFIG.pfsp_checkpoint_dir,
+        # Baseline curriculum parameters
+        baseline_slots: int = DEFAULT_CONFIG.pfsp_baseline_slots,
+        baseline_max_allocation: float = DEFAULT_CONFIG.pfsp_baseline_max_allocation,
+        baseline_curriculum: list = None,
         verbose: int = 1,
     ):
         """
@@ -70,6 +74,9 @@ class PFSPCallback(BaseCallback):
                 Higher = focus more on hard opponents (typical: 1.0-3.0)
             winrate_window: Number of recent episodes to track per opponent
             checkpoint_dir: Directory to save opponent checkpoints
+            baseline_slots: Number of permanent baseline slots (never evicted)
+            baseline_max_allocation: Max fraction of envs that can play vs baselines
+            baseline_curriculum: List of (step_threshold, [baseline_codes]) tuples
             verbose: Verbosity level (0=silent, 1=normal, 2=debug)
         """
         super().__init__(verbose)
@@ -83,6 +90,13 @@ class PFSPCallback(BaseCallback):
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+        # Baseline curriculum settings
+        self.baseline_slots = baseline_slots
+        self.baseline_max_allocation = baseline_max_allocation
+        self.baseline_curriculum = baseline_curriculum or DEFAULT_CONFIG.pfsp_baseline_curriculum
+        self.current_baselines: list = []  # Currently active baseline codes
+        self.baseline_envs_count = max(1, int(n_envs * baseline_max_allocation))  # How many envs for baselines
+
         # State tracking
         self.rollout_count = 0
         self.current_opponent_name = None
@@ -94,7 +108,7 @@ class PFSPCallback(BaseCallback):
         ] * n_envs  # Track which opponent each env is using
         self.pool_mode = False  # True if using pool with per-env opponents
 
-        # Opponent pool: {name: {"path": str, "onnx_path": str, "wins": int, "losses": int, "added_at_step": int}}
+        # Opponent pool: {name: {"path": str, "onnx_path": str, "wins": int, "losses": int, "added_at_step": int, "is_baseline": bool}}
         self.opponent_pool: Dict[str, Dict] = {}
 
         # Episode tracking: [(opponent_name, won: bool), ...]
@@ -111,11 +125,16 @@ class PFSPCallback(BaseCallback):
                 f"[PFSP] Selecting opponent every {select_opponent_every_n_rollouts} rollouts"
             )
             print(f"[PFSP] Per-episode opponent selection ENABLED")
+            print(f"[PFSP] Baseline curriculum: {baseline_slots} slots, {baseline_max_allocation:.0%} max allocation")
+            print(f"[PFSP] Baseline stages: {len(self.baseline_curriculum)}")
 
     def _on_training_start(self) -> None:
         """Called when training starts - initialize pool with current model."""
         if self.verbose > 0:
             print("[PFSP] Training started - adding initial opponent to pool")
+
+        # Initialize baseline curriculum (add initial baselines to pool)
+        self._update_baseline_curriculum()
 
         # Add current (untrained) model to pool as initial opponent
         self._add_to_pool()
@@ -183,13 +202,90 @@ class PFSPCallback(BaseCallback):
 
         self.pool_mode = True
 
+    def _update_baseline_curriculum(self):
+        """
+        Update baseline opponents based on current training step.
+        
+        Checks the curriculum stages and swaps baselines when thresholds are crossed.
+        Baselines are added to the pool with is_baseline=True (never evicted).
+        """
+        current_step = self.num_timesteps
+        
+        # Find the appropriate curriculum stage
+        new_baselines = []
+        for step_threshold, baselines in sorted(self.baseline_curriculum, key=lambda x: x[0], reverse=True):
+            if current_step >= step_threshold:
+                new_baselines = baselines
+                break
+        
+        # Check if baselines changed
+        if set(new_baselines) == set(self.current_baselines):
+            return  # No change needed
+        
+        # Remove old baselines from pool
+        for old_bl in self.current_baselines:
+            bl_name = f"baseline_{old_bl}"
+            if bl_name in self.opponent_pool:
+                del self.opponent_pool[bl_name]
+                if self.pool_mode and isinstance(self.env, BatchedDeckGymEnv):
+                    try:
+                        self.env.vec_game.remove_onnx_from_pool(bl_name)
+                    except Exception:
+                        pass
+        
+        # Add new baselines to pool
+        for bl_code in new_baselines:
+            bl_name = f"baseline_{bl_code}"
+            self.opponent_pool[bl_name] = {
+                "path": None,  # No path for baselines (they're built-in)
+                "baseline_code": bl_code,  # Store the actual code (e.g., "e2", "v")
+                "wins": 0,
+                "losses": 0,
+                "added_at_step": current_step,
+                "is_baseline": True,  # Mark as baseline (never evicted)
+            }
+            
+            # Add to Rust pool if in pool mode
+            if self.pool_mode and isinstance(self.env, BatchedDeckGymEnv):
+                try:
+                    # Use the built-in baseline code directly
+                    self.env.vec_game.add_baseline_to_pool(bl_name, bl_code)
+                    if self.verbose > 0:
+                        print(f"[PFSP Baseline] Added {bl_name} ({bl_code}) to Rust pool")
+                except Exception as e:
+                    if self.verbose > 0:
+                        print(f"[PFSP WARNING] Failed to add baseline {bl_name}: {e}")
+        
+        if self.verbose > 0 and new_baselines != self.current_baselines:
+            old_str = ", ".join(self.current_baselines) if self.current_baselines else "none"
+            new_str = ", ".join(new_baselines)
+            print(f"[PFSP Baseline] Curriculum update at step {current_step}: [{old_str}] -> [{new_str}]")
+        
+        self.current_baselines = new_baselines
+
     def _assign_opponent_to_env(self, env_idx: int):
-        """Assign an opponent to a specific env using PFSP priority."""
+        """
+        Assign an opponent to a specific env.
+        
+        First `baseline_envs_count` envs are reserved for baselines (uniform selection).
+        Remaining envs use PFSP priority for opponent selection.
+        """
         if not self.opponent_pool:
             return
 
-        # Use PFSP priority to select opponent
-        selected_name = self._select_opponent_pfsp_for_env()
+        # Determine if this env should use baselines or PFSP pool
+        baseline_names = [f"baseline_{bl}" for bl in self.current_baselines]
+        
+        if env_idx < self.baseline_envs_count and baseline_names:
+            # This env is reserved for baselines - uniform selection among baselines
+            selected_name = np.random.choice(baseline_names)
+        else:
+            # Use PFSP priority (excluding baselines for fairness)
+            selected_name = self._select_opponent_pfsp_for_env(exclude_baselines=True)
+            
+            # Fallback to any opponent if pool is empty
+            if selected_name is None:
+                selected_name = self._select_opponent_pfsp_for_env(exclude_baselines=False)
 
         if selected_name:
             try:
@@ -201,17 +297,28 @@ class PFSPCallback(BaseCallback):
                         f"[PFSP WARNING] Failed to set opponent for env {env_idx}: {e}"
                     )
 
-    def _select_opponent_pfsp_for_env(self) -> Optional[str]:
-        """Select opponent using PFSP priority (same as _select_opponent_pfsp but returns name only)."""
-        if len(self.opponent_pool) == 0:
+    def _select_opponent_pfsp_for_env(self, exclude_baselines: bool = False) -> Optional[str]:
+        """
+        Select opponent using PFSP priority.
+        
+        Args:
+            exclude_baselines: If True, only select from self-play opponents (not baselines)
+        """
+        # Filter pool based on exclude_baselines
+        pool = {
+            name: data for name, data in self.opponent_pool.items()
+            if not (exclude_baselines and data.get("is_baseline", False))
+        }
+        
+        if len(pool) == 0:
             return None
 
-        if len(self.opponent_pool) == 1:
-            return list(self.opponent_pool.keys())[0]
+        if len(pool) == 1:
+            return list(pool.keys())[0]
 
         # Calculate PFSP priorities
         priorities = {}
-        for name, data in self.opponent_pool.items():
+        for name, data in pool.items():
             total = data["wins"] + data["losses"]
             if total == 0:
                 opp_winrate = PFSP_NEUTRAL_WINRATE
@@ -221,14 +328,18 @@ class PFSPCallback(BaseCallback):
         total_priority = sum(priorities.values())
 
         if total_priority <= 0:
-            return np.random.choice(list(self.opponent_pool.keys()))
+            return np.random.choice(list(pool.keys()))
 
-        probs = [priorities[name] / total_priority for name in self.opponent_pool]
-        return np.random.choice(list(self.opponent_pool.keys()), p=probs)
+        probs = [priorities[name] / total_priority for name in pool]
+        return np.random.choice(list(pool.keys()), p=probs)
 
     def _on_rollout_end(self) -> None:
         """Called at end of each rollout collection."""
         self.rollout_count += 1
+
+        # Check for curriculum stage transitions (every 10 rollouts to reduce overhead)
+        if self.rollout_count % 10 == 0:
+            self._update_baseline_curriculum()
 
         # Update win rates from recent episodes
         if (
@@ -416,8 +527,11 @@ class PFSPCallback(BaseCallback):
                     print(f"[PFSP WARNING] Failed to add to Rust pool: {e}")
 
         # Remove WEAKEST opponent if pool full (keep hardest opponents!)
-        # But NEVER remove current opponent
-        while len(self.opponent_pool) > self.pool_size:
+        # But NEVER remove: current opponent, baselines, or the one we just added
+        # Count non-baseline opponents for pool size check
+        non_baseline_count = sum(1 for d in self.opponent_pool.values() if not d.get("is_baseline", False))
+        
+        while non_baseline_count > self.pool_size:
             # Find opponent with LOWEST winrate (easiest for agent)
             candidates = []
             for name, data in self.opponent_pool.items():
@@ -426,6 +540,8 @@ class PFSPCallback(BaseCallback):
                     continue
                 if name == self.current_opponent_name:
                     continue  # Never remove current opponent
+                if data.get("is_baseline", False):
+                    continue  # NEVER remove baselines
                 total = data["wins"] + data["losses"]
                 if total > 0:
                     opp_wr = data["wins"] / total
@@ -471,6 +587,7 @@ class PFSPCallback(BaseCallback):
                         f"[PFSP] Evicted weakest opponent: {weakest_name} (WR: {weakest_wr:.1%})"
                     )
 
+                non_baseline_count -= 1  # Update counter for loop condition
                 gc.collect()
             else:
                 if self.verbose > 0:

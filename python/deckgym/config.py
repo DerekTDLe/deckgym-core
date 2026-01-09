@@ -205,6 +205,19 @@ class TrainingConfig:
     pfsp_checkpoint_dir: str = "./checkpoints/pfsp_pool/"
     pfsp_min_winrate_to_add: float = 0.50  # Only add to pool if agent winrate >= this
 
+    # PFSP Baseline Curriculum (permanent baseline slots with progressive difficulty)
+    # These baselines are never evicted and provide diversity signal against non-self opponents
+    pfsp_baseline_slots: int = 2  # Number of permanent baseline slots
+    pfsp_baseline_max_allocation: float = 0.20  # Max 20% of envs can play vs baselines
+    # Curriculum stages: list of (step_threshold, [baseline_codes])
+    # At each stage, the baselines are replaced. Codes: v=ValueFunction, w=WeightedRandom,
+    # aa=AttachAttack, er=EvolutionRusher, e2/e3/e4=Expectiminimax(depth)
+    pfsp_baseline_curriculum: List[Tuple[int, List[str]]] = field(default_factory=lambda: [
+        (0, ["v", "w"]),           # Stage 1: Easy opponents (0-500k steps)
+        (500_000, ["aa", "er"]),   # Stage 2: Medium opponents (500k-2M steps)
+        (2_000_000, ["e2", "er"]), # Stage 3: Hard opponent + medium (2M+ steps)
+    ])
+
     # -------------------------------------------------------------------------
     # Game Environment Limits
     # -------------------------------------------------------------------------

@@ -1200,6 +1200,20 @@ impl PyVecGame {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))
     }
 
+    /// Add a built-in baseline bot to the opponent pool
+    ///
+    /// This allows PFSP to include non-ONNX opponents like Expectiminimax.
+    /// Use this for curriculum training where baselines provide diversity.
+    ///
+    /// Args:
+    ///     name: Unique name for this opponent (e.g., "baseline_e2")
+    ///     bot_code: Bot code like "e2", "v", "aa", "er"
+    fn add_baseline_to_pool(&mut self, name: &str, bot_code: &str) -> PyResult<()> {
+        self.inner
+            .add_baseline_to_pool(name, bot_code)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))
+    }
+
     /// Set the opponent for a specific environment (from the pool)
     ///
     /// Call this per-episode to implement PFSP opponent selection.
