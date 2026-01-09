@@ -27,7 +27,7 @@ The agent uses a custom feature extractor (`CardAttentionExtractor`) that proces
 
 Each card is encoded with intrinsic properties and position information:
 
-#### Intrinsic Features (113 dims)
+#### Intrinsic Features (121 dims)
 - `is_pokemon` (1) - Pokemon vs Trainer
 - `stage` (1) - Basic/Stage1/Stage2 normalized
 - `energy_type` (10) - One-hot energy type
@@ -64,7 +64,7 @@ Each card is encoded with intrinsic properties and position information:
           ▼                               ▼
 ┌─────────────────┐             ┌─────────────────────────┐
 │ Global Features │             │   Card Features         │
-│     (131)       │             │   (18 × 116)            │
+│     (131)       │             │   (18 × 121)            │
 └─────────────────┘             └─────────────────────────┘
           │                               │
            ▼                               ▼
@@ -164,6 +164,8 @@ The default configuration uses the following values:
 | `total_timesteps` | 30M | Target training duration (long-term) |
 | `use_pfsp` | True | Enable Prioritized Fictitious Self-Play |
 
+*Note : current run uses n_steps = 64 to compensate for n_envs = 128, making full use of the GPU.*
+
 ## Evaluation (TrueSkill)
 
 The evaluation system in `evaluate.py` has been revamped to use **TrueSkill** instead of traditional Elo. This provides:
@@ -174,7 +176,7 @@ The evaluation system in `evaluate.py` has been revamped to use **TrueSkill** in
 ## Training Performance
 
 With the current attention-based architecture and `configs/attention_baseline.yaml`:
-- **Training Speed**: ~400 it/s (on RTX 3050).
+- **Training Speed**: ~440 it/s (on RTX 3050).
 - **Adaptability**: Training now uses pure self-play by default, sampling from 1k+ meta decks via `MetaDeckLoader`.
 
 ```bash
