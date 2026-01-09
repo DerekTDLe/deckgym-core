@@ -27,6 +27,8 @@ pub use weighted_random_player::WeightedRandomPlayer;
 use crate::{actions::Action, Deck, State};
 use rand::rngs::StdRng;
 use std::fmt::Debug;
+#[cfg(feature = "onnx")]
+use std::path::Path;
 
 pub trait Player: Debug {
     fn get_deck(&self) -> Deck;
@@ -59,6 +61,11 @@ pub enum PlayerCode {
         path: String,
         device: String,
     },
+    #[cfg(feature = "onnx")]
+    O {
+        index: usize,  // 1-indexed: o1 = newest model, o2 = second newest, etc.
+        device: String, // c=cpu, g=cuda, t=trt, or auto
+    },
 }
 /// Custom parser function enforcing case-insensitivity
 pub fn parse_player_code(s: &str) -> Result<PlayerCode, String> {
@@ -88,6 +95,31 @@ pub fn parse_player_code(s: &str) -> Result<PlayerCode, String> {
             return Ok(PlayerCode::M { iterations });
         }
         return Err(format!("Invalid player code: {s}. Use 'm<number>' for MCTS with iterations, e.g., 'm100', 'm500'"));
+    }
+
+    // Check if it starts with 'o' followed by digits and optional device suffix
+    // o1 = auto, o1c = cpu, o1g = cuda, o1t = tensorrt
+    #[cfg(feature = "onnx")]
+    if lower.starts_with('o') && lower.len() > 1 {
+        let rest = &lower[1..];
+        
+        // Check for device suffix (last char: c, g, t)
+        let (num_part, device) = if rest.ends_with('c') {
+            (&rest[..rest.len()-1], "cpu")
+        } else if rest.ends_with('g') {
+            (&rest[..rest.len()-1], "cuda")
+        } else if rest.ends_with('t') {
+            (&rest[..rest.len()-1], "trt")
+        } else {
+            (rest, "auto")
+        };
+        
+        if let Ok(index) = num_part.parse::<usize>() {
+            if index == 0 {
+                return Err("o0 is invalid. Use o1 for the newest model.".to_string());
+            }
+            return Ok(PlayerCode::O { index, device: device.to_string() });
+        }
     }
 
     // Check if it starts with 'onnx:' (e.g., onnx:/path/to/model.onnx)
@@ -165,5 +197,61 @@ fn get_player(deck: Deck, player: &PlayerCode) -> Box<dyn Player> {
         PlayerCode::Onnx { path, device } => {
             Box::new(OnnxPlayer::new(&path, deck, true, device).expect("Failed to load ONNX model"))
         }
+        #[cfg(feature = "onnx")]
+        PlayerCode::O { index, device } => {
+            let path = get_nth_onnx_model(*index).expect(&format!(
+                "Failed to find ONNX model o{}. Make sure models/ contains .onnx files.",
+                index
+            ));
+            Box::new(OnnxPlayer::new(&path, deck, true, device).expect(&format!(
+                "Failed to load ONNX model from {}",
+                path
+            )))
+        }
     }
+}
+
+/// Get the Nth newest ONNX model from models/ directory.
+/// Index is 1-based: 1 = newest, 2 = second newest, etc.
+#[cfg(feature = "onnx")]
+fn get_nth_onnx_model(index: usize) -> Result<String, String> {
+    let models_dir = Path::new("models");
+    if !models_dir.exists() {
+        return Err("models/ directory not found".to_string());
+    }
+
+    // Collect all .onnx files with their modification times
+    let mut onnx_files: Vec<(std::path::PathBuf, std::time::SystemTime)> = std::fs::read_dir(models_dir)
+        .map_err(|e| format!("Failed to read models/ directory: {}", e))?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("onnx") {
+                let mtime = entry.metadata().ok()?.modified().ok()?;
+                Some((path, mtime))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if onnx_files.is_empty() {
+        return Err("No .onnx files found in models/ directory".to_string());
+    }
+
+    // Sort by modification time, newest first
+    onnx_files.sort_by(|a, b| b.1.cmp(&a.1));
+
+    // Get the Nth file (1-indexed)
+    if index > onnx_files.len() {
+        return Err(format!(
+            "o{} requested but only {} ONNX models found in models/",
+            index,
+            onnx_files.len()
+        ));
+    }
+
+    let selected = &onnx_files[index - 1];
+
+    Ok(selected.0.to_string_lossy().to_string())
 }

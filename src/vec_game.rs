@@ -876,8 +876,9 @@ impl VecGame {
                 break;
             }
 
-            // Process each opponent group by index
-            for opp_idx in 0..self.onnx_pool.len() {
+            // Process each opponent group by index (use min to handle eviction during batch)
+            let pool_len = self.onnx_pool.len().min(self.opponent_groups.len());
+            for opp_idx in 0..pool_len {
                 if self.opponent_groups[opp_idx].is_empty() {
                     continue;
                 }
@@ -1069,8 +1070,9 @@ impl VecGame {
                 break;
             }
 
-            // Process each opponent group by index
-            for opp_idx in 0..self.onnx_pool.len() {
+            // Process each opponent group by index (use min to handle eviction during batch)
+            let pool_len = self.onnx_pool.len().min(self.opponent_groups.len());
+            for opp_idx in 0..pool_len {
                 if self.opponent_groups[opp_idx].is_empty() {
                     continue;
                 }

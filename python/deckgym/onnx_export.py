@@ -181,6 +181,35 @@ def _validate_onnx_export(
         print(f"[ONNX] WARNING: Output mismatch (max diff: {max_diff:.2e})")
 
 
+def convert_zip_to_onnx(
+    model_path: str,
+    output_path: Optional[str] = None,
+    validate: bool = True,
+) -> str:
+    """
+    Convert a SB3 MaskablePPO checkpoint (.zip) to ONNX format.
+
+    Args:
+        model_path: Path to the .zip checkpoint file
+        output_path: Path to save ONNX file. If None, saves to same directory
+                     as model_path with .onnx extension.
+
+    Returns:
+        Path to exported ONNX file
+    """
+    from sb3_contrib import MaskablePPO
+
+    # Determine output path
+    if output_path is None:
+        model_p = Path(model_path)
+        output_path = str(model_p.with_suffix(".onnx"))
+
+    print(f"[ONNX] Loading model from {model_path}...")
+    model = MaskablePPO.load(model_path, device="cpu")
+
+    return export_policy_to_onnx(model, output_path, validate=validate)
+
+
 def cleanup_old_onnx_files(directory: str, keep_latest: int = 1) -> None:
     """
     Remove old ONNX files, keeping only the most recent ones.
@@ -201,18 +230,14 @@ def cleanup_old_onnx_files(directory: str, keep_latest: int = 1) -> None:
 
 
 if __name__ == "__main__":
-    # Test export with a dummy model
     import argparse
 
-    parser = argparse.ArgumentParser(description="Export MaskablePPO to ONNX")
-    parser.add_argument("--model", required=True, help="Path to SB3 checkpoint")
-    parser.add_argument("--output", default="model.onnx", help="Output ONNX path")
+    parser = argparse.ArgumentParser(description="Convert SB3 MaskablePPO (.zip) to ONNX")
+    parser.add_argument("model_path", help="Path to SB3 checkpoint (.zip)")
+    parser.add_argument("output_path", nargs="?", default=None, help="Output ONNX path (default: same dir as model with .onnx ext)")
+    parser.add_argument("--no-validate", action="store_true", help="Skip ONNX validation")
     args = parser.parse_args()
 
-    from sb3_contrib import MaskablePPO
+    output = convert_zip_to_onnx(args.model_path, args.output_path, validate=not args.no_validate)
+    print(f"Done! Saved to {output}")
 
-    print(f"Loading model from {args.model}...")
-    model = MaskablePPO.load(args.model, device="cpu")
-
-    export_policy_to_onnx(model, args.output)
-    print("Done!")
