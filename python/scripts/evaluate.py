@@ -422,7 +422,7 @@ def evaluate_single_model(
             print_ratings(tracker)
         else:
             console.print(
-                f"Done. Rating: [bold green]mu={model_rating.mu:.2f} sigma={model_rating.sigma:.2f}[/bold green] (Expose: {expose:.2f})\n"
+                f"Done. Rating: [bold green]mu={model_rating.mu:.2f} sigma={model_rating.sigma:.2f}[/bold green] (Expose: {model_rating.mu - 3 * model_rating.sigma:.2f})\n"
             )
 
         # Build results for storage
@@ -669,11 +669,13 @@ def benchmark_directory(
         # Print results
         print_bench_results(ratings, wins, losses, draws, participants)
 
-        # Save benchmark report
+        # Save benchmark report (exclude baselines from ratings - they're only for reference)
+        model_names = set(onnx_paths.keys())  # Only models, not baselines
         bench_results = {
             "meta": {
                 "directory": str(directory),
                 "games_per_match": n_games_per_pair,
+                "model_count": len(model_names),
                 "participants": list(participants.keys()),
             },
             "ratings": {
@@ -683,6 +685,7 @@ def benchmark_directory(
                     "expose": r.mu - 3 * r.sigma,
                 }
                 for name, r in ratings.items()
+                if name in model_names  # Only include models, not baselines
             },
             "stats": {
                 name: {
@@ -690,7 +693,7 @@ def benchmark_directory(
                     "losses": losses[name],
                     "draws": draws[name],
                 }
-                for name in participants
+                for name in model_names  # Only include model stats
             },
         }
         save_report(bench_results, "bench", name=model_dir.name)
