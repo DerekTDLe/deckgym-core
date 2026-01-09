@@ -202,7 +202,7 @@ sudo cargo flamegraph --root --dev -- simulate example_decks/venusaur-exeggutor.
 
 ## Reinforcement Learning Agent
 
-The repository includes a deep reinforcement learning agent trained using PPO (Proximal Policy Optimization) with curriculum learning.
+The repository includes a deep reinforcement learning agent trained using PPO (Proximal Policy Optimization) with curriculum learning and Prioritized Fictitious Self-Play.
 
 ### Architecture: Attention-Based Observation
 
@@ -210,7 +210,7 @@ The agent uses a **card-level attention mechanism** that processes each card ind
 
 | Feature | Value |
 |---------|-------|
-| Observation size | 2219 dims (131 global + 18 cards × 116 features) |
+| Observation size | 2219 dims (41 global + 18 cards × 121 features) |
 | Architecture | Modern Transformer (3 layers, 8 heads, GELU) |
 | Card encoding | Intrinsic properties + Position (Hand + Board) |
 | Training Mode | **Pure Self-Play** (PFSP Enabled) |
@@ -220,7 +220,7 @@ See [RL_ARCHITECTURE.md](RL_ARCHITECTURE.md) for detailed architecture documenta
 
 ### Pure Self-Play Training (Default)
 
-The agent learns through continuous self-play against its own previous versions using **Prioritized Fictitious Self-Play (PFSP)**. It faces 100+ meta decks from step 1, ensuring high-quality adversarial gradients.
+The agent learns through continuous self-play against its own previous versions using **Prioritized Fictitious Self-Play (PFSP)**. It faces 1k+ meta decks from step 1, ensuring high-quality adversarial gradients.
 
 | Feature | Description |
 |---------|-------------|
@@ -229,25 +229,27 @@ The agent learns through continuous self-play against its own previous versions 
 | **Stability** | Rust-side `catch_unwind` prevents game-state crashes |
 | **YAML Config** | Fully configurable via `configs/template.yaml` |
 
-### Elo Leaderboard (300 games/baseline)
+### TrueSkill Leaderboard (300 games/baseline)
 
 *Note : Newest and current model architecture did not finish training yet, this serves as a temporary demonstration of the agent level of play*
 
-| Rank | Player | TrueSkill | Win Rate |
-|------|--------|-----------|----------|
-| 1 | Expectiminimax(5) | 2020 | 84.0% |
-| 2 | Expectiminimax(4) | 2000 | 80.0% |
-| 3 | Expectiminimax(3) | 1978 | 82.0% |
-| 4 | **RL Agent (Run #4)** | **1825** | **59.8%** |
-| 5 | Expectiminimax(2) | 1893 | 76.2% |
-| 6 | EvolutionRusher | 1549 | 44.2% |
-| 7 | ValueFunction | 1451 | 31.3% |
-| 8 | WeightedRandom | 1340 | 38.2% |
-| 9 | AttachAttack | 1273 | 29.6% |
-| 10 | EndTurn | 1200 | 0.0% |
-| 11 | Random | 1081 | 19.8% |
+| Rank | Player | Expose |
+|------|--------|-----------|
+| 1 | Expectiminimax(5) | 2014 |
+| 2 | Expectiminimax(3) | 2009 |
+| 3 | Expectiminimax(4) | 1925 |
+| 4 | Expectiminimax(2) | 1939 |
+| 5 | **RL Agent 12.8M (Run #9)** | **1807** |
+| 6 | EvolutionRusher | 1480 |
+| 7 | WeightedRandom | 1432 |
+| 8 | AttachAttack | 1374 |
+| 9 | ValueFunction | 1363 |
+| 10 | Random | 1105 |
+| 11 | EndTurn | 1072 |
 
-### Training Commands
+Expose is TrueSkill conservative ELO
+
+### Usefull Commands
 
 ```bash
 # Generate a training configuration template
@@ -256,9 +258,18 @@ python python/deckgym/config.py --generate-template my_config.yaml
 # Train with pure self-play using YAML config
 python python/scripts/train.py --config my_config.yaml
 
-# Evaluate model and update TrueSkill leaderboard
-python python/scripts/evaluate.py eval --model checkpoints/rl_bot_xxx_steps.zip --games 300
+# Audit model or directory of models compared to TrueSkill baselines leaderboard
+python python/scripts/evaluate.py  audit checkpoints/rl_bot_xxx_steps.zip
+
+python python/scripts/evaluate.py  audit_dir checkpoints/
+
+# Diagnose model gradients, weights, biais
+python python/scripts/diagnose.py --model checkpoints/rl_bot_xxx_steps.zip
+
+# Export model .zip to .onnx
+python python/scripts/onnx_export.py checkpoints/rl_bot_xxx_steps.zip
 ```
+*Note : Almost all of the .py scripts should have helpers, use -h --help to see them*
 
 ### Hyperparameters
 
