@@ -230,6 +230,9 @@ pub struct VecGame {
     /// RNG for ONNX opponent sampling
     #[cfg(feature = "onnx")]
     onnx_rng: StdRng,
+    /// Baseline bot codes: maps opponent name to bot code (e.g., "baseline_e2" -> "e2")
+    /// Baselines in the pool use built-in bots instead of ONNX
+    baseline_codes: std::collections::HashMap<String, String>,
 }
 
 impl VecGame {
@@ -269,6 +272,7 @@ impl VecGame {
             opponent_groups: Vec::new(),
             #[cfg(feature = "onnx")]
             onnx_rng: StdRng::seed_from_u64(base_seed.wrapping_add(999)),
+            baseline_codes: std::collections::HashMap::new(),
         }
     }
 
@@ -339,29 +343,86 @@ impl VecGame {
         Ok(())
     }
 
+    /// Add a built-in baseline bot to the opponent pool
+    ///
+    /// This allows PFSP to include non-ONNX opponents like Expectiminimax.
+    /// Baselines are handled differently: they don't use batched ONNX inference,
+    /// instead they use the EnvInstance's built-in bot system.
+    ///
+    /// # Arguments
+    /// * `name` - Unique name for this opponent (e.g., "baseline_e2")
+    /// * `bot_code` - Bot code like "e2", "v", "aa", "er" (see players module)
+    pub fn add_baseline_to_pool(&mut self, name: &str, bot_code: &str) -> Result<(), String> {
+        // Validate bot code
+        parse_player_code(bot_code)?;
+        
+        // Check if already exists in baseline_codes or onnx pool
+        if self.baseline_codes.contains_key(name) {
+            return Err(format!("Baseline '{}' already in pool", name));
+        }
+        #[cfg(feature = "onnx")]
+        if self.onnx_pool_names.contains(&name.to_string()) {
+            return Err(format!("Opponent '{}' already in pool", name));
+        }
+        
+        // Store the baseline code mapping
+        self.baseline_codes.insert(name.to_string(), bot_code.to_string());
+        
+        // Also add to pool names for unified lookup (but NOT to onnx_pool itself)
+        #[cfg(feature = "onnx")]
+        {
+            self.onnx_pool_names.push(name.to_string());
+            // Add a placeholder for opponent_groups to keep indices aligned
+            self.opponent_groups.push(Vec::with_capacity(self.n_envs));
+        }
+        
+        Ok(())
+    }
+
     /// Set the opponent for a specific environment (from the pool)
     ///
     /// The environment will use this opponent until changed again.
     /// This is called per-episode to implement PFSP opponent selection.
+    /// Supports both ONNX models and built-in baseline bots.
     ///
     /// # Arguments
     /// * `env_idx` - Environment index
     /// * `opponent_name` - Name of opponent in pool (must exist)
     #[cfg(feature = "onnx")]
     pub fn set_env_opponent(&mut self, env_idx: usize, opponent_name: &str) -> Result<(), String> {
-        // Find opponent index by name
-        let opp_idx = self
-            .onnx_pool_names
-            .iter()
-            .position(|n| n == opponent_name)
-            .ok_or_else(|| format!("Opponent '{}' not in pool", opponent_name))?;
-
         if env_idx >= self.n_envs {
             return Err(format!(
                 "env_idx {} out of range (n_envs={})",
                 env_idx, self.n_envs
             ));
         }
+
+        // Check if this is a baseline opponent
+        if let Some(bot_code) = self.baseline_codes.get(opponent_name) {
+            // Use built-in bot for this env
+            let deck_a = Deck::from_string(&self.envs[env_idx].deck_a)
+                .map_err(|e| format!("Failed to parse deck A: {}", e))?;
+            let deck_b = Deck::from_string(&self.envs[env_idx].deck_b)
+                .map_err(|e| format!("Failed to parse deck B: {}", e))?;
+            
+            let player_codes = vec![
+                parse_player_code("r").unwrap(), // Player 0: random (agent controls)
+                parse_player_code(bot_code).map_err(|e| e.to_string())?, // Player 1: baseline bot
+            ];
+            
+            self.envs[env_idx].opponent_type = Some(bot_code.clone());
+            self.envs[env_idx].players = Some(create_players(deck_a, deck_b, player_codes));
+            self.env_opponent_indices[env_idx] = None; // Not using ONNX pool index
+            
+            return Ok(());
+        }
+
+        // Otherwise, it's an ONNX opponent
+        let opp_idx = self
+            .onnx_pool_names
+            .iter()
+            .position(|n| n == opponent_name)
+            .ok_or_else(|| format!("Opponent '{}' not in pool", opponent_name))?;
 
         self.env_opponent_indices[env_idx] = Some(opp_idx);
         self.envs[env_idx].opponent_type = Some("onnx".to_string());
@@ -376,25 +437,61 @@ impl VecGame {
         self.onnx_pool.clear();
         self.onnx_pool_names.clear();
         self.opponent_groups.clear();
+        self.baseline_codes.clear();
         for idx in &mut self.env_opponent_indices {
             *idx = None;
         }
     }
 
-    /// Remove a specific opponent from the pool (frees GPU memory)
+    /// Remove a specific opponent from the pool (frees GPU memory for ONNX)
     ///
     /// Returns true if opponent was found and removed, false otherwise.
     /// If any environment was using this opponent, its assignment is cleared.
+    /// Works for both ONNX models and baseline bots.
     #[cfg(feature = "onnx")]
     pub fn remove_onnx_from_pool(&mut self, opponent_name: &str) -> bool {
-        // Find the opponent index
+        // Check if it's a baseline first
+        let is_baseline = self.baseline_codes.contains_key(opponent_name);
+        
+        if is_baseline {
+            // Remove baseline
+            self.baseline_codes.remove(opponent_name);
+            
+            // Also remove from pool names
+            if let Some(opp_idx) = self.onnx_pool_names.iter().position(|n| n == opponent_name) {
+                self.onnx_pool_names.remove(opp_idx);
+                self.opponent_groups.remove(opp_idx);
+                
+                // Clear any env using this opponent (baselines use opponent_type, not indices)
+                for env in &mut self.envs {
+                    if env.opponent_type.as_deref() == Some(self.baseline_codes.get(opponent_name).map(|s| s.as_str()).unwrap_or(opponent_name)) {
+                        env.opponent_type = None;
+                        env.players = None;
+                    }
+                }
+            }
+            return true;
+        }
+        
+        // Find the ONNX opponent index
         let opp_idx = match self.onnx_pool_names.iter().position(|n| n == opponent_name) {
             Some(idx) => idx,
             None => return false,
         };
 
-        // Remove from pool (this drops the Session, freeing GPU memory)
-        self.onnx_pool.remove(opp_idx);
+        // Count baselines before this index (they're in names but not in onnx_pool)
+        let baselines_before = self.onnx_pool_names[..opp_idx]
+            .iter()
+            .filter(|n| self.baseline_codes.contains_key(*n))
+            .count();
+        
+        // The actual ONNX pool index is opp_idx minus baselines before it
+        let onnx_pool_idx = opp_idx - baselines_before;
+        
+        // Remove from ONNX pool (this drops the Session, freeing GPU memory)
+        if onnx_pool_idx < self.onnx_pool.len() {
+            self.onnx_pool.remove(onnx_pool_idx);
+        }
         self.onnx_pool_names.remove(opp_idx);
         self.opponent_groups.remove(opp_idx);
 
@@ -423,7 +520,7 @@ impl VecGame {
     /// Check if using per-env opponents (pool mode) vs single opponent (legacy mode)
     #[cfg(feature = "onnx")]
     pub fn is_using_pool(&self) -> bool {
-        !self.onnx_pool.is_empty()
+        !self.onnx_pool.is_empty() || !self.baseline_codes.is_empty()
     }
 
     /// Get number of environments
