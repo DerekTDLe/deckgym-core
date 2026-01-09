@@ -449,9 +449,7 @@ class PFSPCallback(BaseCallback):
         )
 
         if self.rollout_count % effective_add_freq == 0:
-            # Refreshes stats for the whole pool BEFORE adding (so eviction uses fresh stats)
-            self._reset_pool_stats()
-
+            # Add to pool FIRST (eviction uses accumulated stats)
             if avg_agent_winrate >= min_wr_to_add or len(self.opponent_pool) < 2:
                 if self.verbose > 0 and avg_agent_winrate >= min_wr_to_add:
                     print(
@@ -462,6 +460,9 @@ class PFSPCallback(BaseCallback):
                 print(
                     f"[PFSP] Agent winrate {avg_agent_winrate:.1%} < {min_wr_to_add:.0%}, skipping pool add"
                 )
+
+            # Reset stats AFTER eviction (so next period starts fresh)
+            self._reset_pool_stats()
 
     def _get_avg_agent_winrate(self) -> float:
         """Calculate average agent winrate across all opponents in pool."""

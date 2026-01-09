@@ -49,7 +49,7 @@ ppo:
 
 training:
   total_timesteps: 30000000
-  checkpoint_freq: 10000
+  checkpoint_freq: 2000 # times n-envs = 256000 (keep a frequent trace of progression)
   n_envs: 128 # more env to use the GPU efficiently
   use_batched_env: true
   device: "auto"
