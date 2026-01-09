@@ -32,13 +32,31 @@ use crate::players::Player;
 
 use std::fmt::Debug;
 
+// Global session cache to avoid reloading ONNX models for every game
+#[cfg(feature = "onnx")]
+use std::sync::{Arc, Mutex, OnceLock};
+#[cfg(feature = "onnx")]
+use std::collections::HashMap;
+
+#[cfg(feature = "onnx")]
+type SessionCache = Mutex<HashMap<String, Arc<Mutex<Session>>>>;
+
+
+#[cfg(feature = "onnx")]
+static ONNX_SESSION_CACHE: OnceLock<SessionCache> = OnceLock::new();
+
+#[cfg(feature = "onnx")]
+fn get_session_cache() -> &'static SessionCache {
+    ONNX_SESSION_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// A player that uses an ONNX model for decision-making.
 ///
 /// The model takes a game observation and outputs action logits.
 /// Supports both deterministic (argmax) and stochastic (sampling) modes.
 #[cfg(feature = "onnx")]
 pub struct OnnxPlayer {
-    session: Session,
+    session: Arc<Mutex<Session>>,
     deterministic: bool,
     deck: Deck,
 }
@@ -82,6 +100,7 @@ fn get_execution_providers(
 #[cfg(feature = "onnx")]
 impl OnnxPlayer {
     /// Create a new ONNX player from a model file.
+    /// Uses a global session cache to avoid reloading the model for every game.
     ///
     /// # Arguments
     /// * `model_path` - Path to the .onnx model file
@@ -93,18 +112,35 @@ impl OnnxPlayer {
         deterministic: bool,
         device: &str,
     ) -> Result<Self, String> {
-        let providers = get_execution_providers(device);
-
-        let session = Session::builder()
-            .map_err(|e| format!("Failed to create session builder: {}", e))?
-            .with_execution_providers(providers)
-            .map_err(|e| format!("Failed to set execution providers: {}", e))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| format!("Failed to set optimization level: {}", e))?
-            .with_intra_threads(1)
-            .map_err(|e| format!("Failed to set thread count: {}", e))?
-            .commit_from_file(model_path)
-            .map_err(|e| format!("Failed to load ONNX model from '{}': {}", model_path, e))?;
+        // Check cache first
+        let cache = get_session_cache();
+        let cache_key = format!("{}:{}", model_path, device);
+        
+        let session = {
+            let mut guard = cache.lock().map_err(|e| format!("Cache lock poisoned: {}", e))?;
+            
+            if let Some(cached) = guard.get(&cache_key) {
+                // Reuse cached session
+                Arc::clone(cached)
+            } else {
+                // Create new session and cache it
+                let providers = get_execution_providers(device);
+                let new_session = Session::builder()
+                    .map_err(|e| format!("Failed to create session builder: {}", e))?
+                    .with_execution_providers(providers)
+                    .map_err(|e| format!("Failed to set execution providers: {}", e))?
+                    .with_optimization_level(GraphOptimizationLevel::Level3)
+                    .map_err(|e| format!("Failed to set optimization level: {}", e))?
+                    .with_intra_threads(1)
+                    .map_err(|e| format!("Failed to set thread count: {}", e))?
+                    .commit_from_file(model_path)
+                    .map_err(|e| format!("Failed to load ONNX model from '{}': {}", model_path, e))?;
+                
+                let arc_session = Arc::new(Mutex::new(new_session));
+                guard.insert(cache_key, Arc::clone(&arc_session));
+                arc_session
+            }
+        };
 
         Ok(Self {
             session,
@@ -115,7 +151,7 @@ impl OnnxPlayer {
 
     /// Run inference on a single observation.
     /// Returns the selected action index.
-    fn predict(&mut self, obs: &[f32], action_mask: &[bool], rng: &mut StdRng) -> usize {
+    fn predict(&self, obs: &[f32], action_mask: &[bool], rng: &mut StdRng) -> usize {
         // Create input tensor as ndarray
         let obs_array = Array2::from_shape_vec((1, OBSERVATION_SIZE), obs.to_vec())
             .expect("Failed to create observation array");
@@ -125,8 +161,8 @@ impl OnnxPlayer {
 
         // Run inference and extract logits
         let logits = {
-            let outputs = self
-                .session
+            let mut session = self.session.lock().expect("Session lock poisoned");
+            let outputs = session
                 .run(ort::inputs![tensor])
                 .expect("ONNX inference failed");
 

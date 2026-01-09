@@ -116,6 +116,30 @@ cargo run --bin card_status -- --first-incomplete
 
 The tool displays a summary showing total cards, completion percentage, and a breakdown of missing implementations by type (attacks, abilities, tools, trainer logic).
 
+**Player Performance Benchmark**
+
+Compare decision-making speed of different player strategies:
+
+```bash
+python python/scripts/benchmark_players.py
+```
+
+| Player | Code | Steps/s | Notes |
+|--------|------|---------|-------|
+| Random | `r` | ~345,000 | Fastest baseline, no decision logic |
+| WeightedRandom | `w` | ~273,000 | Slight heuristics overhead |
+| AttachAttack | `aa` | ~154,000 | Simple attach-then-attack strategy |
+| EvolutionRusher | `er` | ~144,000 | Prioritizes evolutions |
+| EndTurn | `et` | ~135,000 | Always ends turn immediately |
+| ValueFunction | `v` | ~15,000 | Evaluates board state heuristically |
+| ExpectiMiniMax (d=2) | `e2` | ~1,500 | Tree search, 2 plies deep |
+| **ONNX Neural Net (CPU)** | `o1c` | **~930** | Attention model (15MB), single inference |
+| **ONNX Neural Net (GPU)** | `o1g` | **~930** | Attention model (15MB), single inference |
+| **ONNX Neural Net (TensorRT)** | `o1t` | **~930** | Attention model (15MB), single inference |
+| ExpectiMiniMax (d=3) | `e3` | ~450 | Exponentially slower with depth |
+
+> **Note**: ONNX performance is limited by single-sample inference overhead. In batch mode (training with `VecGame`), throughput is much higher. The `o[n]` player loads the *n* newest `.onnx` model from `models/` directory.
+
 **Temporary Deck Generator**
 
 Generate a valid temporary test deck for a specific card id (it considers the evolution chain of a card and the required energy types if its a pokemon card).
