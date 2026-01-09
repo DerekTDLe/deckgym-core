@@ -8,10 +8,11 @@ a pool of historical checkpoints, prioritizing harder opponents.
 Reference: https://www.nature.com/articles/s41586-019-1724-z
 """
 
+from collections import Counter
 import os
 import gc
 import tempfile
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
 import numpy as np
@@ -19,12 +20,12 @@ from stable_baselines3.common.callbacks import BaseCallback
 from sb3_contrib import MaskablePPO
 
 from deckgym.batched_env import BatchedDeckGymEnv
+from deckgym.onnx_export import export_policy_to_onnx
 from deckgym.config import (
     DEFAULT_CONFIG,
     PFSP_NEUTRAL_WINRATE,
     PFSP_MIN_EPISODES_FOR_UPDATE,
     PFSP_ADAPTIVE_DOMINATION_THRESHOLD,
-    PFSP_ADAPTIVE_DOMINATION_ADD_FREQ,
 )
 
 
@@ -51,7 +52,6 @@ class PFSPCallback(BaseCallback):
         n_envs: int = DEFAULT_CONFIG.n_envs,
         pool_size: int = DEFAULT_CONFIG.pfsp_pool_size,
         add_to_pool_every_n_rollouts: int = DEFAULT_CONFIG.pfsp_add_every_n_rollouts,
-        select_opponent_every_n_rollouts: int = DEFAULT_CONFIG.pfsp_select_every_n_rollouts,
         priority_exponent: float = DEFAULT_CONFIG.pfsp_priority_exponent,
         winrate_window: int = DEFAULT_CONFIG.pfsp_winrate_window,
         checkpoint_dir: str = DEFAULT_CONFIG.pfsp_checkpoint_dir,
@@ -60,6 +60,7 @@ class PFSPCallback(BaseCallback):
         baseline_max_allocation: float = DEFAULT_CONFIG.pfsp_baseline_max_allocation,
         baseline_curriculum: list = None,
         verbose: int = 1,
+        **kwargs, # Accept legacy args but ignore them
     ):
         """
         Initialize PFSP callback.
@@ -84,7 +85,6 @@ class PFSPCallback(BaseCallback):
         self.n_envs = n_envs
         self.pool_size = pool_size
         self.add_to_pool_every_n_rollouts = add_to_pool_every_n_rollouts
-        self.select_opponent_every_n_rollouts = select_opponent_every_n_rollouts
         self.priority_exponent = priority_exponent
         self.winrate_window = winrate_window
         self.checkpoint_dir = Path(checkpoint_dir)
@@ -107,6 +107,9 @@ class PFSPCallback(BaseCallback):
             None
         ] * n_envs  # Track which opponent each env is using
         self.pool_mode = False  # True if using pool with per-env opponents
+        
+        # New: Tracking for fair statistics (skip episodes that were mid-game when opponent changed)
+        self.skip_next_episode = [False] * n_envs
 
         # Opponent pool: {name: {"path": str, "onnx_path": str, "wins": int, "losses": int, "added_at_step": int, "is_baseline": bool}}
         self.opponent_pool: Dict[str, Dict] = {}
@@ -121,10 +124,7 @@ class PFSPCallback(BaseCallback):
             print(
                 f"[PFSP] Adding to pool every {add_to_pool_every_n_rollouts} rollouts"
             )
-            print(
-                f"[PFSP] Selecting opponent every {select_opponent_every_n_rollouts} rollouts"
-            )
-            print(f"[PFSP] Per-episode opponent selection ENABLED")
+            print(f"[PFSP] Per-episode opponent selection active")
             print(f"[PFSP] Baseline curriculum: {baseline_slots} slots, {baseline_max_allocation:.0%} max allocation")
             print(f"[PFSP] Baseline stages: {len(self.baseline_curriculum)}")
 
@@ -136,32 +136,14 @@ class PFSPCallback(BaseCallback):
         # Initialize baseline curriculum (add initial baselines to pool)
         self._update_baseline_curriculum()
 
-        # Add current (untrained) model to pool as initial opponent
-        self._add_to_pool()
-
-        # Check if we can use pool mode (BatchedDeckGymEnv with ONNX support)
+        # Ensure we are in pool mode (BatchedDeckGymEnv with ONNX support)
         if isinstance(self.env, BatchedDeckGymEnv):
             try:
-                # Try to enable pool mode
                 self._enable_pool_mode()
-                if self.verbose > 0:
-                    print(
-                        f"[PFSP] Pool mode ENABLED - per-episode opponent selection active"
-                    )
             except Exception as e:
-                print(
-                    f"[PFSP WARNING] Pool mode not available, falling back to single opponent: {e}"
-                )
-                self.pool_mode = False
-
-        # If not pool mode, select first opponent as usual
-        if not self.pool_mode and self.opponent_pool:
-            first_opponent = list(self.opponent_pool.keys())[0]
-            self._set_opponent(
-                first_opponent, self.opponent_pool[first_opponent]["path"]
-            )
-            if self.verbose > 0:
-                print(f"[PFSP] Initial opponent set (legacy mode): {first_opponent}")
+                raise RuntimeError(f"[PFSP CRITICAL] Failed to initialize pool mode: {e}")
+        else:
+            raise TypeError("[PFSP CRITICAL] Only BatchedDeckGymEnv is supported (legacy mode removed)")
 
     def _enable_pool_mode(self):
         """Enable per-episode opponent selection by preloading all pool opponents."""
@@ -198,11 +180,7 @@ class PFSPCallback(BaseCallback):
                 del loaded_model
 
             # Add to Rust pool
-            device = (
-                getattr(self.env.config, "pfsp_opponent_device", "trt")
-                if hasattr(self.env, "config")
-                else "trt"
-            )
+            device = self.env.config.pfsp_opponent_device if hasattr(self.env, "config") else "trt"
             self.env.vec_game.add_onnx_to_pool(
                 opp_name, opp_data["onnx_path"], False, device
             )
@@ -310,6 +288,23 @@ class PFSPCallback(BaseCallback):
                         f"[PFSP WARNING] Failed to set opponent for env {env_idx}: {e}"
                     )
 
+    def _flag_reassigned_envs(self, opponent_name: str):
+        """Flag all environments currently playing against a specific opponent to skip their next result."""
+        for env_idx, name in enumerate(self.env_opponent_names):
+            if name == opponent_name:
+                self.skip_next_episode[env_idx] = True
+                if self.verbose > 1:
+                    print(f"[PFSP Refresh] Flagged env {env_idx} to skip next result (reassigned mid-game)")
+
+    def _get_pool_priorities(self, pool: Dict[str, Dict]) -> Dict[str, float]:
+        """Calculate PFSP priorities for a given set of opponents."""
+        priorities = {}
+        for name, data in pool.items():
+            total = data["wins"] + data["losses"]
+            opp_winrate = data["wins"] / total if total > 0 else PFSP_NEUTRAL_WINRATE
+            priorities[name] = float(opp_winrate**self.priority_exponent)
+        return priorities
+
     def _select_opponent_pfsp_for_env(self, exclude_baselines: bool = False) -> Optional[str]:
         """
         Select opponent using PFSP priority.
@@ -323,28 +318,23 @@ class PFSPCallback(BaseCallback):
             if not (exclude_baselines and data.get("is_baseline", False))
         }
         
-        if len(pool) == 0:
+        if not pool:
             return None
 
         if len(pool) == 1:
-            return list(pool.keys())[0]
+            return next(iter(pool.keys()))
 
         # Calculate PFSP priorities
-        priorities = {}
-        for name, data in pool.items():
-            total = data["wins"] + data["losses"]
-            if total == 0:
-                opp_winrate = PFSP_NEUTRAL_WINRATE
-            else:
-                opp_winrate = data["wins"] / total
-            priorities[name] = opp_winrate**self.priority_exponent
+        priorities = self._get_pool_priorities(pool)
         total_priority = sum(priorities.values())
 
         if total_priority <= 0:
             return np.random.choice(list(pool.keys()))
 
-        probs = [priorities[name] / total_priority for name in pool]
-        return np.random.choice(list(pool.keys()), p=probs)
+        # Select using normalized probabilities
+        names = list(pool.keys())
+        probs = [priorities[name] / total_priority for name in names]
+        return np.random.choice(names, p=probs)
 
     def _on_rollout_end(self) -> None:
         """Called at end of each rollout collection."""
@@ -360,17 +350,16 @@ class PFSPCallback(BaseCallback):
         ):  # Update every N episodes minimum
             if self.verbose > 0:
                 # Count wins/losses per opponent
-                from collections import Counter
-
                 wins = Counter(name for name, won in self.episode_results if won)
                 losses = Counter(name for name, won in self.episode_results if not won)
-                print(
-                    f"[PFSP Debug] Rollout {self.rollout_count}: {len(self.episode_results)} episodes tracked"
-                )
-                for name in set(wins.keys()) | set(losses.keys()):
-                    print(
-                        f"  {name}: agent won {wins[name]}, agent lost {losses[name]}"
-                    )
+                
+                print(f"[PFSP Debug] Rollout {self.rollout_count}: {len(self.episode_results)} episodes tracked")
+                
+                for name in sorted(set(wins.keys()) | set(losses.keys())):
+                    w, l = wins[name], losses[name]
+                    wr = l / (w + l) if (w + l) > 0 else 0
+                    print(f"  {name:15}: agent WR {wr:5.1%}, wins {l:2}, losses {w:2}")
+            
             self._update_winrates()
             self.episode_results.clear()
         elif self.verbose > 0 and self.rollout_count % 5 == 0:
@@ -381,41 +370,23 @@ class PFSPCallback(BaseCallback):
         # Calculate average agent winrate against pool for adaptive decisions
         avg_agent_winrate = self._get_avg_agent_winrate()
 
-        # Adaptive add frequency: if agent is dominating, add more frequently
+        # Adaptive add frequency: if agent is dominating, add more frequently (Refresh period decreased by 2)
         effective_add_freq = (
-            PFSP_ADAPTIVE_DOMINATION_ADD_FREQ
+            max(1, self.add_to_pool_every_n_rollouts // 2)
             if avg_agent_winrate > PFSP_ADAPTIVE_DOMINATION_THRESHOLD
             else self.add_to_pool_every_n_rollouts
         )
 
         # Add current agent to pool periodically, but ONLY if performing well
-        # Threshold is defined in TrainingConfig per instance (can be overriden via YAML)
-        min_wr_to_add = (
-            getattr(self.env.config, "pfsp_min_winrate_to_add", 0.50)
-            if hasattr(self.env, "config")
-            else 0.50
-        )
+        min_wr_to_add = getattr(self.env.config, "pfsp_min_winrate_to_add", 0.50) if hasattr(self.env, "config") else 0.50
 
         if self.rollout_count % effective_add_freq == 0:
             if avg_agent_winrate >= min_wr_to_add or len(self.opponent_pool) < 2:
-                # Add if winning enough OR pool needs more opponents
                 self._add_to_pool()
                 if self.verbose > 0 and avg_agent_winrate >= min_wr_to_add:
-                    print(
-                        f"[PFSP] Agent winrate {avg_agent_winrate:.1%} >= {min_wr_to_add:.0%}, adding to pool"
-                    )
+                    print(f"[PFSP] Agent winrate {avg_agent_winrate:.1%} >= {min_wr_to_add:.0%}, adding to pool")
             elif self.verbose > 0:
-                print(
-                    f"[PFSP] Agent winrate {avg_agent_winrate:.1%} < {min_wr_to_add:.0%}, skipping pool add"
-                )
-
-        # Select new opponent periodically (legacy mode only)
-        # In pool mode, opponents are assigned per-env on episode end
-        if (
-            not self.pool_mode
-            and self.rollout_count % self.select_opponent_every_n_rollouts == 0
-        ):
-            self._select_opponent_pfsp()
+                print(f"[PFSP] Agent winrate {avg_agent_winrate:.1%} < {min_wr_to_add:.0%}, skipping pool add")
 
     def _get_avg_agent_winrate(self) -> float:
         """Calculate average agent winrate across all opponents in pool."""
@@ -444,27 +415,24 @@ class PFSPCallback(BaseCallback):
             infos = [info] if info else []
 
         for env_idx, info in enumerate(infos):
-            if info and "episode" in info:
-                # Episode ended: check if agent won
-                episode_reward = info["episode"].get("r", 0)
-                agent_won = episode_reward > 0
+            if not info or "episode" not in info:
+                continue
 
-                # Get opponent name for this env (pool mode or single opponent)
-                if self.pool_mode and env_idx < len(self.env_opponent_names):
-                    opp_name = self.env_opponent_names[env_idx]
-                else:
-                    opp_name = self.current_opponent_name
+            # Episode ended: check if agent won
+            agent_won = info["episode"].get("r", 0) > 0
+            opp_name = self.env_opponent_names[env_idx]
 
-                if opp_name:
-                    self.episode_results.append((opp_name, agent_won))
+            if opp_name:
+                # Only record result if the episode was "full" (not reassigned mid-game)
+                if self.skip_next_episode[env_idx]:
+                    self.skip_next_episode[env_idx] = False
                     if self.verbose > 1:
-                        print(
-                            f"[PFSP] Episode tracked: env{env_idx} vs {opp_name}, reward={episode_reward:.2f}, agent_won={agent_won}"
-                        )
+                        print(f"[PFSP Refresh] Skipping result for env {env_idx} (reassigned mid-game)")
+                else:
+                    self.episode_results.append((opp_name, agent_won))
 
-                # In pool mode, reassign opponent for this env on episode end
-                if self.pool_mode and env_idx < self.n_envs:
-                    self._assign_opponent_to_env(env_idx)
+            # Reassign opponent for this env on episode end
+            self._assign_opponent_to_env(env_idx)
 
         return True
 
@@ -487,12 +455,12 @@ class PFSPCallback(BaseCallback):
             if total > self.winrate_window:
                 # Scale down to keep within window
                 scale = self.winrate_window / total
-                # Use round() instead of int() to avoid systematic bias
-                self.opponent_pool[opp_name]["wins"] = max(
-                    1, round(self.opponent_pool[opp_name]["wins"] * scale)
+                # Use round() to avoid systematic bias
+                self.opponent_pool[opp_name]["wins"] = round(
+                    self.opponent_pool[opp_name]["wins"] * scale
                 )
-                self.opponent_pool[opp_name]["losses"] = max(
-                    1, round(self.opponent_pool[opp_name]["losses"] * scale)
+                self.opponent_pool[opp_name]["losses"] = round(
+                    self.opponent_pool[opp_name]["losses"] * scale
                 )
 
     def _add_to_pool(self):
@@ -540,220 +508,80 @@ class PFSPCallback(BaseCallback):
                     print(f"[PFSP WARNING] Failed to add to Rust pool: {e}")
 
         # Remove WEAKEST opponent if pool full (keep hardest opponents!)
-        # But NEVER remove: current opponent, baselines, or the one we just added
-        # Count non-baseline opponents for pool size check
-        non_baseline_count = sum(1 for d in self.opponent_pool.values() if not d.get("is_baseline", False))
+        # But NEVER remove: baselines or the one we just added
+        non_baseline_pool = {n: d for n, d in self.opponent_pool.items() if not d.get("is_baseline", False)}
         
-        while non_baseline_count > self.pool_size:
-            # Find opponent with LOWEST winrate (easiest for agent)
-            candidates = []
-            for name, data in self.opponent_pool.items():
-                # Don't remove the one we just added!
-                if name == checkpoint_name:
-                    continue
-                if name == self.current_opponent_name:
-                    continue  # Never remove current opponent
-                if data.get("is_baseline", False):
-                    continue  # NEVER remove baselines
-                total = data["wins"] + data["losses"]
-                if total > 0:
-                    opp_wr = data["wins"] / total
-                else:
-                    opp_wr = 0.5  # Untested opponents get neutral priority
-
-                # We store (name, winrate, added_at_step)
-                candidates.append((name, opp_wr, data.get("added_at_step", 0)))
+        while len(non_baseline_pool) > self.pool_size:
+            # Rank candidates by winrate
+            priorities = self._get_pool_priorities(non_baseline_pool)
+            
+            # Filter candidates for eviction (exclude the one we just added)
+            candidates = [
+                (name, priorities[name], int(data.get("added_at_step", 0)))
+                for name, data in non_baseline_pool.items()
+                if name != checkpoint_name
+            ]
 
             if candidates:
-                # Remove the opponent with LOWEST winrate (easiest to beat)
-                # If winrates are tied, remove the OLDEST one (lowest added_at_step)
-                weakest_name, weakest_wr, _ = min(
-                    candidates, key=lambda x: (x[1], x[2])
-                )
-                weakest_path = Path(self.opponent_pool[weakest_name]["path"])
+                # Remove candidate with LOWEST priority (easiest to beat)
+                # If tied, remove oldest one
+                candidates.sort(key=lambda x: (x[1], x[2]))
+                weakest_name = candidates[0][0]
+                weakest_wr = candidates[0][1] ** (1/self.priority_exponent) if self.priority_exponent != 0 else 0
+                
+                # 1. Flag environments to skip next result and reassign
+                self._flag_reassigned_envs(weakest_name)
+                
+                # 2. Cleanup files and pool
+                weakest_data = self.opponent_pool.pop(weakest_name)
+                non_baseline_pool.pop(weakest_name)
 
-                # 1. Remove from selectable pool IMMEDIATELY
-                del self.opponent_pool[weakest_name]
+                if weakest_data.get("path"):
+                    p = Path(weakest_data["path"])
+                    if p.exists(): p.unlink()
 
-                # 2. Force reassign any envs currently using this opponent
-                # This ensures we don't have "zombies" mid-episode
-                if self.pool_mode:
-                    for env_idx, name in enumerate(self.env_opponent_names):
-                        if name == weakest_name:
-                            self._assign_opponent_to_env(env_idx)
+                try:
+                    self.env.vec_game.remove_onnx_from_pool(weakest_name)
+                except Exception as e:
+                    if self.verbose > 0: print(f"[PFSP WARNING] Failed to remove {weakest_name} from Rust: {e}")
 
-                # 3. Now safe to remove from Rust and Disk
-                if weakest_path.exists():
-                    weakest_path.unlink()  # Delete checkpoint file
-
-                if self.pool_mode and isinstance(self.env, BatchedDeckGymEnv):
-                    try:
-                        self.env.vec_game.remove_onnx_from_pool(weakest_name)
-                    except Exception as e:
-                        if self.verbose > 0:
-                            print(
-                                f"[PFSP WARNING] Failed to remove from Rust pool: {e}"
-                            )
+                # 3. Force reassign envs
+                for env_idx, name in enumerate(self.env_opponent_names):
+                    if name == weakest_name:
+                        self._assign_opponent_to_env(env_idx)
 
                 if self.verbose > 0:
-                    print(
-                        f"[PFSP] Evicted weakest opponent: {weakest_name} (WR: {weakest_wr:.1%})"
-                    )
-
-                non_baseline_count -= 1  # Update counter for loop condition
+                    print(f"[PFSP] Evicted weakest: {weakest_name} (WR: {weakest_wr:.1%})")
+                
                 gc.collect()
             else:
-                if self.verbose > 0:
-                    print("[PFSP WARNING] Pool full but no candidates for eviction")
                 break
 
+        # Refresh Logic: Reset WR stats for all models in the pool at each addition
+        for data in self.opponent_pool.values():
+            data["wins"] = 0
+            data["losses"] = 0
+        
         if self.verbose > 0:
-            print(
-                f"[PFSP →Pool] Saved agent as {checkpoint_name} (pool size: {len(self.opponent_pool)})"
-            )
-
-    def _select_opponent_pfsp(self):
-        """Select opponent using PFSP priority function."""
-        if not self.opponent_pool:
-            if self.verbose > 0:
-                print("[PFSP] Pool empty, skipping opponent selection")
-            return
-
-        # Calculate win rates for each opponent
-        winrates = {}
-        for name, data in self.opponent_pool.items():
-            total = data["wins"] + data["losses"]
-            if total > 0:
-                # Opponent's win rate against agent
-                winrates[name] = data["wins"] / total
-            else:
-                # New opponent: assume 50% win rate
-                winrates[name] = 0.5
-
-        # PFSP priority: higher priority for opponents that beat the agent
-        # f(x) = (1 - agent_winrate)^p = opponent_winrate^p
-        priorities = {
-            name: (wr**self.priority_exponent) for name, wr in winrates.items()
-        }
-
-        # Normalize to probabilities
-        total_priority = sum(priorities.values())
-        if total_priority == 0:
-            # All priorities zero (shouldn't happen): uniform distribution
-            probs = np.ones(len(self.opponent_pool)) / len(self.opponent_pool)
-            selected_name = np.random.choice(list(self.opponent_pool.keys()))
-        else:
-            probs = np.array(
-                [
-                    priorities[name] / total_priority
-                    for name in self.opponent_pool.keys()
-                ]
-            )
-            selected_name = np.random.choice(list(self.opponent_pool.keys()), p=probs)
-
-        # Load and set opponent
-        selected_path = self.opponent_pool[selected_name]["path"]
-        self._set_opponent(selected_name, selected_path)
-
-        if self.verbose > 0:
-            wr = winrates[selected_name]
-            print(
-                f"[PFSP Pool→] Loading opponent: {selected_name} "
-                f"(opp WR: {wr:.1%}, priority: {priorities[selected_name]:.3f})"
-            )
-
-        if self.verbose > 1:
-            # Debug: show all opponents and their priorities
-            print(f"[PFSP Debug] Pool state:")
-            for name in sorted(
-                self.opponent_pool.keys(), key=lambda k: priorities[k], reverse=True
-            ):
-                wr = winrates[name]
-                prio = priorities[name]
-                prob = prio / total_priority if total_priority > 0 else 0
-                w = self.opponent_pool[name]["wins"]
-                l = self.opponent_pool[name]["losses"]
-                print(
-                    f"  {name}: WR={wr:.1%} ({w}W-{l}L), prio={prio:.3f}, p(select)={prob:.1%}"
-                )
-
-    def _set_opponent(self, opponent_name: str, checkpoint_path: str):
-        """Load checkpoint and set as current opponent."""
-        # Clean up old frozen model
-        if self._frozen_model is not None:
-            del self._frozen_model
-            gc.collect()
-
-        self.current_opponent_name = opponent_name
-
-        if isinstance(self.env, BatchedDeckGymEnv):
-            # BatchedDeckGymEnv: export to ONNX for Rust-side inference
-            try:
-                from deckgym.onnx_export import export_policy_to_onnx
-
-                # Load checkpoint temporarily
-                loaded_model = MaskablePPO.load(checkpoint_path, device="cpu")
-
-                # Export to ONNX
-                onnx_path = os.path.join(
-                    tempfile.gettempdir(), f"pfsp_{opponent_name}.onnx"
-                )
-                export_policy_to_onnx(loaded_model, onnx_path, validate=False)
-
-                # Set in VecGame
-                device = (
-                    getattr(self.env.config, "pfsp_opponent_device", "trt")
-                    if hasattr(self.env, "config")
-                    else "trt"
-                )
-                self.env.vec_game.set_onnx_opponent(
-                    onnx_path, deterministic=False, device=device
-                )
-
-                # Clean up loaded model
-                del loaded_model
-                gc.collect()
-
-            except AttributeError as e:
-                print(f"[PFSP WARNING] ONNX opponent not available: {e}")
-            except Exception as e:
-                print(f"[PFSP WARNING] Failed to set ONNX opponent: {e}")
-        else:
-            # Non-batched envs: use CPU model
-            self._frozen_model = MaskablePPO.load(checkpoint_path, device="cpu")
-
-            if self.n_envs == 1:
-                # Single environment
-                inner_env = (
-                    self.env.env.env if hasattr(self.env.env, "env") else self.env.env
-                )
-                inner_env.set_opponent_model(self._frozen_model)
-            else:
-                # Multiple environments (DummyVecEnv)
-                for i in range(self.n_envs):
-                    self.env.envs[i].env.env.set_opponent_model(self._frozen_model)
+            print(f"[PFSP Refresh] Pool size: {len(self.opponent_pool)}, statistics reset")
+            print(f"[PFSP →Pool] Saved agent as {checkpoint_name}")
 
     def get_pool_stats(self) -> Dict:
-        """Return statistics about the opponent pool (for logging/monitoring)."""
+        """Return statistics about the opponent pool."""
         if not self.opponent_pool:
-            return {
-                "pool_size": 0,
-                "current_opponent": None,
-            }
+            return {"pool_size": 0}
+
+        priorities = self._get_pool_priorities(self.opponent_pool)
+        total_prio = sum(priorities.values())
 
         winrates = {}
         for name, data in self.opponent_pool.items():
             total = data["wins"] + data["losses"]
-            if total > 0:
-                winrates[name] = data["wins"] / total
-            else:
-                winrates[name] = 0.5
+            winrates[name] = data["wins"] / total if total > 0 else PFSP_NEUTRAL_WINRATE
 
         return {
             "pool_size": len(self.opponent_pool),
-            "current_opponent": self.current_opponent_name,
             "pool_winrates": winrates,
-            "avg_opponent_winrate": (
-                np.mean(list(winrates.values())) if winrates else 0.5
-            ),
+            "avg_opponent_winrate": np.mean(list(winrates.values())) if winrates else 0.5,
+            "selection_probs": {n: p / total_prio for n, p in priorities.items()} if total_prio > 0 else {}
         }

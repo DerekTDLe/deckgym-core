@@ -842,13 +842,32 @@ impl VecGame {
     fn play_pool_opponent_turns(&mut self, rewards: &mut [f32], dones: &mut [bool]) {
         const MAX_OPPONENT_TURNS: usize = 50;
 
+        // First, handle baseline opponents (they have env_opponent_indices[i] = None)
+        // Baselines use built-in bots via play_bot_turns(), not ONNX
+        for i in 0..self.n_envs {
+            if !dones[i] 
+                && self.env_opponent_indices[i].is_none() 
+                && self.envs[i].players.is_some() 
+                && self.envs[i].state.current_player == 1 
+                && !self.envs[i].state.is_game_over() 
+            {
+                // This is a baseline env - play bot turns until agent's turn or game over
+                let (bot_reward, bot_done) = self.envs[i].play_bot_turns();
+                if bot_done {
+                    dones[i] = true;
+                    rewards[i] = bot_reward;
+                }
+            }
+        }
+
+        // Then handle ONNX opponents
         for _ in 0..MAX_OPPONENT_TURNS {
             // Clear grouping buffers (keeps capacity)
             for group in &mut self.opponent_groups {
                 group.clear();
             }
 
-            // Group envs by opponent index (no String operations!)
+            // Group envs by opponent index (only ONNX opponents, not baselines)
             for (i, env) in self.envs.iter().enumerate() {
                 if !dones[i] && env.state.current_player == 1 && !env.state.is_game_over() {
                     if let Some(opp_idx) = self.env_opponent_indices[i] {
@@ -1016,7 +1035,18 @@ impl VecGame {
             return;
         }
 
-        // Play opponent turns until agent's turn
+        // First, handle baseline opponents (they have env_opponent_indices[i] = None)
+        // Baselines use built-in bots via play_bot_turns(), not ONNX
+        for &i in &needs_initial {
+            if self.env_opponent_indices[i].is_none() && self.envs[i].players.is_some() {
+                // This is a baseline env - play bot turns
+                while self.envs[i].state.current_player == 1 && !self.envs[i].state.is_game_over() {
+                    self.envs[i].play_bot_turns();
+                }
+            }
+        }
+
+        // Play ONNX opponent turns until agent's turn
         const MAX_TURNS: usize = 50;
         for _ in 0..MAX_TURNS {
             // Clear grouping buffers (keeps capacity)
@@ -1024,7 +1054,7 @@ impl VecGame {
                 group.clear();
             }
 
-            // Group active envs by opponent index
+            // Group active envs by opponent index (only ONNX opponents, not baselines)
             for &i in &needs_initial {
                 if self.envs[i].state.current_player == 1 && !self.envs[i].state.is_game_over() {
                     if let Some(opp_idx) = self.env_opponent_indices[i] {
