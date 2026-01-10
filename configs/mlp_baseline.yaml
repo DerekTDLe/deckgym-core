@@ -6,6 +6,8 @@
 # against the attention-based model. The MLP is larger to
 # compensate for the lack of card-level attention.
 
+# Dev note : this one will be used for run #11
+
 paths:
   meta_deck_path: "meta_deck.json"
   save_path: "models/mlp_baseline"
