@@ -189,9 +189,16 @@ class SelfPlayEnv(gym.Env):
         try:
             obs, reward, done, truncated, info = self._env.step(action)
         except BaseException as e:
+            if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                raise e
             print(f"WARNING: Game error during agent turn: {e}")
             self.diagnostic_logger.log_error(
-                "agent_panic", 0, self._env.game.get_state(), {"error": str(e)}
+                "agent_panic", 0, self._env.game.get_state(), 
+                {
+                    "error": str(e),
+                    "deck_a": self._current_decks[0],
+                    "deck_b": self._current_decks[1],
+                }
             )
             return self._end_episode_error(str(e))
 
@@ -295,7 +302,17 @@ class SelfPlayEnv(gym.Env):
                 if done:
                     break
         except BaseException as e:
+            if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                raise e
             print(f"WARNING: Game error during opponent turn: {e}")
+            self.diagnostic_logger.log_error(
+                "opponent_panic", 0, self._env.game.get_state(),
+                {
+                    "error": str(e),
+                    "deck_a": self._current_decks[0],
+                    "deck_b": self._current_decks[1],
+                }
+            )
             return obs, info, 0.0, True
 
         return obs, info, final_reward, done
@@ -576,6 +593,10 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         "use_batched_env": config.use_batched_env,
         "device": config.device,
     }
+    
+    from deckgym.diagnostic_logger import get_logger
+    diag_logger = get_logger()
+    diag_logger.setup_excepthook()
 
     print(f"\n{'─' * 60}")
     print("  TRAINING CONFIGURATION (Self-Play)")
@@ -830,11 +851,12 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
             f"      Opponent updates: every {config.frozen_opponent_update_rollouts} rollouts"
         )
 
-    model.learn(
-        total_timesteps=config.total_timesteps,
-        callback=callbacks,
-        progress_bar=True,
-    )
+    with diag_logger.capture_panic(env_provider=lambda: env):
+        model.learn(
+            total_timesteps=config.total_timesteps,
+            callback=callbacks,
+            progress_bar=True,
+        )
 
     # Save final model
     os.makedirs(os.path.dirname(config.save_path), exist_ok=True)

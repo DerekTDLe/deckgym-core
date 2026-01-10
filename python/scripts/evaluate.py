@@ -230,32 +230,39 @@ def run_rust_match(
                 return -1
             else:
                 return 0
-        except Exception as e:
-            if (PanicException and isinstance(e, PanicException)) or type(e).__name__ == "PanicException":
-                # Try to log the state if it was a panic
+        except BaseException as e:
+            if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                raise e
+
+            is_panic = (PanicException and isinstance(e, PanicException)) or type(e).__name__ == "PanicException"
+            reason = "evaluation_panic" if is_panic else "evaluation_error"
+            
+            if is_panic:
                 console.print(f"[bold red]CRITICAL: Rust Panic during simulation![/bold red]")
-                console.print(f"[red]{e}[/red]")
-
-                try:
-                    # We can't easily get the last state from deckgym.simulate yet
-                    # but we can log that it happened
-                    get_logger().log_error(
-                        "evaluation_panic",
-                        0,
-                        None,  # State not available during simulate() crash
-                        {
-                            "p1": player_a_code,
-                            "p2": player_b_code,
-                            "error": str(e),
-                        },
-                    )
-                except Exception:
-                    pass
-
-                return 0  # Treat as draw/void
             else:
                 console.print(f"[red]Error in simulation: {e}[/red]")
-                return 0  # Treat error as draw/void
+            
+            console.print(f"[red]{e}[/red]")
+
+            try:
+                # Log detailed info for reproduction
+                get_logger().log_error(
+                    reason,
+                    0,
+                    None,  # State not available during simulate() crash
+                    {
+                        "p1": player_a_code,
+                        "p2": player_b_code,
+                        "deck_a": deck_a_json,
+                        "deck_b": deck_b_json,
+                        "seed": seed,
+                        "error": str(e),
+                    },
+                )
+            except Exception as log_err:
+                console.print(f"[dim red]Failed to log diagnostic: {log_err}[/dim red]")
+
+            return 0  # Treat as draw/void
 
 
 def benchmark_directory(
@@ -292,11 +299,10 @@ def benchmark_directory(
     for mf in model_files:
         console.print(f"  • {mf.name}")
 
-    # Create temp directory for ONNX files
-    tmpdir = tempfile.mkdtemp(prefix="bench_onnx_")
-    onnx_paths: Dict[str, str] = {}  # model_name -> onnx_path
+    # Use TemporaryDirectory for automatic cleanup of ONNX files
+    with tempfile.TemporaryDirectory(prefix="bench_onnx_") as tmpdir:
+        onnx_paths: Dict[str, str] = {}  # model_name -> onnx_path
 
-    try:
         # Convert all models to ONNX
         console.print("\n[bold cyan]Converting models to ONNX...[/bold cyan]")
         for model_file in model_files:
@@ -451,10 +457,6 @@ def benchmark_directory(
             },
         }
         save_report(bench_results, "bench", name=model_dir.name)
-
-    finally:
-        # Cleanup temp ONNX files
-        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def print_leaderboard(
