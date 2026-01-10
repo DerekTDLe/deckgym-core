@@ -1,23 +1,33 @@
 # RL training dependencies for deckgym-core
 # Install with: pip install -r requirements.txt
 # Note: PyTorch should be installed separately for CUDA support:
-#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
 
 # Core RL
-stable-baselines3[extra]>=2.7.0
-sb3-contrib>=2.7.0
-gymnasium>=1.0.0
+stable-baselines3[extra]>=2.7.1
+sb3-contrib>=2.7.1
+gymnasium>=1.2.3
 
 # Deep learning
-numpy>=2.0.0
+numpy>=2.4.1
 
 # Monitoring
 tensorboard>=2.18.0
 
+# Config parsing
+PyYAML>=6.0.3
+
 # ONNX export and validation
-onnx>=1.14.0
-onnxruntime>=1.16.0
-onnxscript>=0.1.0
+onnx>=1.20.0
+onnxruntime_gpu>=1.23.2
 
 # Rust bindings (build from source)
 maturin>=1.5.0
+
+# Rating system
+trueskill>=0.4.5
+
+# Misc
+pyo3_runtime>=0.0.1
+pytest>=9.0.2
+rich>=14.2.0
