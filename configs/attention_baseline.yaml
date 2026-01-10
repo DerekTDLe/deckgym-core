@@ -3,7 +3,7 @@
 
 paths:
   meta_deck_path: "meta_deck.json"
-  save_path: "models/attention_baseline
+  save_path: "models/attention_baseline/"
   checkpoint_dir: "./checkpoints/attention_baseline/"
   tensorboard_dir: "./logs/attention_baseline/"
   resume_path: null
