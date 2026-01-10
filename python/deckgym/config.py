@@ -206,17 +206,22 @@ class TrainingConfig:
 
     # PFSP Baseline Curriculum (permanent baseline slots with progressive difficulty)
     # These baselines are never evicted and provide diversity signal against non-self opponents
-    pfsp_baseline_slots: int = 2  # Number of permanent baseline slots
+    # baseline_slots is now DYNAMIC based on stage size (see selector.py)
     pfsp_baseline_max_allocation: float = 0.20  # Max 20% of envs can play vs baselines
     # Curriculum stages: list of (step_threshold, [baseline_codes])
-    # At each stage, the baselines are replaced. Codes: v=ValueFunction, w=WeightedRandom,
-    # aa=AttachAttack, er=EvolutionRusher, e2/e3/e4=Expectiminimax(depth)
+    # At each stage, the baselines are replaced. Codes:
+    #   v=ValueFunction, w=WeightedRandom, aa=AttachAttack, er=EvolutionRusher
+    #   e2/e3/e4=Expectiminimax(depth) - omniscient, excluded from global WR
+    #   o[n][device]=ONNX model (n=index from newest, device=c/g/t for cpu/cuda/trt)
+    #     Examples: o1t = newest ONNX on TensorRT, o2c = 2nd newest on CPU
+    # Order: Learn coherence first (o2/attention), then resist exploits (o1/MLP)
     pfsp_baseline_curriculum: List[Tuple[int, List[str]]] = field(
         default_factory=lambda: [
-            (0, ["v", "w"]),  # Stage 1: Easy opponents (0-500k steps)
-            (500_000, ["aa", "er"]),  # Stage 2: Medium opponents (500k-2M steps)
-            (2_000_000, ["er", "o1t"]),  # Stage 3: Hard (2M-5M steps)
-            (5_000_000, ["e2", "o1t"]),  # Stage 4: Boss (5M+ steps)
+            (0, ["v", "w"]),                   # Stage 1: Easy warmup (0-500k)
+            (500_000, ["aa", "er"]),           # Stage 2: Medium bots (500k-2M)
+            (2_000_000, ["er", "o2t"]),        # Stage 3: Attention anchor (2M-5M)
+            (5_000_000, ["o2t", "o1t"]),       # Stage 4: Both NN styles (5M-10M)
+            (10_000_000, ["e2", "o1t", "o2t"]),# Stage 5: Boss + both anchors (10M+)
         ]
     )
 
