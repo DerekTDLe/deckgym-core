@@ -1,0 +1,23 @@
+{
+  "reason": "evaluation_panic",
+  "env_idx": 0,
+  "timestamp": "20260110_232224_769613",
+  "turn_count": 0,
+  "current_player": 0,
+  "points": [
+    0,
+    0
+  ],
+  "action_history": [],
+  "game_state": {
+    "error": "Game state is None"
+  },
+  "extra_info": {
+    "p1": "onnx:/tmp/bench_onnx_niukg86k/rl_bot_21248000_steps.onnx:trt",
+    "p2": "onnx:/tmp/bench_onnx_niukg86k/rl_bot_9728000_steps.onnx:trt",
+    "deck_a": "2 A3b 055\n2 A3b 034\n2 A1 097\n2 A1 098\n2 A2 053\n2 P-A 007\n1 A2 150\n2 P-A 005\n2 P-A 001\n1 P-A 006\n2 A2 147",
+    "deck_b": "1 A3 031\n1 A3 033\n1 A1 047\n1 A4a 010\n1 A3a 019\n1 A2 061\n1 A4a 025\n2 A1a 068\n2 P-A 007\n1 A1 225\n1 A2 150\n2 P-A 005\n2 A4 151\n1 A3 144\n1 A2 147\n1 A3 146",
+    "seed": 1707992706851571720,
+    "error": "Pokemon should be there..."
+  }
+}
