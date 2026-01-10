@@ -197,7 +197,16 @@ The `EvolutionRusher` (`er`) baseline is used as the standard anchor. Since it's
 ## Training Performance
 
 With the current attention-based architecture and `configs/attention_baseline.yaml`:
-- **Training Speed**: ~440 it/s (on RTX 3050).
+- **Training Speed (on RTX 3050)**: 
+
+Pure MLP:
+With [mlp_baseline.yaml](configs/mlp_baseline.yaml) presets
+~2700 it/s .
+
+Attention:
+With [attention_baseline.yaml](configs/attention_baseline.yaml) presets
+~440 it/s (on RTX 3050).
+
 - **Adaptability**: Training now uses pure self-play by default, sampling from 1k+ meta decks via `MetaDeckLoader`.
 
 ```bash
