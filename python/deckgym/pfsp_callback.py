@@ -1,49 +1,28 @@
 #!/usr/bin/env python3
 """
 Prioritized Fictitious Self-Play (PFSP) Callback.
-
-Implements AlphaStar-style league training where the agent trains against
-a pool of historical checkpoints, prioritizing harder opponents.
-
-Reference: https://www.nature.com/articles/s41586-019-1724-z
+Modular implementation delegating to specialized components.
 """
 
-from collections import Counter
-import os
 import gc
-import tempfile
-from typing import Dict, List, Optional, Tuple
-from pathlib import Path
-
-import numpy as np
+from typing import Dict, List, Optional
 from stable_baselines3.common.callbacks import BaseCallback
-from sb3_contrib import MaskablePPO
 
 from deckgym.batched_env import BatchedDeckGymEnv
-from deckgym.onnx_export import export_policy_to_onnx
 from deckgym.config import (
     DEFAULT_CONFIG,
-    PFSP_NEUTRAL_WINRATE,
     PFSP_MIN_EPISODES_FOR_UPDATE,
-    PFSP_ADAPTIVE_DOMINATION_THRESHOLD,
 )
+from deckgym.league.pool import OpponentPool
+from deckgym.league.selector import OpponentSelector
+from deckgym.league.bridge import LeagueBridge
+from deckgym.league.logger import LeagueLogger
 
 
 class PFSPCallback(BaseCallback):
     """
     Prioritized Fictitious Self-Play callback.
-
-    Maintains a pool of historical checkpoints and selects opponents based on
-    their win rate against the current agent (harder opponents = higher priority).
-
-    Algorithm:
-    1. Every N rollouts: save current agent to pool
-    2. Track win rate for each opponent in pool
-    3. Select next opponent using priority function: f(x) = (1 - winrate)^p
-    4. Export selected opponent to ONNX and set as frozen opponent
-
-    This ensures the agent focuses on its weaknesses and prevents exploitation
-    of a single frozen opponent's flaws.
+    Modular implementation delegating to specialized components.
     """
 
     def __init__(
@@ -60,740 +39,196 @@ class PFSPCallback(BaseCallback):
         baseline_max_allocation: float = DEFAULT_CONFIG.pfsp_baseline_max_allocation,
         baseline_curriculum: list = None,
         verbose: int = 1,
-        **kwargs,  # Accept legacy args but ignore them
+        **kwargs,
     ):
-        """
-        Initialize PFSP callback.
-
-        Args:
-            env: Training environment (BatchedDeckGymEnv or DummyVecEnv)
-            n_envs: Number of parallel environments
-            pool_size: Maximum number of opponents to keep in pool
-            add_to_pool_every_n_rollouts: Add current agent to pool every N rollouts
-            select_opponent_every_n_rollouts: Select new opponent every N rollouts
-            priority_exponent: Exponent for PFSP priority (f(x) = (1-x)^p)
-                Higher = focus more on hard opponents (typical: 1.0-3.0)
-            winrate_window: Number of recent episodes to track per opponent
-            checkpoint_dir: Directory to save opponent checkpoints
-            baseline_slots: Number of permanent baseline slots (never evicted)
-            baseline_max_allocation: Max fraction of envs that can play vs baselines
-            baseline_curriculum: List of (step_threshold, [baseline_codes]) tuples
-            verbose: Verbosity level (0=silent, 1=normal, 2=debug)
-        """
         super().__init__(verbose)
         self.env = env
         self.n_envs = n_envs
-        self.pool_size = pool_size
         self.add_to_pool_every_n_rollouts = add_to_pool_every_n_rollouts
-        self.priority_exponent = priority_exponent
         self.winrate_window = winrate_window
-        self.checkpoint_dir = Path(checkpoint_dir)
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        # Baseline curriculum settings
-        self.baseline_slots = baseline_slots
-        self.baseline_max_allocation = baseline_max_allocation
-        self.baseline_curriculum = (
-            baseline_curriculum or DEFAULT_CONFIG.pfsp_baseline_curriculum
+        # Initialize modular components
+        self.pool = OpponentPool(pool_size, checkpoint_dir)
+        self.selector = OpponentSelector(
+            self.pool,
+            priority_exponent,
+            baseline_curriculum or DEFAULT_CONFIG.pfsp_baseline_curriculum,
+            baseline_max_allocation,
+            n_envs,
         )
-        self.current_baselines: list = []  # Currently active baseline codes
-        self.baseline_envs_count = max(
-            1, int(n_envs * baseline_max_allocation)
-        )  # How many envs for baselines
+        self.bridge = LeagueBridge(env, device=getattr(env.config, "pfsp_opponent_device", "trt"), verbose=verbose)
+        self.league_logger = LeagueLogger(self.pool, verbose=verbose)
 
         # State tracking
         self.rollout_count = 0
-        self.current_opponent_name = None
-        self._frozen_model = None
-
-        # Per-env opponent tracking (for pool mode)
-        self.env_opponent_names = [
-            None
-        ] * n_envs  # Track which opponent each env is using
-        self.pool_mode = False  # True if using pool with per-env opponents
-
-        # New: Tracking for fair statistics (skip episodes that were mid-game when opponent changed)
-        self.skip_next_episode = [False] * n_envs
-
-        # Opponent pool: {name: {"path": str, "onnx_path": str, "wins": int, "losses": int, "added_at_step": int, "is_baseline": bool}}
-        self.opponent_pool: Dict[str, Dict] = {}
-
-        # Episode tracking: [(opponent_name, won: bool), ...]
         self.episode_results = []
+        self.env_opponent_names = [None] * n_envs
+        self.skip_next_episode = [False] * n_envs
+        self.pool_mode = False
 
         if self.verbose > 0:
-            print(
-                f"[PFSP] Initialized with pool_size={pool_size}, priority_exp={priority_exponent}"
-            )
-            print(
-                f"[PFSP] Adding to pool every {add_to_pool_every_n_rollouts} rollouts"
-            )
-            print(f"[PFSP] Per-episode opponent selection active")
-            print(
-                f"[PFSP] Baseline curriculum: {baseline_slots} slots, {baseline_max_allocation:.0%} max allocation"
-            )
-            print(f"[PFSP] Baseline stages: {len(self.baseline_curriculum)}")
+            print(f"[PFSP] Modular initialized (pool={pool_size}, exp={priority_exponent})")
 
     def _on_training_start(self) -> None:
-        """Called when training starts - initialize pool with current model."""
-        if self.verbose > 0:
-            print("[PFSP] Training started - adding initial opponent to pool")
+        """Initialize league state and Rust pool."""
+        self.league_logger.logger = self.logger
+        
+        # Initial curriculum update
+        added, _ = self.selector.update_curriculum(self.num_timesteps)
+        for bl_code in added:
+            self.pool.add_opponent(f"baseline_{bl_code}", {
+                "path": None, "baseline_code": bl_code, "wins": 0, "losses": 0, "draws": 0,
+                "added_at_step": self.num_timesteps, "is_baseline": True
+            })
 
-        # Initialize baseline curriculum (add initial baselines to pool)
-        self._update_baseline_curriculum()
-
-        # Add current (untrained) model to pool as initial opponent
+        # Add initial untrained model
         self._add_to_pool()
 
-        # Ensure we are in pool mode (BatchedDeckGymEnv with ONNX support)
-        if isinstance(self.env, BatchedDeckGymEnv):
-            try:
-                self._enable_pool_mode()
-            except Exception as e:
-                raise RuntimeError(
-                    f"[PFSP CRITICAL] Failed to initialize pool mode: {e}"
-                )
-        else:
-            raise TypeError(
-                "[PFSP CRITICAL] Only BatchedDeckGymEnv is supported (legacy mode removed)"
-            )
+        # Initialize Rust pool
+        self.bridge.clear_rust_pool()
+        for name, data in self.pool.opponents.items():
+            if data.get("is_baseline"):
+                self.bridge.add_baseline_to_rust(name, data["baseline_code"])
+            else:
+                self.bridge.add_onnx_to_rust(name, data["onnx_path"])
 
-    def _enable_pool_mode(self):
-        """Enable per-episode opponent selection by preloading all pool opponents."""
-        from deckgym.onnx_export import export_policy_to_onnx
-        import tempfile
-
-        # Clear any existing pool in Rust
-        if hasattr(self.env.vec_game, "clear_onnx_pool"):
-            self.env.vec_game.clear_onnx_pool()
-
-        # Load all opponents into pool
-        for opp_name, opp_data in self.opponent_pool.items():
-            # Skip baselines - they use built-in bots, not ONNX
-            if opp_data.get("is_baseline", False):
-                # Add baseline to Rust pool using built-in bot code
-                baseline_code = opp_data.get(
-                    "baseline_code", opp_name.replace("baseline_", "")
-                )
-                try:
-                    self.env.vec_game.add_baseline_to_pool(opp_name, baseline_code)
-                    if self.verbose > 1:
-                        print(
-                            f"[PFSP] Added baseline {opp_name} ({baseline_code}) to pool"
-                        )
-                except Exception as e:
-                    if self.verbose > 0:
-                        print(f"[PFSP WARNING] Failed to add baseline {opp_name}: {e}")
-                continue
-
-            # Export ONNX opponents if not already done
-            if "onnx_path" not in opp_data or not Path(opp_data["onnx_path"]).exists():
-                loaded_model = MaskablePPO.load(opp_data["path"], device="cpu")
-                onnx_path = os.path.join(
-                    tempfile.gettempdir(), f"pfsp_pool_{opp_name}.onnx"
-                )
-                export_policy_to_onnx(loaded_model, onnx_path, validate=False)
-                opp_data["onnx_path"] = onnx_path
-                del loaded_model
-
-            # Add to Rust pool
-            device = (
-                self.env.config.pfsp_opponent_device
-                if hasattr(self.env, "config")
-                else "trt"
-            )
-            self.env.vec_game.add_onnx_to_pool(
-                opp_name, opp_data["onnx_path"], False, device
-            )
-            if self.verbose > 1:
-                print(f"[PFSP] Added {opp_name} to pool")
-
-        # Assign initial opponents to each env
-        for env_idx in range(self.n_envs):
-            self._assign_opponent_to_env(env_idx)
-
+        # Assign initial opponents
+        for i in range(self.n_envs):
+            self._assign_opponent_to_env(i)
+            
         self.pool_mode = True
 
-    def _update_baseline_curriculum(self):
-        """
-        Update baseline opponents based on current training step.
-
-        Checks the curriculum stages and swaps baselines when thresholds are crossed.
-        Baselines are added to the pool with is_baseline=True (never evicted).
-        """
-        current_step = self.num_timesteps
-
-        # Find the appropriate curriculum stage
-        new_baselines = []
-        for step_threshold, baselines in sorted(
-            self.baseline_curriculum, key=lambda x: x[0], reverse=True
-        ):
-            if current_step >= step_threshold:
-                new_baselines = baselines
-                break
-
-        # Check if baselines changed
-        if set(new_baselines) == set(self.current_baselines):
-            return  # No change needed
-
-        # Remove old baselines from pool
-        for old_bl in self.current_baselines:
-            bl_name = f"baseline_{old_bl}"
-            if bl_name in self.opponent_pool:
-                del self.opponent_pool[bl_name]
-                if self.pool_mode and isinstance(self.env, BatchedDeckGymEnv):
-                    try:
-                        self.env.vec_game.remove_onnx_from_pool(bl_name)
-                    except Exception:
-                        pass
-
-        # Add new baselines to pool
-        for bl_code in new_baselines:
-            bl_name = f"baseline_{bl_code}"
-            self.opponent_pool[bl_name] = {
-                "path": None,  # No path for baselines (they're built-in)
-                "baseline_code": bl_code,  # Store the actual code (e.g., "e2", "v")
-                "wins": 0,
-                "losses": 0,
-                "draws": 0,
-                "added_at_step": current_step,
-                "is_baseline": True,  # Mark as baseline (never evicted)
-            }
-
-            # Add to Rust pool if in pool mode
-            if self.pool_mode and isinstance(self.env, BatchedDeckGymEnv):
-                try:
-                    # Use the built-in baseline code directly
-                    self.env.vec_game.add_baseline_to_pool(bl_name, bl_code)
-                    if self.verbose > 0:
-                        print(
-                            f"[PFSP Baseline] Added {bl_name} ({bl_code}) to Rust pool"
-                        )
-                except Exception as e:
-                    if self.verbose > 0:
-                        print(f"[PFSP WARNING] Failed to add baseline {bl_name}: {e}")
-
-        if self.verbose > 0 and new_baselines != self.current_baselines:
-            old_str = (
-                ", ".join(self.current_baselines) if self.current_baselines else "none"
-            )
-            new_str = ", ".join(new_baselines)
-            print(
-                f"[PFSP Baseline] Curriculum update at step {current_step}: [{old_str}] -> [{new_str}]"
-            )
-
-        self.current_baselines = new_baselines
-
     def _assign_opponent_to_env(self, env_idx: int):
-        """
-        Assign an opponent to a specific env.
-
-        First `baseline_envs_count` envs are reserved for baselines (uniform selection).
-        Remaining envs use PFSP priority for opponent selection.
-        """
-        if not self.opponent_pool:
-            return
-
-        # Determine if this env should use baselines or PFSP pool
-        baseline_names = [f"baseline_{bl}" for bl in self.current_baselines]
-
-        if env_idx < self.baseline_envs_count and baseline_names:
-            # This env is reserved for baselines - uniform selection among baselines
-            selected_name = np.random.choice(baseline_names)
-        else:
-            # Use PFSP priority (excluding baselines for fairness)
-            selected_name = self._select_opponent_pfsp_for_env(exclude_baselines=True)
-
-            # Fallback to any opponent if pool is empty
-            if selected_name is None:
-                selected_name = self._select_opponent_pfsp_for_env(
-                    exclude_baselines=False
-                )
-
-        if selected_name:
-            try:
-                self.env.vec_game.set_env_opponent(env_idx, selected_name)
-                self.env_opponent_names[env_idx] = selected_name
-            except Exception as e:
-                if self.verbose > 0:
-                    print(
-                        f"[PFSP WARNING] Failed to set opponent for env {env_idx}: {e}"
-                    )
+        """Select an opponent and assign it via bridge."""
+        name = self.selector.select_for_env(env_idx)
+        if name:
+            self.bridge.assign_to_env(env_idx, name)
+            self.env_opponent_names[env_idx] = name
 
     def _flag_reassigned_envs(self, opponent_name: str):
-        """Flag all environments currently playing against a specific opponent to skip their next result."""
-        for env_idx, name in enumerate(self.env_opponent_names):
+        """Flag environments to skip next result when opponent changes mid-game."""
+        for i, name in enumerate(self.env_opponent_names):
             if name == opponent_name:
-                self.skip_next_episode[env_idx] = True
-                if self.verbose > 1:
-                    print(
-                        f"[PFSP Refresh] Flagged env {env_idx} to skip next result (reassigned mid-game)"
-                    )
-
-    def _get_pool_priorities(self, pool: Dict[str, Dict]) -> Dict[str, float]:
-        """Calculate PFSP priorities for a given set of opponents.
-        Uses Laplace smoothing to ensure every model has a non-zero selection priority.
-        """
-        priorities = {}
-        for name, data in pool.items():
-            total = data["wins"] + data["losses"] + data["draws"]
-            # Laplace smoothing: (wins + 1) / (total + 2)
-            opp_winrate = (data["wins"] + 1) / (total + 2)
-            priorities[name] = float(opp_winrate**self.priority_exponent)
-        return priorities
-
-    def _select_opponent_pfsp_for_env(
-        self, exclude_baselines: bool = False
-    ) -> Optional[str]:
-        """
-        Select opponent using PFSP priority.
-
-        Args:
-            exclude_baselines: If True, only select from self-play opponents (not baselines)
-        """
-        # Filter pool based on exclude_baselines
-        pool = {
-            name: data
-            for name, data in self.opponent_pool.items()
-            if not (exclude_baselines and data.get("is_baseline", False))
-        }
-
-        if not pool:
-            return None
-
-        if len(pool) == 1:
-            return next(iter(pool.keys()))
-
-        # Calculate PFSP priorities
-        priorities = self._get_pool_priorities(pool)
-        total_priority = sum(priorities.values())
-
-        if total_priority <= 0:
-            return np.random.choice(list(pool.keys()))
-
-        # Select using normalized probabilities
-        names = list(pool.keys())
-        probs = [priorities[name] / total_priority for name in names]
-        return np.random.choice(names, p=probs)
+                self.skip_next_episode[i] = True
 
     def _on_rollout_end(self) -> None:
         """Called at end of each rollout collection."""
         self.rollout_count += 1
 
-        # Check for curriculum stage transitions (every 10 rollouts to reduce overhead)
+        # Periodic curriculum update
         if self.rollout_count % 10 == 0:
-            self._update_baseline_curriculum()
+            added, removed = self.selector.update_curriculum(self.num_timesteps)
+            for bl_code in added:
+                name = f"baseline_{bl_code}"
+                self.pool.add_opponent(name, {
+                    "path": None, "baseline_code": bl_code, "wins": 0, "losses": 0, "draws": 0,
+                    "added_at_step": self.num_timesteps, "is_baseline": True
+                })
+                self.bridge.add_baseline_to_rust(name, bl_code)
+            for bl_code in removed:
+                name = f"baseline_{bl_code}"
+                self.pool.remove_opponent(name)
+                self.bridge.remove_from_rust(name)
 
-        # Update win rates from recent episodes
-        if (
-            len(self.episode_results) >= PFSP_MIN_EPISODES_FOR_UPDATE
-        ):  # Update every N episodes minimum
-            if self.verbose > 0:
-                print(
-                    f"[PFSP Debug] Rollout {self.rollout_count}: {len(self.episode_results)} episodes tracked"
-                )
+        # Update statistics and log
+        if len(self.episode_results) >= PFSP_MIN_EPISODES_FOR_UPDATE:
+            # Aggregate rollout stats for detailed logging
+            rollout_stats = {}
+            for opp_name, result in self.episode_results:
+                if opp_name not in rollout_stats:
+                    rollout_stats[opp_name] = {"wins": 0, "losses": 0, "draws": 0}
+                if result == "agent_win":
+                    rollout_stats[opp_name]["losses"] += 1
+                elif result == "opp_win":
+                    rollout_stats[opp_name]["wins"] += 1
+                elif result == "draw":
+                    rollout_stats[opp_name]["draws"] += 1
 
-                # Rollout-specific stats (from opponent perspective)
-                r_wins = Counter(
-                    name for name, res in self.episode_results if res == "opp_win"
-                )
-                r_losses = Counter(
-                    name for name, res in self.episode_results if res == "agent_win"
-                )
-                r_draws = Counter(
-                    name for name, res in self.episode_results if res == "draw"
-                )
-
-                for name in sorted(
-                    set(r_wins.keys()) | set(r_losses.keys()) | set(r_draws.keys())
-                ):
-                    data = self.opponent_pool.get(name)
-                    if not data:
-                        continue
-
-                    # Rollout stats
-                    w, l, d = r_wins[name], r_losses[name], r_draws[name]
-                    tot = w + l + d
-                    wr = w / tot if tot > 0 else 0
-
-                    # Total stats (after update below, we calculate it here for display)
-                    tw = data["wins"] + w
-                    tl = data["losses"] + l
-                    td = data["draws"] + d
-                    ttot = tw + tl + td
-                    twr = tw / ttot if ttot > 0 else 0
-
-                    print(
-                        f"  {name:15} : Rollout : {wr:5.1%}({w}-{l}-{d}) | Total : {twr:5.1%}({tw}-{tl}-{td})"
-                    )
-
-            # Calculate metrics BEFORE updating and clearing results
-            self_play_wr = self._get_self_play_winrate()
-            baseline_wr = self._get_baseline_winrate()
-
-            # Update and clear
-            self._update_winrates()
+            self.pool.update_results(self.episode_results)
+            # self.pool.apply_decay(self.winrate_window) # Decay is already applied in update_results in some versions, but here it is explicit
+            self.pool.apply_decay(self.winrate_window)
+            self.league_logger.log_metrics(self.rollout_count)
+            self.league_logger.log_detailed_info(rollout_stats)
             self.episode_results.clear()
 
-            # Log to TensorBoard
-            if self.logger:
-                self.logger.record("pfsp/winrate_self_play", self_play_wr)
-                if baseline_wr is not None:
-                    self.logger.record("pfsp/winrate_baselines", baseline_wr)
-                self.logger.record("pfsp/pool_size", len(self.opponent_pool))
-
-            if self.verbose > 0:
-                bl_str = f", Baselines: {baseline_wr:.1%}" if baseline_wr is not None else ""
-                print(f"[PFSP Summary] Self-Play WR: {self_play_wr:.1%}{bl_str}")
-
-        elif self.verbose > 0 and self.rollout_count % 5 == 0:
-            print(
-                f"[PFSP Debug] Rollout {self.rollout_count}: only {len(self.episode_results)} episodes (need 10+)"
-            )
-
-        # Calculate average agent winrate against self-play pool for addition decisions
-        # We use unweighted mean to avoid bias toward hard opponents (which are played more often)
-        self_play_winrate = self._get_self_play_winrate()
-
-        # Adaptive add frequency: if agent is dominating, add more frequently
-        effective_add_freq = (
-            max(1, self.add_to_pool_every_n_rollouts // 2)
-            if self_play_winrate > PFSP_ADAPTIVE_DOMINATION_THRESHOLD
-            else self.add_to_pool_every_n_rollouts
-        )
-
-        # Add current agent to pool periodically, but ONLY if performing well
-        min_wr_to_add = (
-            getattr(self.env.config, "pfsp_min_winrate_to_add", 0.50)
-            if hasattr(self.env, "config")
-            else 0.50
-        )
-
-        if self.rollout_count % effective_add_freq == 0:
-            # Add to pool FIRST (eviction uses accumulated stats)
-            if self_play_winrate >= min_wr_to_add or len(self.opponent_pool) < 2:
-                if self.verbose > 0 and self_play_winrate >= min_wr_to_add:
-                    print(
-                        f"[PFSP] Agent self-play winrate {self_play_winrate:.1%} >= {min_wr_to_add:.0%}, adding to pool"
-                    )
+        # Add current agent to pool
+        if self.rollout_count % self.add_to_pool_every_n_rollouts == 0:
+            sp_winrate = self.league_logger.get_self_play_winrate()
+            min_wr_to_add = getattr(self.env.config, "pfsp_min_winrate_to_add", 0.50)
+            
+            if sp_winrate >= min_wr_to_add or self.pool.model_count < 2:
                 self._add_to_pool()
-            elif self.verbose > 0:
-                print(
-                    f"[PFSP] Agent self-play winrate {self_play_winrate:.1%} < {min_wr_to_add:.0%}, skipping pool add"
-                )
-
-            # Reset stats AFTER eviction (so next period starts fresh)
-            self._reset_pool_stats()
-
-    def _get_self_play_winrate(self) -> float:
-        """
-        Calculate unweighted average agent winrate against non-baseline opponents in pool.
-        This provides a fair assessment of progress that isn't biased by selection frequencies
-        or difficult training baselines.
-        """
-        self_play_opps = [
-            d for n, d in self.opponent_pool.items() if not d.get("is_baseline")
-        ]
-        if not self_play_opps:
-            return 0.5
-
-        winrates = []
-        for d in self_play_opps:
-            total = d["wins"] + d["losses"] + d["draws"]
-            if total > 0:
-                # Agent winrate = Opponent losses / Total
-                winrates.append(d["losses"] / total)
-            else:
-                winrates.append(PFSP_NEUTRAL_WINRATE)
-
-        return float(np.mean(winrates))
-
-    def _is_fair_baseline(self, baseline_code: str) -> bool:
-        """
-        Check if a baseline is considered 'fair' (non-omniscient).
-
-        Omniscient bots (Expectiminimax 'e' and MCTS 'm') are excluded from
-        fair winrate metrics as they have access to hidden information.
-        """
-        lower = baseline_code.lower()
-        if lower in ["er", "et"]:
-            return True
-        if lower.startswith("e") or lower.startswith("m"):
-            return False
-        return True
-
-    def _get_baseline_winrate(self, only_fair: bool = True) -> Optional[float]:
-        """
-        Calculate unweighted average agent winrate against baseline opponents.
-
-        Args:
-            only_fair: If True, only include non-omniscient baselines (excludes 'e' and 'm').
-        """
-        baseline_opps = [
-            d
-            for n, d in self.opponent_pool.items()
-            if d.get("is_baseline")
-            and (
-                not only_fair
-                or self._is_fair_baseline(d.get("baseline_code", ""))
-            )
-        ]
-        if not baseline_opps:
-            return None
-
-        winrates = []
-        for d in baseline_opps:
-            total = d["wins"] + d["losses"] + d["draws"]
-            if total > 0:
-                winrates.append(d["losses"] / total)
-            else:
-                winrates.append(PFSP_NEUTRAL_WINRATE)
-
-        return float(np.mean(winrates))
-
-    def _get_avg_agent_winrate(self) -> float:
-        """Calculate weighted average agent winrate across all opponents (including baselines)."""
-        if not self.opponent_pool:
-            return PFSP_NEUTRAL_WINRATE
-
-        total_wins = 0
-        total_games = 0
-        for data in self.opponent_pool.values():
-            games = data["wins"] + data["losses"] + data["draws"]
-            if games > 0:
-                # Agent winrate = Opponent losses / Total
-                total_wins += data["losses"]
-                total_games += games
-
-        return total_wins / total_games if total_games > 0 else PFSP_NEUTRAL_WINRATE
+            
+            self.pool.reset_statistics()
 
     def _on_step(self) -> bool:
-        """Called at each env step - track episode outcomes and reassign opponents."""
-        # Collect episode results from infos
-        # Note: self.locals is a dict, so we use 'in' not hasattr
+        """Called at each env step - track outcomes and reassign."""
         infos = self.locals.get("infos", [])
-        if not infos:
-            # Fallback for non-vectorized envs
-            info = self.locals.get("info", {})
-            infos = [info] if info else []
-
         for env_idx, info in enumerate(infos):
             if not info or "episode" not in info:
                 continue
 
-            # Episode ended: check outcome
             reward = info["episode"].get("r", 0)
             draw_reward = getattr(self.env.config, "draw_reward", -0.5)
-
-            if reward > 0:
-                result = "agent_win"
-            elif abs(reward - draw_reward) < 1e-4:
-                result = "draw"
-            else:
-                result = "opp_win"
+            result = "agent_win" if reward > 0 else ("draw" if abs(reward - draw_reward) < 1e-4 else "opp_win")
 
             opp_name = self.env_opponent_names[env_idx]
-
             if opp_name:
-                # Only record result if the episode was "full" (not reassigned mid-game)
                 if self.skip_next_episode[env_idx]:
                     self.skip_next_episode[env_idx] = False
-                    if self.verbose > 1:
-                        print(
-                            f"[PFSP Refresh] Skipping result for env {env_idx} (reassigned mid-game)"
-                        )
                 else:
                     self.episode_results.append((opp_name, result))
 
-            # Reassign opponent for this env on episode end
             self._assign_opponent_to_env(env_idx)
-
         return True
 
-    def _update_winrates(self):
-        """Update opponent win rates based on recent episode results."""
-        # First, accumulate all results
-        for opp_name, result in self.episode_results:
-            if opp_name in self.opponent_pool:
-                if result == "agent_win":
-                    self.opponent_pool[opp_name]["losses"] += 1
-                elif result == "opp_win":
-                    self.opponent_pool[opp_name]["wins"] += 1
-                elif result == "draw":
-                    self.opponent_pool[opp_name]["draws"] += 1
-
-        # Then, apply decay ONCE per opponent (not per episode!)
-        for opp_name in self.opponent_pool:
-            total = (
-                self.opponent_pool[opp_name]["wins"]
-                + self.opponent_pool[opp_name]["losses"]
-                + self.opponent_pool[opp_name]["draws"]
-            )
-            if total > self.winrate_window:
-                # Scale down to keep within window
-                scale = self.winrate_window / total
-                # Use round() to avoid systematic bias
-                self.opponent_pool[opp_name]["wins"] = round(
-                    self.opponent_pool[opp_name]["wins"] * scale
-                )
-                self.opponent_pool[opp_name]["losses"] = round(
-                    self.opponent_pool[opp_name]["losses"] * scale
-                )
-                self.opponent_pool[opp_name]["draws"] = round(
-                    self.opponent_pool[opp_name]["draws"] * scale
-                )
-
     def _add_to_pool(self):
-        """Save current model to opponent pool."""
-        checkpoint_name = f"pfsp_{self.num_timesteps // 1000}k"
-        checkpoint_path = self.checkpoint_dir / f"{checkpoint_name}.zip"
-
-        # Save current model
-        self.model.save(str(checkpoint_path))
-
-        # Add to pool
-        self.opponent_pool[checkpoint_name] = {
-            "path": str(checkpoint_path),
-            "wins": 0,
-            "losses": 0,
-            "draws": 0,
-            "added_at_step": self.num_timesteps,
+        """Orchestrate saving and adding a new model to the league."""
+        name = f"pfsp_{self.num_timesteps // 1000}k"
+        path = self.pool.checkpoint_dir / f"{name}.zip"
+        
+        # Save model
+        self.model.save(str(path))
+        
+        # Add to local pool
+        data = {
+            "path": str(path), "wins": 0, "losses": 0, "draws": 0,
+            "added_at_step": self.num_timesteps, "is_baseline": False
         }
+        self.pool.add_opponent(name, data)
 
-        # In pool mode, also add to Rust pool
-        if self.pool_mode and isinstance(self.env, BatchedDeckGymEnv):
-            try:
-                from deckgym.onnx_export import export_policy_to_onnx
-                import tempfile
+        # Add to Rust via bridge
+        onnx_path = self.bridge.export_model(self.model, name)
+        data["onnx_path"] = onnx_path
+        self.bridge.add_onnx_to_rust(name, onnx_path)
 
-                # Export to ONNX
-                onnx_path = os.path.join(
-                    tempfile.gettempdir(), f"pfsp_pool_{checkpoint_name}.onnx"
-                )
-                export_policy_to_onnx(self.model, onnx_path, validate=False)
-                self.opponent_pool[checkpoint_name]["onnx_path"] = onnx_path
-
-                # Add to Rust pool
-                device = (
-                    getattr(self.env.config, "pfsp_opponent_device", "trt")
-                    if hasattr(self.env, "config")
-                    else "trt"
-                )
-                self.env.vec_game.add_onnx_to_pool(
-                    checkpoint_name, onnx_path, False, device
-                )
-                if self.verbose > 0:
-                    print(f"[PFSP] Added {checkpoint_name} to Rust pool")
-            except Exception as e:
-                if self.verbose > 0:
-                    print(f"[PFSP WARNING] Failed to add to Rust pool: {e}")
-
-        # Remove WEAKEST opponent if pool full (keep hardest opponents!)
-        # But NEVER remove: baselines or the one we just added
-        non_baseline_pool = {
-            n: d
-            for n, d in self.opponent_pool.items()
-            if not d.get("is_baseline", False)
-        }
-
-        while len(non_baseline_pool) > self.pool_size:
-            # Rank candidates by winrate
-            priorities = self._get_pool_priorities(non_baseline_pool)
-
-            # Filter candidates for eviction (exclude the one we just added)
-            candidates = [
-                (name, priorities[name], int(data.get("added_at_step", 0)))
-                for name, data in non_baseline_pool.items()
-                if name != checkpoint_name
-            ]
-
+        # Eviction if pool full
+        while self.pool.model_count > self.pool.pool_size:
+            candidates = self.pool.get_eviction_candidates(exclude_names=[name])
             if candidates:
-                # Remove candidate with LOWEST priority (easiest to beat)
-                # If tied, remove oldest one
-                candidates.sort(key=lambda x: (x[1], x[2]))
-                weakest_name = candidates[0][0]
-
-                # Get actual winrate for log display (before stats were reset)
-                w_data = non_baseline_pool.get(
-                    weakest_name, {"wins": 0, "losses": 0, "draws": 0}
-                )
-                w_total = w_data["wins"] + w_data["losses"] + w_data["draws"]
-                weakest_wr = (
-                    w_data["wins"] / w_total if w_total > 0 else PFSP_NEUTRAL_WINRATE
-                )
-
-                # 1. Remove from Rust pool FIRST (this shifts indices)
-                try:
-                    self.env.vec_game.remove_onnx_from_pool(weakest_name)
-                except Exception as e:
-                    if self.verbose > 0:
-                        print(
-                            f"[PFSP WARNING] Failed to remove {weakest_name} from Rust: {e}"
-                        )
-
-                # 2. Flag environments to skip next result and reassign
+                weakest_name, wr, _ = candidates[0]
                 self._flag_reassigned_envs(weakest_name)
-
-                # 3. Cleanup files and pool
-                weakest_data = self.opponent_pool.pop(weakest_name)
-                non_baseline_pool.pop(weakest_name)
-
-                if weakest_data.get("path"):
-                    p = Path(weakest_data["path"])
-                    if p.exists():
-                        p.unlink()
-
-                # 4. Force reassign envs AFTER Rust removal
-                for env_idx, name in enumerate(self.env_opponent_names):
-                    if name == weakest_name:
-                        self._assign_opponent_to_env(env_idx)
-
+                self.bridge.remove_from_rust(weakest_name)
+                weakest_data = self.pool.remove_opponent(weakest_name)
+                self.pool.cleanup_files(weakest_data)
+                
+                # Immediate reassignment for envs playing against evicted opponent
+                for i, curr_name in enumerate(self.env_opponent_names):
+                    if curr_name == weakest_name:
+                        self._assign_opponent_to_env(i)
+                        
                 if self.verbose > 0:
-                    print(
-                        f"[PFSP] Evicted weakest: {weakest_name} (WR: {weakest_wr:.1%})"
-                    )
-
-                gc.collect()
+                    print(f"[PFSP] Evicted weakest model: {weakest_name} (WR: {wr:.1%})")
             else:
                 break
-
+        
         if self.verbose > 0:
-            print(f"[PFSP \u2192Pool] Saved agent as {checkpoint_name}")
-
-    def _reset_pool_stats(self) -> None:
-        """Reset win/loss/draw statistics for all models in the pool."""
-        for data in self.opponent_pool.values():
-            data["wins"] = 0
-            data["losses"] = 0
-            data["draws"] = 0
-
-        if self.verbose > 0:
-            print(
-                f"[PFSP Refresh] Pool size: {len(self.opponent_pool)}, statistics reset"
-            )
+            print(f"[PFSP] Saved and added model: {name}")
+        gc.collect()
 
     def get_pool_stats(self) -> Dict:
-        """Return statistics about the opponent pool."""
-        if not self.opponent_pool:
-            return {"pool_size": 0}
-
-        priorities = self._get_pool_priorities(self.opponent_pool)
-        total_prio = sum(priorities.values())
-
-        winrates = {}
-        for name, data in self.opponent_pool.items():
-            total = data["wins"] + data["losses"] + data["draws"]
-            winrates[name] = data["wins"] / total if total > 0 else PFSP_NEUTRAL_WINRATE
-
+        """Backward compatibility for stats."""
         return {
-            "pool_size": len(self.opponent_pool),
-            "pool_winrates": winrates,
-            "avg_opponent_winrate": (
-                np.mean(list(winrates.values())) if winrates else 0.5
-            ),
-            "selection_probs": (
-                {n: p / total_prio for n, p in priorities.items()}
-                if total_prio > 0
-                else {}
-            ),
+            "pool_size": self.pool.total_count,
+            "self_play_winrate": self.league_logger.get_self_play_winrate(),
         }

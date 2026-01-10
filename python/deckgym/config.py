@@ -67,7 +67,7 @@ TRUESKILL_TAU = 0  # Dynamic factor
 TRUESKILL_DRAW_PROBABILITY = 0.01  # Probability of draw
 
 # Default evaluation games
-N_ROBIN_ROUNDS = 20 # Brute force for precision
+N_ROBIN_ROUNDS = 10 # Brute force for precision
 EVAL_REPORTS_DIR = "eval_reports"
 EVAL_DEFAULT_DEVICE = "trt"
 
@@ -121,8 +121,6 @@ MODEL_MASK_THRESHOLD = 1e-6  # Threshold to detect all-zero padding
 # PFSP internal constants
 PFSP_NEUTRAL_WINRATE = 0.5  # Winrate for untested opponents
 PFSP_MIN_EPISODES_FOR_UPDATE = 10  # Minimum episodes before updating winrates
-PFSP_ADAPTIVE_DOMINATION_THRESHOLD = 0.65  # If agent > 65%, add to pool faster
-PFSP_ADAPTIVE_DOMINATION_ADD_FREQ = 4  # Add every 4 rollouts if dominating
 
 
 @dataclass
