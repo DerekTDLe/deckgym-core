@@ -37,8 +37,16 @@ class OpponentSelector:
         self.n_envs = n_envs
         self.brutal_resume = brutal_resume
         
-        self.baseline_envs_count = max(1, int(n_envs * baseline_max_allocation))
         self.current_baselines: List[str] = []
+    
+    @property
+    def baseline_envs_count(self) -> int:
+        """Dynamic baseline env count based on current curriculum stage."""
+        if not self.current_baselines:
+            return 0
+        # Scale envs by number of baselines in current stage
+        per_baseline = max(1, int(self.n_envs * self.baseline_max_allocation / max(1, len(self.current_baselines))))
+        return min(per_baseline * len(self.current_baselines), int(self.n_envs * self.baseline_max_allocation))
 
     def update_curriculum(self, current_step: int) -> Tuple[List[str], List[str]]:
         """
