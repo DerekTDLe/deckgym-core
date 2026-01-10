@@ -38,6 +38,7 @@ class PFSPCallback(BaseCallback):
         baseline_slots: int = DEFAULT_CONFIG.pfsp_baseline_slots,
         baseline_max_allocation: float = DEFAULT_CONFIG.pfsp_baseline_max_allocation,
         baseline_curriculum: list = None,
+        brutal_resume: bool = DEFAULT_CONFIG.brutal_resume,
         verbose: int = 1,
         **kwargs,
     ):
@@ -55,6 +56,7 @@ class PFSPCallback(BaseCallback):
             baseline_curriculum or DEFAULT_CONFIG.pfsp_baseline_curriculum,
             baseline_max_allocation,
             n_envs,
+            brutal_resume,
         )
         self.bridge = LeagueBridge(env, device=getattr(env.config, "pfsp_opponent_device", "trt"), verbose=verbose)
         self.league_logger = LeagueLogger(self.pool, verbose=verbose)
@@ -88,7 +90,11 @@ class PFSPCallback(BaseCallback):
         self.bridge.clear_rust_pool()
         for name, data in self.pool.opponents.items():
             if data.get("is_baseline"):
-                self.bridge.add_baseline_to_rust(name, data["baseline_code"])
+                bl_code = data["baseline_code"]
+                if bl_code.startswith("o"):
+                    self._add_onnx_baseline_to_rust(name, bl_code)
+                else:
+                    self.bridge.add_baseline_to_rust(name, bl_code)
             else:
                 self.bridge.add_onnx_to_rust(name, data["onnx_path"])
 
@@ -124,7 +130,11 @@ class PFSPCallback(BaseCallback):
                     "path": None, "baseline_code": bl_code, "wins": 0, "losses": 0, "draws": 0,
                     "added_at_step": self.num_timesteps, "is_baseline": True
                 })
-                self.bridge.add_baseline_to_rust(name, bl_code)
+                # Check if it's an ONNX baseline (optimized path)
+                if bl_code.startswith("o"):
+                    self._add_onnx_baseline_to_rust(name, bl_code)
+                else:
+                    self.bridge.add_baseline_to_rust(name, bl_code)
             for bl_code in removed:
                 name = f"baseline_{bl_code}"
                 self.pool.remove_opponent(name)
@@ -232,3 +242,31 @@ class PFSPCallback(BaseCallback):
             "pool_size": self.pool.total_count,
             "self_play_winrate": self.league_logger.get_self_play_winrate(),
         }
+
+    def _add_onnx_baseline_to_rust(self, name: str, code: str):
+        """Resolve an ONNX baseline code to a path and add it to Rust ONNX pool."""
+        path = self._resolve_onnx_code_to_path(code)
+        if path:
+            if self.verbose > 0:
+                print(f"[PFSP] Resolved baseline boss '{code}' to {path}")
+            self.bridge.add_onnx_to_rust(name, path)
+        else:
+            if self.verbose > 0:
+                print(f"[WARNING] Could not resolve ONNX baseline '{code}', falling back to sequential.")
+            self.bridge.add_baseline_to_rust(name, code)
+
+    def _resolve_onnx_code_to_path(self, code: str) -> Optional[str]:
+        """Resolve a code like 'o1' to a path in models/."""
+        import glob
+        import os
+        if not code.startswith("o"):
+            return None
+            
+        # Search for .onnx files in models/ and subdirectories
+        models = glob.glob("models/*.onnx") + glob.glob("models/**/*.onnx")
+        if not models:
+            return None
+        
+        # Sort by modification time (newest first)
+        models.sort(key=os.path.getmtime, reverse=True)
+        return str(models[0])

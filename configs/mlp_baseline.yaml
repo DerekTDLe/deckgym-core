@@ -1,0 +1,84 @@
+# DeckGym Training Configuration - Pure MLP Baseline
+# Architecture: MLP only (no attention mechanism)
+# Purpose: Baseline comparison with attention model
+#
+# This configuration uses a pure MLP architecture to compare
+# against the attention-based model. The MLP is larger to
+# compensate for the lack of card-level attention.
+
+# Dev note : this one will be used for run #11
+
+paths:
+  meta_deck_path: "meta_deck.json"
+  save_path: "models/mlp_baseline"
+  checkpoint_dir: "./checkpoints/mlp_baseline/"
+  tensorboard_dir: "./logs/mlp_baseline/"
+  resume_path: null
+
+model:
+  # MLP mode - disable attention
+  use_attention: false
+
+  # These attention params are ignored when use_attention=false
+  # but kept for reference
+  attention_embed_dim: 256
+  attention_num_heads: 8
+  attention_num_layers: 3
+  attention_global_proj_dim: 128
+  attention_ff_expansion_factor: 4
+  attention_output_proj_factor: 2
+  attention_mask_threshold: 1e-06
+  attention_dropout: 0.1
+  attention_pool_queries: 4
+  attention_temperature: 1.0
+  attention_init_residual_scale: true
+
+  use_silu: true
+
+  # MLP architecture - larger than attention heads to compensate
+  # Input: 2219 dims -> hidden layers -> action logits
+  # Deeper network to learn card interactions without attention
+  net_arch:
+    pi: [1024, 512, 256, 128]
+    vf: [1024, 512, 256]
+
+ppo:
+  learning_rate: 3e-05  # Higher LR for MLP (faster to train)
+  min_learning_rate: 1e-06
+  warmup_ratio: 0.03  # Slightly longer warmup
+
+  n_steps: 128  # More steps per rollout
+  batch_size: 2048  # Larger batches (MLP is faster)
+  n_epochs: 10  # More epochs per update
+
+  gamma: 0.98
+  gae_lambda: 0.95
+  ent_coef: 0.03  # Slightly more exploration
+  vf_coef: 0.5
+  clip_range: 0.2
+  max_grad_norm: 1.0
+  target_kl: 0.02  # Allow more KL divergence
+
+training:
+  total_timesteps: 30000000
+  checkpoint_freq: 2000
+  n_envs: 128  # Can use more envs since MLP is faster
+  use_batched_env: true
+  device: "auto"
+  onnx_device: "auto"
+  pfsp_opponent_device: "trt"
+  frozen_opponent_update_rollouts: 8
+
+  # PFSP settings
+  use_pfsp: true
+  pfsp_pool_size: 8
+  pfsp_add_every_n_rollouts: 8
+  pfsp_select_every_n_rollouts: 2
+  pfsp_priority_exponent: 2.0
+  pfsp_winrate_window: 200
+  pfsp_checkpoint_dir: "./checkpoints/mlp_baseline/pfsp_pool/"
+
+environment:
+  max_turns: 99
+  max_actions_per_turn: 50
+  max_total_actions: 1000
