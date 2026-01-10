@@ -89,9 +89,9 @@ Each card is encoded with intrinsic properties and position information:
           │                               ▼
           │               ┌─────────────────────────────────┐
           │               │ Multi-Head Attention Pooling    │
-          │               │ - 4 learned queries (config)    │
+          │               │ - 4-6 learned queries (config)  │
           │               │ - Final LayerNorm before Pool   │
-          │               │ - Output: 4 × 256 = 1024 dims   │
+          │               │ - Output: queries × 256 dims    │
           │               └─────────────────────────────────┐
           │                               │
           │                               ▼
@@ -111,10 +111,13 @@ Each card is encoded with intrinsic properties and position information:
           ▼                               ▼
 ┌─────────────────┐             ┌─────────────────┐
 │   Policy Head   │             │   Value Head    │
-│ 640 → 256 → 128 │             │ 640 → 256 → 128 │
+│ 640→512→384→256 │             │ 640→512→384     │
 │  → actions      │             │  → value        │
 └─────────────────┘             └─────────────────┘
 ```
+
+> **Note**: The baseline config uses small heads `[256,128]` which creates a bottleneck.
+> See `attention_enhanced.yaml` for the optimized version with `[512,384,256]` heads.
 
 ### Dynamic Architecture & Configuration (Run #8)
 
@@ -164,7 +167,25 @@ The default configuration uses the following values:
 | `total_timesteps` | 30M | Target training duration (long-term) |
 | `use_pfsp` | True | Enable Prioritized Fictitious Self-Play |
 
-*Note : current run uses n_steps = 64 to compensate for n_envs = 128, making full use of the GPU.*
+### PFSP Baseline Curriculum
+
+The default curriculum progressively introduces harder opponents:
+
+| Stage | Steps | Baselines | Purpose |
+|-------|-------|-----------|--------|
+| 1 | 0 | `v`, `w` | Warmup against simple heuristics |
+| 2 | 500K | `aa`, `er` | Medium difficulty bots |
+| 3 | 2M | `er`, `o2t` | Attention anchor (coherence) |
+| 4 | 5M | `o2t`, `o1t` | Both NN styles |
+| 5 | 10M | `e2`, `o1t`, `o2t` | Boss + both anchors |
+
+**Baseline Codes**:
+- `v`, `w`, `aa`, `er`: Heuristic bots (ValueFunction, WeightedRandom, AttachAttack, EvolutionRusher)
+- `e2`, `e3`, `e4`: Expectiminimax (omniscient, excluded from global WR)
+- `o[n][device]`: ONNX models (n=index from newest, device=c/g/t for cpu/cuda/trt)
+  - Example: `o1t` = newest ONNX on TensorRT, `o2c` = 2nd newest on CPU
+
+**Dynamic Baseline Slots**: The number of environments allocated to baselines scales automatically based on the current stage's baseline count.
 
 ## Evaluation (Professional Tournament System)
 
@@ -201,7 +222,7 @@ With the current attention-based architecture and `configs/attention_baseline.ya
 
 Pure MLP:
 With [mlp_baseline.yaml](configs/mlp_baseline.yaml) presets
-~2700 it/s .
+~1500 it/s .
 
 Attention:
 With [attention_baseline.yaml](configs/attention_baseline.yaml) presets
