@@ -174,42 +174,42 @@ pub fn create_players(
     deck_a: Deck,
     deck_b: Deck,
     players: Vec<PlayerCode>,
-) -> Vec<Box<dyn Player>> {
-    let player_a: Box<dyn Player> = get_player(deck_a.clone(), &players[0]);
-    let player_b: Box<dyn Player> = get_player(deck_b.clone(), &players[1]);
-    vec![player_a, player_b]
+) -> Result<Vec<Box<dyn Player>>, String> {
+    let player_a: Box<dyn Player> = get_player(deck_a.clone(), &players[0])?;
+    let player_b: Box<dyn Player> = get_player(deck_b.clone(), &players[1])?;
+    Ok(vec![player_a, player_b])
 }
 
-fn get_player(deck: Deck, player: &PlayerCode) -> Box<dyn Player> {
+fn get_player(deck: Deck, player: &PlayerCode) -> Result<Box<dyn Player>, String> {
     match player {
-        PlayerCode::AA => Box::new(AttachAttackPlayer { deck }),
-        PlayerCode::ET => Box::new(EndTurnPlayer { deck }),
-        PlayerCode::R => Box::new(RandomPlayer { deck }),
-        PlayerCode::H => Box::new(HumanPlayer { deck }),
-        PlayerCode::W => Box::new(WeightedRandomPlayer { deck }),
-        PlayerCode::M { iterations } => Box::new(MctsPlayer::new(deck, *iterations)),
-        PlayerCode::V => Box::new(ValueFunctionPlayer { deck }),
-        PlayerCode::E { max_depth } => Box::new(ExpectiMiniMaxPlayer {
+        PlayerCode::AA => Ok(Box::new(AttachAttackPlayer { deck })),
+        PlayerCode::ET => Ok(Box::new(EndTurnPlayer { deck })),
+        PlayerCode::R => Ok(Box::new(RandomPlayer { deck })),
+        PlayerCode::H => Ok(Box::new(HumanPlayer { deck })),
+        PlayerCode::W => Ok(Box::new(WeightedRandomPlayer { deck })),
+        PlayerCode::M { iterations } => Ok(Box::new(MctsPlayer::new(deck, *iterations))),
+        PlayerCode::V => Ok(Box::new(ValueFunctionPlayer { deck })),
+        PlayerCode::E { max_depth } => Ok(Box::new(ExpectiMiniMaxPlayer {
             deck,
             max_depth: *max_depth,
             write_debug_trees: false,
             value_function: Box::new(value_functions::baseline_value_function),
-        }),
-        PlayerCode::ER => Box::new(EvolutionRusherPlayer { deck }),
+        })),
+        PlayerCode::ER => Ok(Box::new(EvolutionRusherPlayer { deck })),
         #[cfg(feature = "onnx")]
         PlayerCode::Onnx { path, device } => {
-            Box::new(OnnxPlayer::new(&path, deck, true, device).expect("Failed to load ONNX model"))
+            Ok(Box::new(OnnxPlayer::new(&path, deck, true, device).map_err(|e| format!("Failed to load ONNX model: {}", e))?))
         }
         #[cfg(feature = "onnx")]
         PlayerCode::O { index, device } => {
-            let path = get_nth_onnx_model(*index).expect(&format!(
-                "Failed to find ONNX model o{}. Make sure models/ contains .onnx files.",
-                index
-            ));
-            Box::new(
+            let path = get_nth_onnx_model(*index).map_err(|e| format!(
+                "Failed to find ONNX model o{}. Make sure models/ contains .onnx files. Error: {}",
+                index, e
+            ))?;
+            Ok(Box::new(
                 OnnxPlayer::new(&path, deck, true, device)
-                    .expect(&format!("Failed to load ONNX model from {}", path)),
-            )
+                    .map_err(|e| format!("Failed to load ONNX model from {}: {}", path, e))?,
+            ))
         }
     }
 }

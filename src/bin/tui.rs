@@ -59,8 +59,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     // create app and run it
-    let app = App::new(&cli.deck_a, &cli.deck_b, player_codes, cli.seed)?;
-    let res = run_app(&mut terminal, app);
+    let res = match App::new(&cli.deck_a, &cli.deck_b, player_codes, cli.seed) {
+        Ok(app) => run_app(&mut terminal, app),
+        Err(e) => Err(io::Error::new(io::ErrorKind::Other, e.to_string())),
+    };
 
     // restore terminal
     disable_raw_mode()?;
@@ -72,7 +74,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     terminal.show_cursor()?;
 
     if let Err(err) = res {
-        println!("{err:?}")
+        eprintln!("Error: {err}");
     }
 
     Ok(())

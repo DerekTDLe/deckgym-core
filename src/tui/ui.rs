@@ -40,8 +40,17 @@ pub fn ui(f: &mut Frame, app: &App) {
         )
         .split(main_chunks[1]);
 
-    // Opponent's hand (opponent is player 0)
-    let opponent_hand = &state.hands[0];
+    // Determine which player to show at the bottom ("You") and which at the top ("Opponent")
+    // If there's a human at P0 and AI at P1, swap them so human is at the bottom.
+    // Otherwise, default to P1 at bottom and P0 at top.
+    let (top_idx, bottom_idx) = if !app.is_ai[0] && app.is_ai[1] {
+        (1, 0)
+    } else {
+        (0, 1)
+    };
+
+    // Opponent's hand
+    let opponent_hand = &state.hands[top_idx];
     let opponent_hand_total = opponent_hand.len();
 
     let opponent_hand_chunks = Layout::default()
@@ -135,7 +144,7 @@ pub fn ui(f: &mut Frame, app: &App) {
     // Render opponent bench slots (using indices 1, 3, 5 to account for spacing)
     let bench_indices = [1, 3, 5]; // Skip spacing slots
     for (bench_pos, &chunk_idx) in bench_indices.iter().enumerate() {
-        let pokemon = &state.in_play_pokemon[0][bench_pos + 1]; // bench positions 1, 2, 3
+        let pokemon = &state.in_play_pokemon[top_idx][bench_pos + 1]; // bench positions 1, 2, 3
         let (lines, style, border_color, is_empty) =
             render_pokemon_card(pokemon, &format!("Opp Bench {}", bench_pos + 1), Color::Red);
 
@@ -166,7 +175,7 @@ pub fn ui(f: &mut Frame, app: &App) {
         ])
         .split(battle_area[1]);
 
-    let opponent_active = &state.in_play_pokemon[0][0];
+    let opponent_active = &state.in_play_pokemon[top_idx][0];
     let (lines, style, border_color, is_empty) =
         render_pokemon_card(opponent_active, "Opponent Active", Color::Red);
 
@@ -196,7 +205,7 @@ pub fn ui(f: &mut Frame, app: &App) {
         ])
         .split(battle_area[2]);
 
-    let player_active = &state.in_play_pokemon[1][0];
+    let player_active = &state.in_play_pokemon[bottom_idx][0];
     let (lines, style, border_color, is_empty) =
         render_pokemon_card(player_active, "Your Active", Color::Green);
 
@@ -229,7 +238,7 @@ pub fn ui(f: &mut Frame, app: &App) {
     // Render player bench slots (using indices 1, 3, 5 to account for spacing)
     let bench_indices = [1, 3, 5]; // Skip spacing slots
     for (bench_pos, &chunk_idx) in bench_indices.iter().enumerate() {
-        let pokemon = &state.in_play_pokemon[1][bench_pos + 1]; // bench positions 1, 2, 3
+        let pokemon = &state.in_play_pokemon[bottom_idx][bench_pos + 1]; // bench positions 1, 2, 3
         let (lines, style, border_color, is_empty) = render_pokemon_card(
             pokemon,
             &format!("Your Bench {}", bench_pos + 1),
@@ -250,7 +259,7 @@ pub fn ui(f: &mut Frame, app: &App) {
     }
 
     // Hand display area
-    let player_hand = &state.hands[1]; // Player 1's hand (your hand)
+    let player_hand = &state.hands[bottom_idx]; // Your hand
     let player_hand_total = player_hand.len();
 
     let hand_chunks = Layout::default()
@@ -327,14 +336,18 @@ pub fn ui(f: &mut Frame, app: &App) {
     let actions = app.get_possible_actions();
 
     // Build discarded energy display
-    let p1_discard_line = render_discarded_energy_line(&state.discard_energies[0]);
-    let p2_discard_line = render_discarded_energy_line(&state.discard_energies[1]);
+    let p1_discard_line = render_discarded_energy_line(&state.discard_energies[top_idx]);
+    let p2_discard_line = render_discarded_energy_line(&state.discard_energies[bottom_idx]);
 
     // Build header line with game status
     let header_line = if is_interactive {
         format!(
-            "DeckGym [INTERACTIVE] | Turn: {} | P1: {} pts | P2: {} pts",
-            state.turn_count, state.points[0], state.points[1]
+            "DeckGym [INTERACTIVE] | Turn: {} | P{}: {} pts | P{}: {} pts",
+            state.turn_count,
+            top_idx + 1,
+            state.points[top_idx],
+            bottom_idx + 1,
+            state.points[bottom_idx]
         )
     } else {
         format!(
@@ -350,11 +363,11 @@ pub fn ui(f: &mut Frame, app: &App) {
     let footer_lines = if is_interactive {
         // Interactive mode footer
         let current_actor = app.get_current_actor();
-        let is_human_turn = current_actor == 1;
+        let is_human_turn = !app.is_ai[current_actor];
 
         let mut lines = vec![
             Line::from(vec![Span::styled(
-                "P1 Discard: ",
+                format!("P{} Discard: ", top_idx + 1),
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )])
             .spans
@@ -363,7 +376,7 @@ pub fn ui(f: &mut Frame, app: &App) {
             .collect::<Vec<_>>()
             .into(),
             Line::from(vec![Span::styled(
-                "P2 Discard: ",
+                format!("P{} Discard: ", bottom_idx + 1),
                 Style::default()
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
