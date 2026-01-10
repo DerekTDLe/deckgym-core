@@ -2,8 +2,7 @@
 """
 Train a Pokemon TCG Pocket RL agent using MaskablePPO with self-play.
 
-The agent learns by playing against frozen copies of itself, with curriculum
-learning that progressively increases deck difficulty from simple to meta.
+The agent learns by playing against a pool of frozen copies of itself following the Prioritized Fictitious Self-Play (PFSP) method, with different anchors ranging from random, heuristic to established baseline models, following a curriculum.
 
 Starting player alternates randomly each game (controlled by game seed).
 """
@@ -68,6 +67,7 @@ class SelfPlayEnv(gym.Env):
     - "self": Frozen copy of agent (self-play)
     - "e2", "e3", etc.: Rust expectiminimax bots
     - "random": Random baseline
+    - "o*" : ONNX models
 
     Player 0 (agent) trains against Player 1 (opponent).
     Starting player is randomized by game seed.
@@ -86,7 +86,7 @@ class SelfPlayEnv(gym.Env):
         Args:
             deck_loader: Samples deck pairs
             opponent_model: Frozen model for self-play (used when opponent_type="self")
-            opponent_type: "self", "e2", "e3", "v", "random"
+            opponent_type: "self", "e2", "e3", "v", "random", "o*"
             config: Training configuration
         """
         self.deck_loader = deck_loader
@@ -169,7 +169,7 @@ class SelfPlayEnv(gym.Env):
 
         Returns:
             obs: Game state from agent's perspective
-            reward: +1 win, -1 loss, 0 otherwise, plus bonus or penalty based on game score
+            reward: +1 win, -1 loss, 0 otherwise, plus bonus or penalty based on game score and speed
             terminated: True if game ended normally
             truncated: True if game ended due to limits
             info: Additional information
