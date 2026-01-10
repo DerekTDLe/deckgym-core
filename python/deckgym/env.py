@@ -15,16 +15,16 @@ class DeckGymEnv(gym.Env):
     Gymnasium environment to play Pokémon TCG Pocket.
 
     Observation space:
-        Box(2849,) - Flattened game state tensor including:
+        Box(2219,) - Flattened game state tensor including:
         - Global info (41): turn, points, deck/hand/discard sizes, energy types
-        - Card features (24 cards × 117 features = 2808): HP, energy, attacks, status, abilities, position
+        - Card features (18 cards × 121 features = 2178): HP, energy, attacks, status, abilities, position
 
     Action space:
         Discrete(175) - Canonical action indices covering all SimpleAction variants:
         ... (rest of action space doc)
 
     Reward:
-        Score-based reward: 1.0 + (point_diff / 6.0) for wins, -1.0 + (point_diff / 6.0) for losses.
+        Score-based reward: 1.0 + (point_diff / 6.0) for wins, -1.0 - (point_diff / 6.0) for losses. Multiplied by a speed factor.
     """
 
     def __init__(self, deck_a_str: str, deck_b_str: str, seed: int = None):
