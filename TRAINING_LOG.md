@@ -986,7 +986,42 @@ Diagnostic Results:
 **Date**: 2026-01-09  
 **Model**: Attention-based (256 embed, 8 heads, 3 layers)  
 **Config**: `configs/attention_run_2.yaml`  
-**Status**: [IN PROGRESS]
+**Status**: [COMPLETED] 🏆 Peak performance achieved at 26.6M steps.
+
+### Final Results Summary (Run #10)
+
+The "Baseline Curriculum" strategy was highly successful. The agent maintained a diverse training signal and achieved its highest absolute strength to date.
+
+| Metric | Peak Value (26.6M) | Baseline (`er`) | Status |
+|--------|---------------------|-----------------|--------|
+| **Mu (TrueSkill)** | **1572.0** | 1265.3 | ✅ Dominant |
+| **Expose (Mu - 3σ)** | **1533.0** | 1222.9 | ✅ Highly Reliable |
+| **Win Rate vs `er`** | **~75%** | - | ✅ Consistent |
+
+> [!IMPORTANT]
+> **Foundation Model**: `rl_bot_26624000_steps` is now the official foundation model for future fine-tuning and iterations.
+
+### Benchmark Analysis (Run #10)
+
+A final benchmark tournament was conducted on all 118 checkpoints plus baselines.
+
+1. **Monotonic Progression**: Most of the run shows steady improvement until ~26.6M steps.
+2. **Late Run Regression**: Performance slightly declined after 26.6M (Mu 1572 → 1530 at 29.9M), likely due to learning rate decay or over-specialization.
+3. **Local Instabilities**: Minor "dips" were observed (e.g., 1.5M was slightly worse than 1M), which is typical for PPO in complex environments.
+
+### Terminology Harmonization
+
+To avoid confusion between different runs, here is the unified rating guide:
+
+| Term | Definition | Context |
+|------|------------|---------|
+| **Elo** | Standard Elo rating | Used in Runs #1 - #4. Not directly comparable to TrueSkill. |
+| **CR** | Conservative Rating (Mu - 3σ) | Used in Runs #5 - #9. Global TrueSkill rating. |
+| **CRN** | Conservative Rating (New) | Used in Run #10. Calculated within a specific benchmark folder. |
+| **Foundation** | `rl_bot_26624000_steps` | Anchor point: ~1533 CRN. |
+
+> [!NOTE]
+> **Benchmark Anchor**: Future benchmarks should always include `e2` (Expectiminimax d2) to provide a stable absolute anchor across different training runs.
 
 ### Key Changes from Run #9
 
@@ -999,20 +1034,6 @@ Permanent baseline slots to prevent echo chamber:
 | 0 - 500k | `v`, `w` | Easy warmup |
 | 500k - 2M | `aa`, `er` | Medium |
 | 2M+ | `e2`, `er` | Hard + Medium |
-
-### Benchmark Results (TrueSkill Tournament)
-
-A full Round Robin tournament (5 reps) was conducted on all checkpoints in `attention_run_2`.
-
-| Metric | Value | Note |
-|--------|-------|------|
-| **Peak Expose (CRN)** | **1531.3** | Reached by `rl_bot_10752000_steps` |
-| **Baseline Rank** | **Rank 45/48** | `EvolutionRusher` (1247.9) |
-| **Growth Threshold** | **~500k steps** | Point where agent reliably beats `er` |
-| **Status** | **Stable** 🟡 | Ratings stabilized ($\sigma \approx 15$) |
-
-> [!IMPORTANT]
-> The model has decisively cleared the heuristic baseline (`EvolutionRusher`), justifying the attention architecture. The next milestone is 1900+ CR (rivaling `e2` even with omniscient rollouts).
 
 ```python
 pfsp_baseline_slots = 2              # Permanent slots (never evicted)

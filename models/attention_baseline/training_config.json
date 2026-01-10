@@ -1,0 +1,42 @@
+{
+  "meta_deck_path": "meta_deck.json",
+  "save_path": "models/attention_run_2",
+  "checkpoint_dir": "./checkpoints/attention_run_2/",
+  "tensorboard_dir": "./logs/attention_run_2/",
+  "resume_path": null,
+  "total_timesteps": 30000000,
+  "checkpoint_freq": 2000,
+  "base_learning_rate": 1e-05,
+  "min_learning_rate": 1e-06,
+  "warmup_ratio": 0.02,
+  "n_steps": 64,
+  "batch_size": 1024,
+  "n_epochs": 8,
+  "gamma": 0.98,
+  "gae_lambda": 0.95,
+  "ent_coef": 0.02,
+  "vf_coef": 0.5,
+  "clip_range": 0.2,
+  "max_grad_norm": 1.0,
+  "target_kl": 0.015,
+  "use_attention": true,
+  "attention_embed_dim": 256,
+  "attention_num_heads": 8,
+  "attention_num_layers": 3,
+  "policy_layers": [
+    256,
+    128
+  ],
+  "value_layers": [
+    256,
+    128
+  ],
+  "use_silu": true,
+  "frozen_opponent_update_rollouts": 8,
+  "max_turns": 99,
+  "max_actions_per_turn": 50,
+  "max_total_actions": 1000,
+  "n_envs": 128,
+  "use_batched_env": true,
+  "device": "auto"
+}

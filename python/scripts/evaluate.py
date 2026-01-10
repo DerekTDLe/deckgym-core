@@ -119,7 +119,6 @@ BOT_NAMES = {
     "v": "ValueFunction",
     "er": "EvolutionRusher",
     "e2": "Expectiminimax(2)",
-    "e3": "Expectiminimax(3)",
 }
 
 
@@ -334,7 +333,7 @@ def benchmark_directory(
 
         # Add baselines
         if include_baselines:
-            baselines_to_test = ["er", "aa", "w"]  # Strongest non-cheating baselines
+            baselines_to_test = ["e2", "er", "aa", "w"]  # e2 is the anchor
             for bl in baselines_to_test:
                 participants[BOT_NAMES[bl]] = bl
 
@@ -429,13 +428,12 @@ def benchmark_directory(
         # Print results
         print_bench_results(ratings, wins, losses, draws, participants)
 
-        # Save benchmark report (exclude baselines from ratings - they're only for reference)
-        model_names = set(onnx_paths.keys())  # Only models, not baselines
+        # Save benchmark report
         bench_results = {
             "meta": {
                 "directory": str(directory),
                 "games_per_match": n_robin_rounds,
-                "model_count": len(model_names),
+                "model_count": len(onnx_paths),
                 "participants": list(participants.keys()),
             },
             "ratings": {
@@ -445,7 +443,6 @@ def benchmark_directory(
                     "expose": r.mu - 3 * r.sigma,
                 }
                 for name, r in ratings.items()
-                if name in model_names  # Only include models, not baselines
             },
             "stats": {
                 name: {
@@ -453,7 +450,7 @@ def benchmark_directory(
                     "losses": losses[name],
                     "draws": draws[name],
                 }
-                for name in model_names  # Only include model stats
+                for name in ratings.keys()
             },
         }
         save_report(bench_results, "bench", name=model_dir.name)
@@ -478,11 +475,23 @@ def print_leaderboard(
     # Calculate percentiles for tiers
     n = len(sorted_items)
     
+    # Find anchor for deltas (default: Expectiminimax(2))
+    anchor_name = BOT_NAMES.get("e2", "Expectiminimax(2)")
+    anchor_rating = ratings.get(anchor_name)
+    if not anchor_rating:
+        # Fallback to strongest baseline if e2 not present
+        baselines = [name for name, code in participants.items() if code in BOT_NAMES or code in BOT_NAMES.values()]
+        if baselines:
+            baselines.sort(key=lambda x: ratings[x].mu, reverse=True)
+            anchor_name = baselines[0]
+            anchor_rating = ratings[anchor_name]
+
     table = Table(show_lines=True, header_style="bold cyan")
     table.add_column("Rank", style="dim", width=4, justify="center")
     table.add_column("Tier", justify="center")
     table.add_column("Participant", min_width=20)
     table.add_column("Rating (Mu/σ)", justify="right")
+    table.add_column("Δ Anchor", justify="right")
     table.add_column("Expose", style="bold white", justify="right")
     table.add_column("W-L-D", justify="center")
     table.add_column("Win%", justify="right")
@@ -501,12 +510,22 @@ def print_leaderboard(
         # Style baselines differently
         is_baseline = participants[name] in BOT_NAMES or participants[name] in BOT_NAMES.values()
         display_name = f"[italic dim]{name}[/italic dim]" if is_baseline else f"[bold]{name}[/bold]"
+
+        # Calculate delta vs anchor
+        delta_str = ""
+        if anchor_rating and name != anchor_name:
+            delta = r.mu - anchor_rating.mu
+            color = "green" if delta >= 0 else "red"
+            delta_str = f"[{color}]{delta:+3.0f}[/{color}]"
+        elif name == anchor_name:
+            delta_str = "[bold cyan]ANCHOR[/bold cyan]"
         
         table.add_row(
             str(rank),
             f"[{tier_style}]{tier_str}[/{tier_style}]",
             display_name,
             f"{r.mu:.0f} [dim]±{r.sigma:.0f}[/dim]",
+            delta_str,
             f"{expose:.1f}",
             f"{w}-{l}-{d}",
             f"{win_pct:.1f}%",
