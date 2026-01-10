@@ -1,0 +1,91 @@
+# DeckGym Training Configuration - Enhanced Attention Architecture
+# Architecture: Deeper and wider attention model
+# Purpose: Train a more powerful model from scratch for SOTA
+#
+# Enhancements over attention_baseline:
+# - More attention layers (5 vs 3)
+# - Larger embedding dimension (384 vs 256)
+# - More attention heads (12 vs 8)
+# - More pooling queries (8 vs 4)
+# - Deeper policy/value heads
+# - Gradient checkpointing to save VRAM
+#
+# Estimated VRAM: ~4-5GB (with gradient checkpointing)
+# Single GPU friendly - designed for 8GB+ VRAM
+
+paths:
+  meta_deck_path: "meta_deck.json"
+  save_path: "models/attention_enhanced"
+  checkpoint_dir: "./checkpoints/attention_enhanced/"
+  tensorboard_dir: "./logs/attention_enhanced/"
+  resume_path: null
+
+model:
+  use_attention: true
+
+  # Enhanced architecture
+  attention_embed_dim: 384  # Larger embedding (was 256)
+  attention_num_heads: 12   # More heads (was 8)
+  attention_num_layers: 5   # Deeper (was 3)
+  attention_global_proj_dim: 192  # Larger global projection
+  attention_ff_expansion_factor: 4
+  attention_output_proj_factor: 2
+  attention_mask_threshold: 1e-06
+
+  # Stability parameters
+  attention_dropout: 0.1
+  attention_pool_queries: 8  # More queries for richer pooling (was 4)
+  attention_temperature: 1.0
+  attention_init_residual_scale: true
+
+  use_silu: true
+
+  # Deeper policy/value heads
+  net_arch:
+    pi: [512, 256, 128]
+    vf: [512, 256]
+
+ppo:
+  learning_rate: 5e-05  # Slightly higher LR for larger model
+  min_learning_rate: 1e-06
+  warmup_ratio: 0.03  # 3% warmup
+
+  n_steps: 64  # Same as baseline
+  batch_size: 1024
+  n_epochs: 6  # Fewer epochs (larger model overfits faster)
+
+  gamma: 0.98
+  gae_lambda: 0.95
+  ent_coef: 0.025  # Slightly more exploration initially
+  vf_coef: 0.5
+  clip_range: 0.2
+  max_grad_norm: 1.0
+  target_kl: 0.015
+
+training:
+  total_timesteps: 50000000  # 50M steps (longer training for larger model)
+  checkpoint_freq: 2000
+  n_envs: 96  # Slightly fewer envs to manage VRAM
+  use_batched_env: true
+  device: "auto"
+  onnx_device: "auto"
+  pfsp_opponent_device: "trt"
+  frozen_opponent_update_rollouts: 8
+
+  # Enable gradient checkpointing to save VRAM
+  # Trades ~30% compute for ~60% less VRAM
+  use_gradient_checkpointing: true
+
+  # PFSP settings
+  use_pfsp: true
+  pfsp_pool_size: 10
+  pfsp_add_every_n_rollouts: 8
+  pfsp_select_every_n_rollouts: 2
+  pfsp_priority_exponent: 2.0
+  pfsp_winrate_window: 200
+  pfsp_checkpoint_dir: "./checkpoints/attention_enhanced/pfsp_pool/"
+
+environment:
+  max_turns: 99
+  max_actions_per_turn: 50
+  max_total_actions: 1000
