@@ -34,6 +34,7 @@ pub struct App {
     pub player_hand_scroll: usize,
     pub opponent_hand_scroll: usize,
     pub lock_actions_center: bool,
+    pub is_ai: [bool; 2],
 }
 
 impl App {
@@ -48,7 +49,11 @@ impl App {
         let deck_b = Deck::from_file(deck_b_path)?;
 
         // Detect if any player is human
-        let has_human = player_codes.contains(&PlayerCode::H);
+        let is_ai = [
+            player_codes[0] != PlayerCode::H,
+            player_codes[1] != PlayerCode::H,
+        ];
+        let has_human = !is_ai[0] || !is_ai[1];
 
         // Use provided seed or generate a random one
         let seed = seed.unwrap_or_else(|| {
@@ -58,7 +63,7 @@ impl App {
 
         let mode = if has_human {
             // Interactive mode - create live game
-            let players: Vec<Box<dyn Player>> = create_players(deck_a, deck_b, player_codes);
+            let players: Vec<Box<dyn Player>> = create_players(deck_a, deck_b, player_codes)?;
             let game = Box::new(Game::new(players, seed));
 
             // Get initial state and possible actions
@@ -74,7 +79,7 @@ impl App {
             }
         } else {
             // Replay mode - pre-compute entire game
-            let players: Vec<Box<dyn Player>> = create_players(deck_a, deck_b, player_codes);
+            let players: Vec<Box<dyn Player>> = create_players(deck_a, deck_b, player_codes)?;
             let mut game = Game::new(players, seed);
 
             let mut states = Vec::new();
@@ -101,6 +106,7 @@ impl App {
             player_hand_scroll: 0,
             opponent_hand_scroll: 0,
             lock_actions_center: true,
+            is_ai,
         })
     }
 
@@ -394,11 +400,12 @@ impl App {
                 }
                 SelectionState::AwaitingActionSelection => {
                     // If it's AI's turn, play automatically
-                    if *current_actor == 0 {
+                    let actor = *current_actor;
+                    if self.is_ai[actor] {
                         // Record current turn before AI plays
                         let current_turn = game.get_state_clone().turn_count;
 
-                        // AI turn (player 0)
+                        // AI turn
                         let action = game.play_tick();
                         action_history.push(action);
                         turn_history.push(current_turn);

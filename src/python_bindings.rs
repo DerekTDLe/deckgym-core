@@ -700,7 +700,9 @@ impl PyGame {
         };
 
         let cli_players = fill_code_array(player_codes);
-        let rust_players = create_players(deck_a, deck_b, cli_players);
+        let rust_players = create_players(deck_a, deck_b, cli_players).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Failed to create players: {}", e))
+        })?;
         let game_seed = seed.unwrap_or_else(rand::random::<u64>);
         let game = Game::new(rust_players, game_seed);
 
@@ -743,7 +745,9 @@ impl PyGame {
 
         // Use default players (no bots, just the RL agent controls both)
         let cli_players = fill_code_array(None);
-        let rust_players = create_players(deck_a, deck_b, cli_players);
+        let rust_players = create_players(deck_a, deck_b, cli_players).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Failed to create players: {}", e))
+        })?;
         let game_seed = seed.unwrap_or_else(rand::random::<u64>);
         let game = Game::new(rust_players, game_seed);
 
@@ -969,7 +973,8 @@ pub fn py_simulate(
     let py = unsafe { Python::assume_gil_acquired() };
     py.allow_threads(|| {
         for i in 0..num_simulations {
-            let players = create_players(deck_a.clone(), deck_b.clone(), cli_players.clone());
+            let players = create_players(deck_a.clone(), deck_b.clone(), cli_players.clone())
+                .expect("Failed to create players for simulation");
             // Vary seed per game - if seed provided, use seed + game_index; otherwise random
             let game_seed = seed
                 .map(|s| s.wrapping_add(i as u64))

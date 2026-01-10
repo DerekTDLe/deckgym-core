@@ -307,7 +307,8 @@ where
                 .par_iter()
                 .map(|(deck_a, deck_b, player_codes)| {
                     let players =
-                        create_players(deck_a.clone(), deck_b.clone(), player_codes.clone());
+                        create_players(deck_a.clone(), deck_b.clone(), player_codes.clone())
+                            .expect("Failed to create players for optimization parallel run");
                     let seed = opt_config.seed.unwrap_or(rand::random::<u64>());
                     let mut game = Game::new(players, seed);
                     let outcome = game.play();
@@ -330,7 +331,8 @@ where
                 .iter()
                 .map(|(deck_a, deck_b, player_codes)| {
                     let players =
-                        create_players(deck_a.clone(), deck_b.clone(), player_codes.clone());
+                        create_players(deck_a.clone(), deck_b.clone(), player_codes.clone())
+                            .expect("Failed to create players for optimization sequential run");
                     let seed = opt_config.seed.unwrap_or(rand::random::<u64>());
                     let mut game = Game::new(players, seed);
                     let outcome = game.play();
