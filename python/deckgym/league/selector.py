@@ -55,7 +55,7 @@ class OpponentSelector:
                 break
         
         if set(new_baselines) == set(self.current_baselines):
-            return self.current_baselines, []
+            return [], []
             
         removed = list(set(self.current_baselines) - set(new_baselines))
         added = list(set(new_baselines) - set(self.current_baselines))
