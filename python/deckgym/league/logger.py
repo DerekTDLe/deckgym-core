@@ -78,7 +78,6 @@ class LeagueLogger:
         
         # Specific milestones
         e2_wr = self.calculate_winrate(["baseline_e2"]) if "baseline_e2" in self.pool.opponents else None
-        er_wr = self.calculate_winrate(["baseline_er"]) if "baseline_er" in self.pool.opponents else None
 
         if self.logger:
             self.logger.record("pfsp/winrate_self_play", sp_wr)
@@ -87,8 +86,6 @@ class LeagueLogger:
             
             if e2_wr is not None:
                 self.logger.record("pfsp/winrate_e2", e2_wr)
-            if er_wr is not None:
-                self.logger.record("pfsp/winrate_er", er_wr)
 
             # Global "Fair" Winrate
             fair_metrics = [sp_wr]
