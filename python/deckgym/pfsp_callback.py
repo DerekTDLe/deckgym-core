@@ -34,8 +34,7 @@ class PFSPCallback(BaseCallback):
         priority_exponent: float = DEFAULT_CONFIG.pfsp_priority_exponent,
         winrate_window: int = DEFAULT_CONFIG.pfsp_winrate_window,
         checkpoint_dir: str = DEFAULT_CONFIG.pfsp_checkpoint_dir,
-        # Baseline curriculum parameters
-        baseline_slots: int = DEFAULT_CONFIG.pfsp_baseline_slots,
+        # Baseline curriculum parameters (baseline_slots is now dynamic)
         baseline_max_allocation: float = DEFAULT_CONFIG.pfsp_baseline_max_allocation,
         baseline_curriculum: list = None,
         brutal_resume: bool = DEFAULT_CONFIG.brutal_resume,
