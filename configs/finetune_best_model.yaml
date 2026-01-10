@@ -11,6 +11,9 @@
 # IMPORTANT: Architecture params MUST match the original model
 # (embed_dim=256, heads=8, layers=3) or weights won't load correctly
 
+# Dev note : the fine-tuned model should be already "baked" and this config assume that is it
+# if not, another config should be used
+
 paths:
   meta_deck_path: "meta_deck.json"
   save_path: "models/finetune_sota"
@@ -63,6 +66,7 @@ ppo:
 training:
   total_timesteps: 10000000  # 10M more steps
   checkpoint_freq: 1000  # More frequent checkpoints
+  brutal_resume: true
   n_envs: 128
   use_batched_env: true
   device: "auto"

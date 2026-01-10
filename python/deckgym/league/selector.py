@@ -28,12 +28,14 @@ class OpponentSelector:
         baseline_curriculum: List[Tuple[int, List[str]]],
         baseline_max_allocation: float,
         n_envs: int,
+        brutal_resume: bool = False,
     ):
         self.pool = pool
         self.priority_exponent = priority_exponent
         self.baseline_curriculum = baseline_curriculum
         self.baseline_max_allocation = baseline_max_allocation
         self.n_envs = n_envs
+        self.brutal_resume = brutal_resume
         
         self.baseline_envs_count = max(1, int(n_envs * baseline_max_allocation))
         self.current_baselines: List[str] = []
@@ -48,7 +50,7 @@ class OpponentSelector:
         for step_threshold, baselines in sorted(
             self.baseline_curriculum, key=lambda x: x[0], reverse=True
         ):
-            if current_step >= step_threshold:
+            if self.brutal_resume or current_step >= step_threshold:
                 new_baselines = baselines
                 break
         

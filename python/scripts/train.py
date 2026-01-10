@@ -592,6 +592,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         "n_envs": config.n_envs,
         "use_batched_env": config.use_batched_env,
         "device": config.device,
+        "brutal_resume": config.brutal_resume,
     }
     
     from deckgym.diagnostic_logger import get_logger
@@ -607,6 +608,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
     print(f"     Checkpoint dir:    {config.checkpoint_dir}")
     if config.resume_path:
         print(f"     Resume from:       {config.resume_path}")
+        print(f"     Brutal resume:     {config.brutal_resume}")
 
     print("\n  [◷] Training Duration:")
     print(f"     Total timesteps:   {config.total_timesteps:,}")
@@ -796,6 +798,7 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
                 priority_exponent=config.pfsp_priority_exponent,
                 winrate_window=config.pfsp_winrate_window,
                 checkpoint_dir=config.pfsp_checkpoint_dir,
+                brutal_resume=config.brutal_resume,
                 verbose=1,
             )
         )

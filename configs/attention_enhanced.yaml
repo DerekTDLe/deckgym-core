@@ -13,6 +13,8 @@
 # Estimated VRAM: ~4-5GB (with gradient checkpointing)
 # Single GPU friendly - designed for 8GB+ VRAM
 
+# Dev note : definitely not fitting on my RTX 3050, training time will also be prohibitive
+
 paths:
   meta_deck_path: "meta_deck.json"
   save_path: "models/attention_enhanced"

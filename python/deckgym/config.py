@@ -141,6 +141,7 @@ class TrainingConfig:
     # -------------------------------------------------------------------------
     total_timesteps: int = 30_000_000
     checkpoint_freq: int = 10_000
+    brutal_resume: bool = False  # Skip curriculum and jump to final stage
 
     # -------------------------------------------------------------------------
     # PPO Hyperparameters
@@ -214,7 +215,8 @@ class TrainingConfig:
         default_factory=lambda: [
             (0, ["v", "w"]),  # Stage 1: Easy opponents (0-500k steps)
             (500_000, ["aa", "er"]),  # Stage 2: Medium opponents (500k-2M steps)
-            (2_000_000, ["e2", "er"]),  # Stage 3: Hard opponent + medium (2M+ steps)
+            (2_000_000, ["er", "o1t"]),  # Stage 3: Hard (2M-5M steps)
+            (5_000_000, ["e2", "o1t"]),  # Stage 4: Boss (5M+ steps)
         ]
     )
 
@@ -416,6 +418,7 @@ training:
   pfsp_opponent_device: "{self.pfsp_opponent_device}"
   frozen_opponent_update_rollouts: {self.frozen_opponent_update_rollouts}
   use_gradient_checkpointing: {str(self.use_gradient_checkpointing).lower()}
+  brutal_resume: {str(self.brutal_resume).lower()}
 
   # PFSP settings
   use_pfsp: {str(self.use_pfsp).lower()}
@@ -425,6 +428,7 @@ training:
   pfsp_priority_exponent: {self.pfsp_priority_exponent}
   pfsp_winrate_window: {self.pfsp_winrate_window}
   pfsp_checkpoint_dir: "{self.pfsp_checkpoint_dir}"
+  pfsp_baseline_curriculum: {self.pfsp_baseline_curriculum}
 
 environment:
   max_turns: {self.max_turns}
@@ -523,6 +527,8 @@ environment:
                 "pfsp_priority_exponent",
                 "pfsp_winrate_window",
                 "pfsp_checkpoint_dir",
+                "brutal_resume",
+                "pfsp_baseline_curriculum",
             ]:
                 if key in training:
                     flat_config[key] = training[key]

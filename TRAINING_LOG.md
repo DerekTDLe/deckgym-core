@@ -1149,3 +1149,29 @@ python scripts/evaluate.py eval --model ./checkpoints/rl_bot_17000000_steps.zip 
 - Attention policy: `python/deckgym/attention_policy.py`
 - TensorBoard logs: `./logs/`
 - Checkpoints: `./checkpoints/`
+
+---
+
+## Run #11: MLP Baseline with Self-Play & Optimized Boss Players
+
+**Date**: 2026-01-10  
+**Model**: Pure MLP (no attention)  
+**Config**: `configs/mlp_baseline.yaml`  
+**Status**: [READY] Planned for comparison with attention foundation model
+
+### Objectives
+
+1.  **MLP vs Attention Baseline**: Compare a pure MLP model against the `attention_baseline` foundation model using the latest training improvements.
+2.  **Performance Optimization**: Test the new optimized ONNX baseline detection for "boss players" like `o1t`.
+3.  **Refined Curriculum**: Evaluate the performance of the MLP model against a four-stage curriculum ending with `e2` and `o1t`.
+
+### Configuration Highlights
+
+- **Architecture**: Deep MLP (`pi: [1024, 512, 256, 128]`, `vf: [1024, 512, 256]`).
+- **Training**: 30M steps, 128 envs, PFSP enabled.
+- **Curriculum**:
+    - Stage 1 (0 steps): `v`, `w` (Easy)
+    - Stage 2 (500k steps): `aa`, `er` (Medium)
+    - Stage 3 (2M steps): `er`, `o1t` (Hard)
+    - Stage 4 (5M steps): `e2`, `o1t` (Final Boss)
+- **Brutal Resume**: Supported for skipping stages in future fine-tuning.
