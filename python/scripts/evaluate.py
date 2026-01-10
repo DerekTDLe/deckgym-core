@@ -54,13 +54,18 @@ try:
     from deckgym.onnx_export import export_policy_to_onnx
     from sb3_contrib import MaskablePPO
     from deckgym.diagnostic_logger import get_logger
+
     ONNX_AVAILABLE = True
 except ImportError:
     ONNX_AVAILABLE = False
+
     def get_logger():
         class DummyLogger:
-            def log_error(self, *args, **kwargs): pass
+            def log_error(self, *args, **kwargs):
+                pass
+
         return DummyLogger()
+
 
 # PanicException is often not importable directly but can be caught by name
 PanicException = None
@@ -138,6 +143,7 @@ class Rating:
     def from_trueskill(r: trueskill.Rating) -> "Rating":
         return Rating(mu=r.mu, sigma=r.sigma)
 
+
 def assign_tier(percentile: float) -> Tuple[str, str]:
     """Assign a tier and color based on percentile."""
     if percentile >= 95:
@@ -152,6 +158,7 @@ def assign_tier(percentile: float) -> Tuple[str, str]:
         return "C", "orange"
     return "D", "red"
 
+
 def get_reliability(sigma: float) -> str:
     """Return a descriptive reliability string based on sigma."""
     if sigma < 40:
@@ -161,6 +168,7 @@ def get_reliability(sigma: float) -> str:
     if sigma < 150:
         return "[orange3]Estimating 🟠[/orange3]"
     return "[red]Initial 🔴[/red]"
+
 
 def save_report(data: dict, mode: str, name: Optional[str] = None):
     """Save evaluation results to a JSON file."""
@@ -233,14 +241,18 @@ def run_rust_match(
             if isinstance(e, (KeyboardInterrupt, SystemExit)):
                 raise e
 
-            is_panic = (PanicException and isinstance(e, PanicException)) or type(e).__name__ == "PanicException"
+            is_panic = (PanicException and isinstance(e, PanicException)) or type(
+                e
+            ).__name__ == "PanicException"
             reason = "evaluation_panic" if is_panic else "evaluation_error"
-            
+
             if is_panic:
-                console.print(f"[bold red]CRITICAL: Rust Panic during simulation![/bold red]")
+                console.print(
+                    f"[bold red]CRITICAL: Rust Panic during simulation![/bold red]"
+                )
             else:
                 console.print(f"[red]Error in simulation: {e}[/red]")
-            
+
             console.print(f"[red]{e}[/red]")
 
             try:
@@ -342,7 +354,7 @@ def benchmark_directory(
         # Build all matchup pairs (All-play-all)
         names = list(participants.keys())
         base_pairs = list(combinations(names, 2))
-        
+
         # Multiply by repetitions and shuffle GLOBALLY
         # This improves TrueSkill convergence by interleaving participants
         matchups = base_pairs * n_robin_rounds
@@ -416,10 +428,7 @@ def benchmark_directory(
 
             # Run games in parallel
             with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-                futures = [
-                    executor.submit(play_game, p[0], p[1])
-                    for p in matchups
-                ]
+                futures = [executor.submit(play_game, p[0], p[1]) for p in matchups]
 
                 # Wait for all to finish
                 for future in futures:
@@ -466,21 +475,25 @@ def print_leaderboard(
 ):
     """Print a production-grade leaderboard using rich."""
     from rich.panel import Panel
-    
+
     # Sort by expose rating (mu - 3*sigma)
     sorted_items = sorted(
         ratings.items(), key=lambda x: x[1].mu - 3 * x[1].sigma, reverse=True
     )
-    
+
     # Calculate percentiles for tiers
     n = len(sorted_items)
-    
+
     # Find anchor for deltas (default: Expectiminimax(2))
     anchor_name = BOT_NAMES.get("e2", "Expectiminimax(2)")
     anchor_rating = ratings.get(anchor_name)
     if not anchor_rating:
         # Fallback to strongest baseline if e2 not present
-        baselines = [name for name, code in participants.items() if code in BOT_NAMES or code in BOT_NAMES.values()]
+        baselines = [
+            name
+            for name, code in participants.items()
+            if code in BOT_NAMES or code in BOT_NAMES.values()
+        ]
         if baselines:
             baselines.sort(key=lambda x: ratings[x].mu, reverse=True)
             anchor_name = baselines[0]
@@ -501,15 +514,21 @@ def print_leaderboard(
         # Percentile: (n - rank) / (n - 1) * 100
         percentile = ((n - rank) / (n - 1) * 100) if n > 1 else 100
         tier_str, tier_style = assign_tier(percentile)
-        
+
         expose = r.mu - 3 * r.sigma
         w, l, d = wins[name], losses[name], draws[name]
         total = w + l + d
         win_pct = (w / total * 100) if total > 0 else 0
-        
+
         # Style baselines differently
-        is_baseline = participants[name] in BOT_NAMES or participants[name] in BOT_NAMES.values()
-        display_name = f"[italic dim]{name}[/italic dim]" if is_baseline else f"[bold]{name}[/bold]"
+        is_baseline = (
+            participants[name] in BOT_NAMES or participants[name] in BOT_NAMES.values()
+        )
+        display_name = (
+            f"[italic dim]{name}[/italic dim]"
+            if is_baseline
+            else f"[bold]{name}[/bold]"
+        )
 
         # Calculate delta vs anchor
         delta_str = ""
@@ -519,7 +538,7 @@ def print_leaderboard(
             delta_str = f"[{color}]{delta:+3.0f}[/{color}]"
         elif name == anchor_name:
             delta_str = "[bold cyan]ANCHOR[/bold cyan]"
-        
+
         table.add_row(
             str(rank),
             f"[{tier_style}]{tier_str}[/{tier_style}]",
@@ -529,12 +548,13 @@ def print_leaderboard(
             f"{expose:.1f}",
             f"{w}-{l}-{d}",
             f"{win_pct:.1f}%",
-            get_reliability(r.sigma)
+            get_reliability(r.sigma),
         )
 
     console.print("\n")
     console.print(Panel(table, title=f"[bold white]{title}[/bold white]", expand=False))
     console.print("[dim]Expose = Mu - 3σ (Conservative Skill Estimate)[/dim]\n")
+
 
 def print_bench_results(
     ratings: Dict[str, trueskill.Rating],
@@ -543,9 +563,9 @@ def print_bench_results(
     draws: Dict[str, int],
     participants: Dict[str, str],
 ):
-    print_leaderboard(ratings, wins, losses, draws, participants, "Benchmark Tournament Results")
-
-
+    print_leaderboard(
+        ratings, wins, losses, draws, participants, "Benchmark Tournament Results"
+    )
 
 
 def main():
@@ -553,7 +573,9 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Bench (Directory)
-    bench_p = subparsers.add_parser("bench", help="Benchmark directory (Tournament mode)")
+    bench_p = subparsers.add_parser(
+        "bench", help="Benchmark directory (Tournament mode)"
+    )
     bench_p.add_argument("dir", help="Directory containing .zip models")
     bench_p.add_argument(
         "--games",

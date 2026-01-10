@@ -169,7 +169,7 @@ class BatchedDeckGymEnv(VecEnv):
             print(f"CRITICAL: Panic in vec_game.step_batch: {e}")
             traceback.print_exc()
             print(f"{'!' * 60}\n")
-            
+
             # Try to log states for all envs to help debug the panic
             for i in range(self.n_envs):
                 try:
@@ -180,7 +180,10 @@ class BatchedDeckGymEnv(VecEnv):
                 except Exception as dump_err:
                     # If get_state also fails, log with None state
                     self.diagnostic_logger.log_error(
-                        "batch_panic_corrupted", i, None, {"error": str(e), "dump_error": str(dump_err)}
+                        "batch_panic_corrupted",
+                        i,
+                        None,
+                        {"error": str(e), "dump_error": str(dump_err)},
                     )
             raise e
 

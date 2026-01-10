@@ -96,7 +96,7 @@ class DiagnosticLogger:
     def capture_panic(self, env_provider=None):
         """
         Context manager to capture panics during training.
-        
+
         Args:
             env_provider: Optional callable that returns the current environment(s)
                          to dump state from on crash.
@@ -113,23 +113,31 @@ class DiagnosticLogger:
                 print(f"\n{'!' * 80}")
                 print(f"CRITICAL ERROR CAPTURED: {panic_msg}")
                 print(f"{'!' * 80}")
-                
+
                 if env_provider:
                     try:
                         env = env_provider()
                         if env:
-                            self.dump_all_states(env, reason="crash_dump", extra_info={"error": panic_msg})
+                            self.dump_all_states(
+                                env,
+                                reason="crash_dump",
+                                extra_info={"error": panic_msg},
+                            )
                     except Exception as dump_err:
-                        print(f"[DIAGNOSTIC] Could not dump states during crash: {dump_err}")
-                
+                        print(
+                            f"[DIAGNOSTIC] Could not dump states during crash: {dump_err}"
+                        )
+
                 raise e
 
         return _capture()
 
-    def dump_all_states(self, env, reason: str = "manual_dump", extra_info: Optional[Dict] = None):
+    def dump_all_states(
+        self, env, reason: str = "manual_dump", extra_info: Optional[Dict] = None
+    ):
         """Dump states of all environments in a VecEnv."""
         from deckgym.batched_env import BatchedDeckGymEnv
-        
+
         if isinstance(env, BatchedDeckGymEnv):
             for i in range(env.n_envs):
                 try:
@@ -137,12 +145,13 @@ class DiagnosticLogger:
                     self.log_error(reason, i, state, extra_info)
                 except Exception as e:
                     print(f"[DIAGNOSTIC] Failed to dump env {i}: {e}")
-        elif hasattr(env, "envs"): # DummyVecEnv
+        elif hasattr(env, "envs"):  # DummyVecEnv
             for i, sub_env in enumerate(env.envs):
                 try:
                     # Access underlying game if possible
                     inner = sub_env
-                    while hasattr(inner, "env"): inner = inner.env
+                    while hasattr(inner, "env"):
+                        inner = inner.env
                     if hasattr(inner, "game"):
                         self.log_error(reason, i, inner.game.get_state(), extra_info)
                 except Exception as e:

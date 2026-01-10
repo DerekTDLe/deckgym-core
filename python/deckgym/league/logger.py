@@ -24,13 +24,15 @@ from deckgym.league.pool import OpponentPool
 class LeagueLogger:
     """
     Handles logging of league metrics to TensorBoard and console.
-    
+
     Simplified to two key metrics:
     - WR Global (e2 excluded): Overall performance against fair opponents
     - WR vs e2: Benchmark against optimal play
     """
 
-    def __init__(self, pool: OpponentPool, logger: Optional[Logger] = None, verbose: int = 1):
+    def __init__(
+        self, pool: OpponentPool, logger: Optional[Logger] = None, verbose: int = 1
+    ):
         self.pool = pool
         self.logger = logger
         self.verbose = verbose
@@ -72,10 +74,10 @@ class LeagueLogger:
                 if self._is_omniscient(code):
                     continue
             names.append(name)
-        
+
         if not names:
             return 0.5
-            
+
         winrates = [self._get_winrate(n) for n in names]
         return float(np.mean(winrates))
 
@@ -106,14 +108,18 @@ class LeagueLogger:
         if self.verbose > 0:
             self._print_summary(rollout_count, global_wr, e2_wr)
 
-    def _print_summary(self, rollout_count: int, global_wr: float, e2_wr: Optional[float]):
+    def _print_summary(
+        self, rollout_count: int, global_wr: float, e2_wr: Optional[float]
+    ):
         """Print beautiful CLI summary."""
         e2_str = f"{e2_wr:.1%}" if e2_wr is not None else "—"
-        
+
         print(f"\n┌{'─'*50}┐")
         print(f"│{'LEAGUE STATUS':^50}│")
         print(f"├{'─'*50}┤")
-        print(f"│  Rollout: {rollout_count:<10} Pool: {self.pool.total_count} agents{' '*(18-len(str(self.pool.total_count)))}│")
+        print(
+            f"│  Rollout: {rollout_count:<10} Pool: {self.pool.total_count} agents{' '*(18-len(str(self.pool.total_count)))}│"
+        )
         print(f"├{'─'*50}┤")
         print(f"│  📊 WR Global (e2 excl.):  {global_wr:>6.1%}{' '*17}│")
         print(f"│  🎯 WR vs e2:              {e2_str:>6}{' '*17}│")
@@ -131,7 +137,7 @@ class LeagueLogger:
             code = data.get("baseline_code", "")
             is_omni = self._is_omniscient(code) if is_baseline else False
             return (not is_baseline, is_omni, data.get("added_at_step", 0))
-        
+
         sorted_names = sorted(self.pool.opponents.keys(), key=sort_key)
 
         print(f"\n┌{'─'*72}┐")
@@ -142,7 +148,7 @@ class LeagueLogger:
 
         for name in sorted_names:
             data = self.pool.opponents[name]
-            
+
             # Display name with type indicator
             if data.get("is_baseline"):
                 code = data.get("baseline_code", "?")
@@ -154,27 +160,29 @@ class LeagueLogger:
                     display = f"🎮 {name}"
             else:
                 display = f"📸 {name}"
-            
+
             # Truncate if too long
             display = display[:24] if len(display) > 24 else display
-            
+
             # Total stats
             tw = data.get("total_wins", 0)
             tl = data.get("total_losses", 0)
             td = data.get("total_draws", 0)
             total = tw + tl + td
             t_wr = (tl / total * 100) if total > 0 else 50.0
-            
+
             # Rollout stats
             r = rollout_results.get(name, {"wins": 0, "losses": 0, "draws": 0})
             rw, rl, rd = r["wins"], r["losses"], r["draws"]
             r_total = rw + rl + rd
             r_wr = (rl / r_total * 100) if r_total > 0 else 50.0
-            
+
             # Format: WR% W-L-D
-            r_str = f"{r_wr:5.1f}% {rl:2}-{rw:2}-{rd:2}" if r_total > 0 else "     —      "
+            r_str = (
+                f"{r_wr:5.1f}% {rl:2}-{rw:2}-{rd:2}" if r_total > 0 else "     —      "
+            )
             t_str = f"{t_wr:5.1f}% {tl:3}-{tw:3}-{td:3}"
-            
+
             print(f"│{display:^25}│{r_str:^22}│{t_str:^22}│")
 
         print(f"└{'─'*25}┴{'─'*22}┴{'─'*22}┘")

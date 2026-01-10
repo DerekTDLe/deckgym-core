@@ -57,7 +57,11 @@ class PFSPCallback(BaseCallback):
             n_envs,
             brutal_resume,
         )
-        self.bridge = LeagueBridge(env, device=getattr(env.config, "pfsp_opponent_device", "trt"), verbose=verbose)
+        self.bridge = LeagueBridge(
+            env,
+            device=getattr(env.config, "pfsp_opponent_device", "trt"),
+            verbose=verbose,
+        )
         self.league_logger = LeagueLogger(self.pool, verbose=verbose)
 
         # State tracking
@@ -68,19 +72,29 @@ class PFSPCallback(BaseCallback):
         self.pool_mode = False
 
         if self.verbose > 0:
-            print(f"[PFSP] Modular initialized (pool={pool_size}, exp={priority_exponent})")
+            print(
+                f"[PFSP] Modular initialized (pool={pool_size}, exp={priority_exponent})"
+            )
 
     def _on_training_start(self) -> None:
         """Initialize league state and Rust pool."""
         self.league_logger.logger = self.logger
-        
+
         # Initial curriculum update
         added, _ = self.selector.update_curriculum(self.num_timesteps)
         for bl_code in added:
-            self.pool.add_opponent(f"baseline_{bl_code}", {
-                "path": None, "baseline_code": bl_code, "wins": 0, "losses": 0, "draws": 0,
-                "added_at_step": self.num_timesteps, "is_baseline": True
-            })
+            self.pool.add_opponent(
+                f"baseline_{bl_code}",
+                {
+                    "path": None,
+                    "baseline_code": bl_code,
+                    "wins": 0,
+                    "losses": 0,
+                    "draws": 0,
+                    "added_at_step": self.num_timesteps,
+                    "is_baseline": True,
+                },
+            )
 
         # Add initial untrained model
         self._add_to_pool()
@@ -100,7 +114,7 @@ class PFSPCallback(BaseCallback):
         # Assign initial opponents
         for i in range(self.n_envs):
             self._assign_opponent_to_env(i)
-            
+
         self.pool_mode = True
 
     def _assign_opponent_to_env(self, env_idx: int):
@@ -125,10 +139,18 @@ class PFSPCallback(BaseCallback):
             added, removed = self.selector.update_curriculum(self.num_timesteps)
             for bl_code in added:
                 name = f"baseline_{bl_code}"
-                self.pool.add_opponent(name, {
-                    "path": None, "baseline_code": bl_code, "wins": 0, "losses": 0, "draws": 0,
-                    "added_at_step": self.num_timesteps, "is_baseline": True
-                })
+                self.pool.add_opponent(
+                    name,
+                    {
+                        "path": None,
+                        "baseline_code": bl_code,
+                        "wins": 0,
+                        "losses": 0,
+                        "draws": 0,
+                        "added_at_step": self.num_timesteps,
+                        "is_baseline": True,
+                    },
+                )
                 # Check if it's an ONNX baseline (optimized path)
                 if bl_code.startswith("o"):
                     self._add_onnx_baseline_to_rust(name, bl_code)
@@ -164,10 +186,10 @@ class PFSPCallback(BaseCallback):
         if self.rollout_count % self.add_to_pool_every_n_rollouts == 0:
             sp_winrate = self.league_logger.get_self_play_winrate()
             min_wr_to_add = getattr(self.env.config, "pfsp_min_winrate_to_add", 0.50)
-            
+
             if sp_winrate >= min_wr_to_add or self.pool.model_count < 2:
                 self._add_to_pool()
-            
+
             self.pool.reset_statistics()
 
     def _on_step(self) -> bool:
@@ -179,7 +201,11 @@ class PFSPCallback(BaseCallback):
 
             reward = info["episode"].get("r", 0)
             draw_reward = getattr(self.env.config, "draw_reward", -0.5)
-            result = "agent_win" if reward > 0 else ("draw" if abs(reward - draw_reward) < 1e-4 else "opp_win")
+            result = (
+                "agent_win"
+                if reward > 0
+                else ("draw" if abs(reward - draw_reward) < 1e-4 else "opp_win")
+            )
 
             opp_name = self.env_opponent_names[env_idx]
             if opp_name:
@@ -195,14 +221,18 @@ class PFSPCallback(BaseCallback):
         """Orchestrate saving and adding a new model to the league."""
         name = f"pfsp_{self.num_timesteps // 1000}k"
         path = self.pool.checkpoint_dir / f"{name}.zip"
-        
+
         # Save model
         self.model.save(str(path))
-        
+
         # Add to local pool
         data = {
-            "path": str(path), "wins": 0, "losses": 0, "draws": 0,
-            "added_at_step": self.num_timesteps, "is_baseline": False
+            "path": str(path),
+            "wins": 0,
+            "losses": 0,
+            "draws": 0,
+            "added_at_step": self.num_timesteps,
+            "is_baseline": False,
         }
         self.pool.add_opponent(name, data)
 
@@ -220,17 +250,19 @@ class PFSPCallback(BaseCallback):
                 self.bridge.remove_from_rust(weakest_name)
                 weakest_data = self.pool.remove_opponent(weakest_name)
                 self.pool.cleanup_files(weakest_data)
-                
+
                 # Immediate reassignment for envs playing against evicted opponent
                 for i, curr_name in enumerate(self.env_opponent_names):
                     if curr_name == weakest_name:
                         self._assign_opponent_to_env(i)
-                        
+
                 if self.verbose > 0:
-                    print(f"[PFSP] Evicted weakest model: {weakest_name} (WR: {wr:.1%})")
+                    print(
+                        f"[PFSP] Evicted weakest model: {weakest_name} (WR: {wr:.1%})"
+                    )
             else:
                 break
-        
+
         if self.verbose > 0:
             print(f"[PFSP] Saved and added model: {name}")
         gc.collect()
@@ -251,21 +283,24 @@ class PFSPCallback(BaseCallback):
             self.bridge.add_onnx_to_rust(name, path)
         else:
             if self.verbose > 0:
-                print(f"[WARNING] Could not resolve ONNX baseline '{code}', falling back to sequential.")
+                print(
+                    f"[WARNING] Could not resolve ONNX baseline '{code}', falling back to sequential."
+                )
             self.bridge.add_baseline_to_rust(name, code)
 
     def _resolve_onnx_code_to_path(self, code: str) -> Optional[str]:
         """Resolve a code like 'o1' to a path in models/."""
         import glob
         import os
+
         if not code.startswith("o"):
             return None
-            
+
         # Search for .onnx files in models/ and subdirectories
         models = glob.glob("models/*.onnx") + glob.glob("models/**/*.onnx")
         if not models:
             return None
-        
+
         # Sort by modification time (newest first)
         models.sort(key=os.path.getmtime, reverse=True)
         return str(models[0])

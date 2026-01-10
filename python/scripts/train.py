@@ -193,12 +193,14 @@ class SelfPlayEnv(gym.Env):
                 raise e
             print(f"WARNING: Game error during agent turn: {e}")
             self.diagnostic_logger.log_error(
-                "agent_panic", 0, self._env.game.get_state(), 
+                "agent_panic",
+                0,
+                self._env.game.get_state(),
                 {
                     "error": str(e),
                     "deck_a": self._current_decks[0],
                     "deck_b": self._current_decks[1],
-                }
+                },
             )
             return self._end_episode_error(str(e))
 
@@ -306,12 +308,14 @@ class SelfPlayEnv(gym.Env):
                 raise e
             print(f"WARNING: Game error during opponent turn: {e}")
             self.diagnostic_logger.log_error(
-                "opponent_panic", 0, self._env.game.get_state(),
+                "opponent_panic",
+                0,
+                self._env.game.get_state(),
                 {
                     "error": str(e),
                     "deck_a": self._current_decks[0],
                     "deck_b": self._current_decks[1],
-                }
+                },
             )
             return obs, info, 0.0, True
 
@@ -594,8 +598,9 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
         "device": config.device,
         "brutal_resume": config.brutal_resume,
     }
-    
+
     from deckgym.diagnostic_logger import get_logger
+
     diag_logger = get_logger()
     diag_logger.setup_excepthook()
 

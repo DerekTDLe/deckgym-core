@@ -701,7 +701,10 @@ impl PyGame {
 
         let cli_players = fill_code_array(player_codes);
         let rust_players = create_players(deck_a, deck_b, cli_players).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Failed to create players: {}", e))
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Failed to create players: {}",
+                e
+            ))
         })?;
         let game_seed = seed.unwrap_or_else(rand::random::<u64>);
         let game = Game::new(rust_players, game_seed);
@@ -746,7 +749,10 @@ impl PyGame {
         // Use default players (no bots, just the RL agent controls both)
         let cli_players = fill_code_array(None);
         let rust_players = create_players(deck_a, deck_b, cli_players).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Failed to create players: {}", e))
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Failed to create players: {}",
+                e
+            ))
         })?;
         let game_seed = seed.unwrap_or_else(rand::random::<u64>);
         let game = Game::new(rust_players, game_seed);

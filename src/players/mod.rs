@@ -197,15 +197,18 @@ fn get_player(deck: Deck, player: &PlayerCode) -> Result<Box<dyn Player>, String
         })),
         PlayerCode::ER => Ok(Box::new(EvolutionRusherPlayer { deck })),
         #[cfg(feature = "onnx")]
-        PlayerCode::Onnx { path, device } => {
-            Ok(Box::new(OnnxPlayer::new(&path, deck, true, device).map_err(|e| format!("Failed to load ONNX model: {}", e))?))
-        }
+        PlayerCode::Onnx { path, device } => Ok(Box::new(
+            OnnxPlayer::new(&path, deck, true, device)
+                .map_err(|e| format!("Failed to load ONNX model: {}", e))?,
+        )),
         #[cfg(feature = "onnx")]
         PlayerCode::O { index, device } => {
-            let path = get_nth_onnx_model(*index).map_err(|e| format!(
+            let path = get_nth_onnx_model(*index).map_err(|e| {
+                format!(
                 "Failed to find ONNX model o{}. Make sure models/ contains .onnx files. Error: {}",
                 index, e
-            ))?;
+            )
+            })?;
             Ok(Box::new(
                 OnnxPlayer::new(&path, deck, true, device)
                     .map_err(|e| format!("Failed to load ONNX model from {}: {}", path, e))?,

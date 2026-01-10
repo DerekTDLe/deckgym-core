@@ -18,7 +18,7 @@ from deckgym.batched_env import BatchedDeckGymEnv
 class LeagueBridge:
     """
     Bridges the Python league state with the Rust-side execution engine.
-    
+
     Responsibilities:
     - Exporting Stable-Baselines3 models to ONNX.
     - Synchronizing the opponent pool with the Rust vec_game.
@@ -29,9 +29,11 @@ class LeagueBridge:
         self.env = env
         self.device = device
         self.verbose = verbose
-        
+
         if not hasattr(self.env, "vec_game"):
-            raise TypeError("[LeagueBridge] Env must be a BatchedDeckGymEnv with vec_game support")
+            raise TypeError(
+                "[LeagueBridge] Env must be a BatchedDeckGymEnv with vec_game support"
+            )
 
     def export_model(self, model: MaskablePPO, name: str) -> str:
         """Export a model to ONNX and return the path."""
@@ -44,7 +46,9 @@ class LeagueBridge:
         try:
             self.env.vec_game.add_onnx_to_pool(name, onnx_path, False, self.device)
             if self.verbose > 1:
-                print(f"[LeagueBridge] Added ONNX opponent '{name}' to Rust pool ({self.device})")
+                print(
+                    f"[LeagueBridge] Added ONNX opponent '{name}' to Rust pool ({self.device})"
+                )
         except Exception as e:
             if self.verbose > 0:
                 print(f"[LeagueBridge WARNING] Failed to add ONNX {name}: {e}")
@@ -77,4 +81,6 @@ class LeagueBridge:
             self.env.vec_game.set_env_opponent(env_idx, opponent_name)
         except Exception as e:
             if self.verbose > 0:
-                print(f"[LeagueBridge WARNING] Failed to set opponent for env {env_idx}: {e}")
+                print(
+                    f"[LeagueBridge WARNING] Failed to set opponent for env {env_idx}: {e}"
+                )
