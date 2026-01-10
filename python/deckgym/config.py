@@ -415,6 +415,7 @@ training:
   onnx_device: "{self.onnx_device}"
   pfsp_opponent_device: "{self.pfsp_opponent_device}"
   frozen_opponent_update_rollouts: {self.frozen_opponent_update_rollouts}
+  use_gradient_checkpointing: {str(self.use_gradient_checkpointing).lower()}
 
   # PFSP settings
   use_pfsp: {str(self.use_pfsp).lower()}
@@ -514,6 +515,7 @@ environment:
                 "onnx_device",
                 "pfsp_opponent_device",
                 "frozen_opponent_update_rollouts",
+                "use_gradient_checkpointing",
                 "use_pfsp",
                 "pfsp_pool_size",
                 "pfsp_add_every_n_rollouts",
