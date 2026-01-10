@@ -15,10 +15,80 @@ Baseline Codes:
 """
 
 from typing import Dict, List, Optional
+import unicodedata
 import numpy as np
 from stable_baselines3.common.logger import Logger
 
 from deckgym.league.pool import OpponentPool
+
+
+def _display_width(s: str) -> int:
+    """Calculate the display width of a string in terminal columns.
+    
+    Accounts for:
+    - Wide characters (CJK, emojis) that take 2 columns
+    - Zero-width characters (combining marks, variation selectors)
+    """
+    width = 0
+    for char in s:
+        cat = unicodedata.category(char)
+        # Skip zero-width characters (Mn=Mark Nonspacing, Me=Mark Enclosing, Cf=Format)
+        if cat in ('Mn', 'Me', 'Cf'):
+            continue
+        east_asian_width = unicodedata.east_asian_width(char)
+        # Wide (W) and Fullwidth (F) characters take 2 columns
+        if east_asian_width in ('W', 'F'):
+            width += 2
+        else:
+            width += 1
+    return width
+
+
+def _pad_center(s: str, width: int, fillchar: str = ' ') -> str:
+    """Center a string to a given display width, accounting for unicode."""
+    display_w = _display_width(s)
+    padding = width - display_w
+    if padding <= 0:
+        return s
+    left = padding // 2
+    right = padding - left
+    return fillchar * left + s + fillchar * right
+
+
+def _pad_left(s: str, width: int, fillchar: str = ' ') -> str:
+    """Left-align a string to a given display width, accounting for unicode."""
+    display_w = _display_width(s)
+    padding = width - display_w
+    if padding <= 0:
+        return s
+    return s + fillchar * padding
+
+
+def _pad_right(s: str, width: int, fillchar: str = ' ') -> str:
+    """Right-align a string to a given display width, accounting for unicode."""
+    display_w = _display_width(s)
+    padding = width - display_w
+    if padding <= 0:
+        return s
+    return fillchar * padding + s
+
+
+def _truncate_to_width(s: str, max_width: int) -> str:
+    """Truncate a string to fit within max_width display columns."""
+    width = 0
+    result = []
+    for char in s:
+        cat = unicodedata.category(char)
+        if cat in ('Mn', 'Me', 'Cf'):
+            char_width = 0
+        else:
+            east_asian_width = unicodedata.east_asian_width(char)
+            char_width = 2 if east_asian_width in ('W', 'F') else 1
+        if width + char_width > max_width:
+            break
+        result.append(char)
+        width += char_width
+    return ''.join(result)
 
 
 class LeagueLogger:
@@ -113,17 +183,21 @@ class LeagueLogger:
     ):
         """Print beautiful CLI summary."""
         e2_str = f"{e2_wr:.1%}" if e2_wr is not None else "—"
+        col_width = 50
 
-        print(f"\n┌{'─'*50}┐")
-        print(f"│{'LEAGUE STATUS':^50}│")
-        print(f"├{'─'*50}┤")
-        print(
-            f"│  Rollout: {rollout_count:<10} Pool: {self.pool.total_count} agents{' '*(18-len(str(self.pool.total_count)))}│"
-        )
-        print(f"├{'─'*50}┤")
-        print(f"│  📊 WR Global (e2 excl.):  {global_wr:>6.1%}{' '*17}│")
-        print(f"│  🎯 WR vs e2:              {e2_str:>6}{' '*17}│")
-        print(f"└{'─'*50}┘")
+        print(f"\n┌{'─'*col_width}┐")
+        print(f"│{_pad_center('LEAGUE STATUS', col_width)}│")
+        print(f"├{'─'*col_width}┤")
+        
+        pool_line = f"  Rollout: {rollout_count:<10} Pool: {self.pool.total_count} agents"
+        print(f"│{_pad_left(pool_line, col_width)}│")
+        print(f"├{'─'*col_width}┤")
+        
+        wr_global_line = f"  📊 WR Global (e2 excl.):  {global_wr:>6.1%}"
+        wr_e2_line = f"  🎯 WR vs e2:              {e2_str:>6}"
+        print(f"│{_pad_left(wr_global_line, col_width)}│")
+        print(f"│{_pad_left(wr_e2_line, col_width)}│")
+        print(f"└{'─'*col_width}┘")
 
     def log_detailed_info(self, rollout_results: Dict[str, Dict[str, int]]):
         """Log detailed performance against each opponent."""
@@ -140,11 +214,17 @@ class LeagueLogger:
 
         sorted_names = sorted(self.pool.opponents.keys(), key=sort_key)
 
-        print(f"\n┌{'─'*72}┐")
-        print(f"│{'DETAILED OPPONENT BREAKDOWN':^72}│")
-        print(f"├{'─'*25}┬{'─'*22}┬{'─'*22}┤")
-        print(f"│{'Opponent':^25}│{'This Rollout':^22}│{'All-Time':^22}│")
-        print(f"├{'─'*25}┼{'─'*22}┼{'─'*22}┤")
+        # Column widths
+        col1_width = 25  # Opponent name
+        col2_width = 22  # This Rollout
+        col3_width = 22  # All-Time
+        total_width = col1_width + col2_width + col3_width + 2  # +2 for inner borders
+
+        print(f"\n┌{'─'*total_width}┐")
+        print(f"│{_pad_center('DETAILED OPPONENT BREAKDOWN', total_width)}│")
+        print(f"├{'─'*col1_width}┬{'─'*col2_width}┬{'─'*col3_width}┤")
+        print(f"│{_pad_center('Opponent', col1_width)}│{_pad_center('This Rollout', col2_width)}│{_pad_center('All-Time', col3_width)}│")
+        print(f"├{'─'*col1_width}┼{'─'*col2_width}┼{'─'*col3_width}┤")
 
         for name in sorted_names:
             data = self.pool.opponents[name]
@@ -161,8 +241,8 @@ class LeagueLogger:
             else:
                 display = f"📸 {name}"
 
-            # Truncate if too long
-            display = display[:24] if len(display) > 24 else display
+            # Truncate using display width, not character count
+            display = _truncate_to_width(display, col1_width - 2)
 
             # Total stats
             tw = data.get("total_wins", 0)
@@ -183,7 +263,7 @@ class LeagueLogger:
             )
             t_str = f"{t_wr:5.1f}% {tl:3}-{tw:3}-{td:3}"
 
-            print(f"│{display:^25}│{r_str:^22}│{t_str:^22}│")
+            print(f"│{_pad_center(display, col1_width)}│{_pad_center(r_str, col2_width)}│{_pad_center(t_str, col3_width)}│")
 
-        print(f"└{'─'*25}┴{'─'*22}┴{'─'*22}┘")
+        print(f"└{'─'*col1_width}┴{'─'*col2_width}┴{'─'*col3_width}┘")
         print()
