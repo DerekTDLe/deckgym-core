@@ -235,25 +235,33 @@ The agent learns through continuous self-play against its own previous versions 
 | **Stability** | Rust-side `catch_unwind` prevents game-state crashes |
 | **YAML Config** | Fully configurable via `configs/template.yaml` |
 
-### TrueSkill Leaderboard (300 games/baseline)
+### Benchmark Tournament Results (vs e2)
 
-*Note: Newest and current model architecture did not finish training yet, this serves as a temporary demonstration of the agent level of play. Expectiminimax players are included here for reference as "omniscient" baselines.*
+*Note: These benchmarks are conducted against `e2` (Expectiminimax depth 2), an omniscient agent that has access to hidden state information. The evaluations below use the **attention-based architecture**; a comparative training run using a pure MLP architecture is planned.*
 
-| Rank | Player | Expose |
-|------|--------|-----------|
-| 1 | Expectiminimax(5) | 2014 |
-| 2 | Expectiminimax(3) | 2009 |
-| 3 | Expectiminimax(2) | 1939 |
-| 4 | Expectiminimax(4) | 1925 |
-| 5 | **RL Agent 12.8M (Run #9)** | **1807** |
-| 6 | EvolutionRusher | 1480 |
-| 7 | WeightedRandom | 1432 |
-| 8 | AttachAttack | 1374 |
-| 9 | ValueFunction | 1363 |
-| 10 | Random | 1105 |
-| 11 | EndTurn | 1072 |
-
-Expose is TrueSkill conservative ELO
+```text
+╭─────────────────────────────────────────────────── Benchmark Tournament Results ───────────────────────────────────────────────────╮
+│ ┏━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┓ │
+│ ┃ Rank ┃ Tier ┃ Participant                       ┃ Rating (Mu/σ) ┃ Δ Anchor ┃ Expose ┃    W-L-D    ┃  Win% ┃ Reliability        ┃ │
+│ ┡━━━━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━━━━━━┩ │
+│ │  1   │  S+  │ Expectiminimax(2)                 │      1845 ±15 │   ANCHOR │ 1800.3 │ 1158-239-3  │ 82.7% │ Highly Reliable 🟢 │ │
+│ ├──────┼──────┼───────────────────────────────────┼───────────────┼──────────┼────────┼─────────────┼───────┼────────────────────┤ │
+│ │  2   │  S   │ best_model_26624k_steps           │      1742 ±14 │     -103 │ 1700.5 │ 1029-363-8  │ 73.5% │ Highly Reliable 🟢 │ │
+│ ├──────┼──────┼───────────────────────────────────┼───────────────┼──────────┼────────┼─────────────┼───────┼────────────────────┤ │
+│ │  3   │  A   │ last_model_30000k_steps           │      1718 ±13 │     -127 │ 1677.9 │ 998-391-11  │ 71.3% │ Highly Reliable 🟢 │ │
+│ ├──────┼──────┼───────────────────────────────────┼───────────────┼──────────┼────────┼─────────────┼───────┼────────────────────┤ │
+│ │  4   │  B   │ first_to_beat_er_model_512k_steps │      1478 ±13 │     -367 │ 1440.3 │ 644-715-41  │ 46.0% │ Highly Reliable 🟢 │ │
+│ ├──────┼──────┼───────────────────────────────────┼───────────────┼──────────┼────────┼─────────────┼───────┼────────────────────┤ │
+│ │  5   │  B   │ EvolutionRusher                   │      1416 ±13 │     -429 │ 1377.6 │ 560-824-16  │ 40.0% │ Highly Reliable 🟢 │ │
+│ ├──────┼──────┼───────────────────────────────────┼───────────────┼──────────┼────────┼─────────────┼───────┼────────────────────┤ │
+│ │  6   │  C   │ WeightedRandom                    │      1357 ±13 │     -488 │ 1317.2 │ 473-916-11  │ 33.8% │ Highly Reliable 🟢 │ │
+│ ├──────┼──────┼───────────────────────────────────┼───────────────┼──────────┼────────┼─────────────┼───────┼────────────────────┤ │
+│ │  7   │  D   │ first_model_256k_steps            │      1301 ±13 │     -544 │ 1260.5 │ 380-985-35  │ 27.1% │ Highly Reliable 🟢 │ │
+│ ├──────┼──────┼───────────────────────────────────┼───────────────┼──────────┼────────┼─────────────┼───────┼────────────────────┤ │
+│ │  8   │  D   │ AttachAttack                      │      1232 ±14 │     -613 │ 1189.1 │ 280-1089-31 │ 20.0% │ Highly Reliable 🟢 │ │
+│ └──────┴──────┴───────────────────────────────────┴───────────────┴──────────┴────────┴─────────────┴───────┴────────────────────┘ │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
 
 ### Usefull Commands
 
