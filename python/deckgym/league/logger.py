@@ -103,12 +103,14 @@ class LeagueLogger:
     def log_detailed_info(self, rollout_results: Dict[str, Dict[str, int]]):
         """
         Log detailed performance against each opponent.
-        Format: agent name: Rollout : WR% (W-L-D) Total : WR% (W-L-D)
+        Format: opponent: Rollout WR% (Ag Wins - Ag Losses - Draws) Total WR% (Ag Wins - Ag Losses - Draws)
         """
         if self.verbose <= 0:
             return
 
-        print("League Detailed Info")
+        print("\n" + "="*100)
+        print(f"{'Opponent Name':25} | {'Rollout (Agent Wins-Losses-Draws)':^35} | {'Total (Agent Wins-Losses-Draws)':^32}")
+        print("-" * 100)
         
         # Sort opponents: baselines first, then models by age
         sorted_names = sorted(
@@ -130,7 +132,7 @@ class LeagueLogger:
             r_total = rw + rl + rd
             r_wr = (rl / r_total * 100) if r_total > 0 else 50.0
             
-            # Agent Perspective: WR% is based on opponent's losses
-            print(f"{name:25} | Rollout: {r_wr:5.1f}% ({rl}-{rw}-{rd}) | Total: {t_wr:5.1f}% ({tl}-{tw}-{td})")
+            # Agent Perspective: WR% is based on opponent's losses (which are agent's wins)
+            print(f"{name:25} |  {r_wr:5.1f}% ({rl:3}-{rw:3}-{rd:3}) |  {t_wr:5.1f}% ({tl:5}-{tw:5}-{td:5})")
             
-        print("="*90 + "\n")
+        print("="*100 + "\n")

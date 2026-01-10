@@ -58,6 +58,9 @@ class OpponentPool:
             data["wins"] = 0
             data["losses"] = 0
             data["draws"] = 0
+            data["total_wins"] = 0
+            data["total_losses"] = 0
+            data["total_draws"] = 0
 
     def update_results(self, episode_results: List[Tuple[str, str]]):
         """Update win rates based on recent episode results."""
