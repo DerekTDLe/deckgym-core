@@ -1157,7 +1157,7 @@ python scripts/evaluate.py eval --model ./checkpoints/rl_bot_17000000_steps.zip 
 **Date**: 2026-01-10  
 **Model**: Pure MLP (no attention)  
 **Config**: `configs/mlp_baseline.yaml`  
-**Status**: [READY] Planned for comparison with attention foundation model
+**Status**: [IN PROGRESS] Training, comparison with attention model ongoing
 
 ### Objectives
 
@@ -1175,3 +1175,204 @@ python scripts/evaluate.py eval --model ./checkpoints/rl_bot_17000000_steps.zip 
     - Stage 3 (2M steps): `er`, `o1t` (Hard)
     - Stage 4 (5M steps): `e2`, `o1t` (Final Boss)
 - **Brutal Resume**: Supported for skipping stages in future fine-tuning.
+
+---
+
+### 🔥 CRITICAL FINDINGS: MLP vs Attention Head-to-Head (2026-01-10)
+
+After just 5M steps, the MLP model is **crushing** the 26M-step Attention baseline with **+75% winrate** in head-to-head battles.
+
+#### The Paradox
+
+| Matchup | Attention | MLP |
+|---------|-----------|-----|
+| **vs e2** (optimal play) | **40%** ✅ | 35% |
+| **vs MLP (head-to-head)** | 25% | **75% ✅** |
+| **Explained Variance** | **0.75** ✅ | 0.65 |
+
+**This is NOT a bug** — it's a classic case of **exploitation vs generalization**.
+
+#### Root Cause Analysis
+
+##### 1. Attention is UNDERSIZED (Bottleneck Problem)
+
+The `attention_baseline.yaml` config has a **massive bottleneck**:
+
+```
+attention_baseline.yaml:
+  net_arch:
+    pi: [256, 128]   # ← ONLY 200K params in policy head!
+    vf: [256, 128]
+
+mlp_baseline.yaml:
+  net_arch:
+    pi: [1024, 512, 256, 128]  # ← 3M params in policy head
+    vf: [1024, 512, 256]
+```
+
+The attention model has **3.3M params in feature extractor** feeding into a **200K param bottleneck** — massive information loss!
+
+##### 2. Model Capacity Comparison
+
+| Model | Total Params | Feature Extractor | Policy/Value Heads |
+|-------|--------------|-------------------|-------------------|
+| **Attention** | 3.7M | 3.3M | 200K (bottleneck!) |
+| **MLP** | 5.9M | 0 (flatten) | 5.9M |
+
+**MLP has 60% more actionable parameters** for decision-making.
+
+##### 3. Hyperparameter Differences
+
+| Param | Attention | MLP |
+|-------|-----------|-----|
+| Learning Rate | 1e-5 | 3e-5 (3x higher) |
+| n_steps | 64 | 128 (2x larger) |
+| batch_size | 1024 | 2048 (2x larger) |
+| Speed | 1x | 4x faster |
+
+Full explanation in [attention_enhanced.yaml](configs/attention_enhanced.yaml)
+
+**MLP trains 4x faster** with 3x higher learning rate.
+
+#### Why Attention Still Generalizes Better
+
+Despite losing H2H, attention shows **better fundamentals**:
+
+1. **Higher Explained Variance** (0.75 vs 0.65) — better value prediction in stochastic game
+2. **Better vs Optimal Play** (40% vs 35% against e2) — more coherent strategies
+3. **Learning the Game** vs **Exploiting Opponents**
+
+**Conclusion**: MLP learned to **exploit NN weaknesses**, not play optimally. Attention learned more **fundamental strategies** that transfer to optimal opponents.
+
+#### Fix: `attention_enhanced.yaml`
+
+New config addressing the bottleneck:
+
+```yaml
+model:
+  # Same attention architecture (proven to generalize)
+  attention_embed_dim: 256
+  attention_num_heads: 8
+  attention_num_layers: 3
+  
+  # BIGGER heads to avoid bottleneck
+  net_arch:
+    pi: [512, 256, 128]  # was [256, 128]
+    vf: [512, 256]       # was [256, 128]
+
+ppo:
+  learning_rate: 2e-05   # was 1e-05 (too conservative)
+  n_steps: 128           # was 64
+  batch_size: 2048       # was 1024
+```
+
+#### New Curriculum Strategy
+
+To build a model that **both generalizes AND resists exploitation**:
+
+```python
+# Order: Coherence first, anti-exploit second
+pfsp_baseline_curriculum = [
+    (0, ["v", "w"]),                    # Warmup
+    (500_000, ["aa", "er"]),            # Medium
+    (2_000_000, ["er", "o2t"]),         # Attention anchor (coherence)
+    (5_000_000, ["o2t", "o1t"]),        # Both NN styles
+    (10_000_000, ["e2", "o1t", "o2t"]), # Boss + both anchors
+]
+```
+
+Where:
+- `o1t` = MLP (exploitation style)
+- `o2t` = Attention (coherence/generalization style)
+
+**Goal**: New attention model learns coherent play from o2, then learns to resist MLP exploits from o1.
+
+#### Key Takeaways
+
+1. **MLP's +75% WR is an exploit**, not superiority — it loses to optimal play
+2. **Attention baseline was undersized** — policy head bottleneck
+3. **Explained variance tells the truth** — attention understands the game better
+4. **Curriculum matters** — include both NN styles to avoid blind spots
+5. **New enhanced config ready** — fixes bottleneck and hyperparameters
+
+---
+
+## Run #12: Optimized Attention with Bottleneck Fix (PLANNED)
+
+**Date**: 2026-01-XX (after Run #11 MLP completes)  
+**Model**: Attention-based (bottleneck fixed)  
+**Config**: `configs/attention_enhanced.yaml`  
+**Status**: [PLANNED] Waiting for MLP to finish training
+
+### Motivation
+
+Run #11 revealed that the attention baseline was too **undersized**, not broken:
+- 3.3M params in feature extractor → 200K params in policy head (**14.9x compression!**)
+- MLP wins H2H by exploiting this bottleneck, not by being fundamentally better
+- Attention still generalizes better (40% vs 35% against e2, 0.75 vs 0.65 explained variance)
+
+### Configuration Changes
+
+| Parameter | Baseline | Enhanced | Rationale |
+|-----------|----------|----------|-----------|
+| `attention_pool_queries` | 4 | **6** | More card groupings, richer representation |
+| `attention_output_proj_factor` | 2 | **3** | Output 768 dims → 960 total features |
+| `attention_global_proj_dim` | 128 | **192** | Better global state representation |
+| `policy_layers` | [256,128] | **[512,384,256]** | **THE FIX**: 833K params vs 220K |
+| `value_layers` | [256,128] | **[512,384]** | Matching value capacity |
+| `learning_rate` | 1e-5 | **2e-5** | Less conservative, MLP uses 3e-5 |
+| `n_steps` | 64 | **128** | Larger rollouts, better advantage estimation |
+| `batch_size` | 1024 | **2048** | Larger batches, stabler gradients |
+| `n_epochs` | 8 | **6** | Fewer epochs with higher LR |
+| `ent_coef` | 0.02 | **0.025** | Slightly more exploration |
+| `target_kl` | 0.015 | **0.012** | Stricter early stopping |
+
+### Bottleneck Resolution
+
+```
+BEFORE: Extractor → Head = 14.9x compression (MASSIVE bottleneck!)
+AFTER:  Extractor → Head = 4.8x compression (reasonable)
+```
+
+### Model Capacity Comparison
+
+| Model | Total Params | Feature Extractor | Policy Head | Ratio |
+|-------|--------------|-------------------|-------------|-------|
+| **Attention Baseline** | 3.7M | 3.3M | 220K | 14.9x |
+| **Attention Enhanced** | 5.5M | 4.0M | 833K | 4.8x |
+| **MLP Baseline** | 5.9M | 0 | 5.9M | 1.0x |
+
+### Curriculum Strategy
+
+Uses the new dynamic curriculum from `config.py`:
+
+```python
+pfsp_baseline_curriculum = [
+    (0, ["v", "w"]),                    # Stage 1: Warmup
+    (500_000, ["aa", "er"]),            # Stage 2: Medium
+    (2_000_000, ["er", "o2t"]),         # Stage 3: Attention anchor (coherence)
+    (5_000_000, ["o2t", "o1t"]),        # Stage 4: Both NN styles
+    (10_000_000, ["e2", "o1t", "o2t"]), # Stage 5: Boss + both anchors
+]
+```
+
+Order rationale: **Learn coherence first (o2), then resist exploits (o1)**.
+
+### Expected Outcomes
+
+1. **Beat MLP H2H**: Fixed bottleneck should prevent exploitation
+2. **Maintain generalization**: Keep 40%+ vs e2 (vs MLP's 35%)
+3. **Maintain explained variance**: Keep 0.75+ (vs MLP's 0.65)
+4. **Faster convergence**: Higher LR + larger batches
+5. **More stable**: Stricter target_kl, better capacity balance
+
+### Success Criteria
+
+- [ ] Beat MLP baseline H2H (>55% WR)
+- [ ] Maintain or improve vs e2 (>40% WR)
+- [ ] Explained variance > 0.72
+
+### Dependencies
+
+- **Requires**: Run #11 MLP model exported as ONNX (`o1t`)
+- **Uses**: Current attention model as `o2t`
