@@ -193,7 +193,8 @@ impl Simulation {
                     self.deck_a.clone(),
                     self.deck_b.clone(),
                     self.player_codes.clone(),
-                ).expect("Failed to create players")
+                )
+                .expect("Failed to create players")
             };
             let seed = self.seed.unwrap_or(rand::random::<u64>());
             let game_id = Uuid::new_v4();

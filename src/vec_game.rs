@@ -70,7 +70,8 @@ impl EnvInstance {
                 parse_player_code("r").unwrap(), // Player 0: random (agent controls)
                 parse_player_code(opp_type).unwrap(), // Player 1: bot
             ];
-            create_players(deck_a_parsed.clone(), deck_b_parsed.clone(), player_codes).expect("Failed to create players")
+            create_players(deck_a_parsed.clone(), deck_b_parsed.clone(), player_codes)
+                .expect("Failed to create players")
         });
 
         Self {
@@ -96,7 +97,10 @@ impl EnvInstance {
                     parse_player_code("r").unwrap(),
                     parse_player_code(opp_type).unwrap(),
                 ];
-                self.players = Some(create_players(deck_a_parsed, deck_b_parsed, player_codes).expect("Failed to create players"));
+                self.players = Some(
+                    create_players(deck_a_parsed, deck_b_parsed, player_codes)
+                        .expect("Failed to create players"),
+                );
             }
         }
     }
@@ -416,7 +420,10 @@ impl VecGame {
             ];
 
             self.envs[env_idx].opponent_type = Some(bot_code.clone());
-            self.envs[env_idx].players = Some(create_players(deck_a, deck_b, player_codes).map_err(|e| format!("Failed to create baseline players: {}", e))?);
+            self.envs[env_idx].players = Some(
+                create_players(deck_a, deck_b, player_codes)
+                    .map_err(|e| format!("Failed to create baseline players: {}", e))?,
+            );
             self.env_opponent_indices[env_idx] = None; // Not using ONNX pool index
 
             return Ok(());

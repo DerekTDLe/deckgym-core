@@ -14,7 +14,7 @@ from deckgym.league.pool import OpponentPool
 class OpponentSelector:
     """
     Handles the logic for selecting opponents for each training environment.
-    
+
     Responsibilities:
     - Calculating PFSP priorities based on winrates.
     - Managing baseline curriculum stages.
@@ -36,17 +36,27 @@ class OpponentSelector:
         self.baseline_max_allocation = baseline_max_allocation
         self.n_envs = n_envs
         self.brutal_resume = brutal_resume
-        
+
         self.current_baselines: List[str] = []
-    
+
     @property
     def baseline_envs_count(self) -> int:
         """Dynamic baseline env count based on current curriculum stage."""
         if not self.current_baselines:
             return 0
         # Scale envs by number of baselines in current stage
-        per_baseline = max(1, int(self.n_envs * self.baseline_max_allocation / max(1, len(self.current_baselines))))
-        return min(per_baseline * len(self.current_baselines), int(self.n_envs * self.baseline_max_allocation))
+        per_baseline = max(
+            1,
+            int(
+                self.n_envs
+                * self.baseline_max_allocation
+                / max(1, len(self.current_baselines))
+            ),
+        )
+        return min(
+            per_baseline * len(self.current_baselines),
+            int(self.n_envs * self.baseline_max_allocation),
+        )
 
     def update_curriculum(self, current_step: int) -> Tuple[List[str], List[str]]:
         """
@@ -61,13 +71,13 @@ class OpponentSelector:
             if self.brutal_resume or current_step >= step_threshold:
                 new_baselines = baselines
                 break
-        
+
         if set(new_baselines) == set(self.current_baselines):
             return [], []
-            
+
         removed = list(set(self.current_baselines) - set(new_baselines))
         added = list(set(new_baselines) - set(self.current_baselines))
-        
+
         self.current_baselines = new_baselines
         return added, removed
 
@@ -75,22 +85,22 @@ class OpponentSelector:
         """Calculate PFSP priorities for opponents in the pool."""
         pool_data = self.pool.opponents
         priorities = {}
-        
+
         for name, data in pool_data.items():
             if exclude_baselines and data.get("is_baseline", False):
                 continue
-                
+
             total = data["wins"] + data["losses"] + data["draws"]
             # Laplace smoothing: (wins + 1) / (total + 2)
             opp_winrate = (data["wins"] + 1) / (total + 2)
             priorities[name] = float(opp_winrate**self.priority_exponent)
-            
+
         return priorities
 
     def select_opponent_pfsp(self, exclude_baselines: bool = False) -> Optional[str]:
         """Select an opponent using PFSP probabilities."""
         priorities = self.get_priorities(exclude_baselines=exclude_baselines)
-        
+
         if not priorities:
             # Fallback to any opponent if filtered pool is empty
             if exclude_baselines:
@@ -100,7 +110,7 @@ class OpponentSelector:
 
         total_priority = sum(priorities.values())
         names = list(priorities.keys())
-        
+
         if total_priority <= 0:
             return np.random.choice(names)
 
@@ -113,7 +123,7 @@ class OpponentSelector:
         First N envs are reserved for baselines.
         """
         baseline_names = [f"baseline_{bl}" for bl in self.current_baselines]
-        
+
         if env_idx < self.baseline_envs_count and baseline_names:
             # Reserved for baselines - uniform selection
             return np.random.choice(baseline_names)

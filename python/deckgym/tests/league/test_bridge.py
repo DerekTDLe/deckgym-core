@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 from deckgym.league.bridge import LeagueBridge
 
+
 class TestLeagueBridge(unittest.TestCase):
     def setUp(self):
         # Mocking the Rust-side vec_game
@@ -20,7 +21,9 @@ class TestLeagueBridge(unittest.TestCase):
 
     def test_add_onnx_to_rust(self):
         self.bridge.add_onnx_to_rust("m1", "/path/to/m1.onnx")
-        self.mock_game.add_onnx_to_pool.assert_called_with("m1", "/path/to/m1.onnx", False, "trt")
+        self.mock_game.add_onnx_to_pool.assert_called_with(
+            "m1", "/path/to/m1.onnx", False, "trt"
+        )
 
     def test_add_baseline_to_rust(self):
         self.bridge.add_baseline_to_rust("b1", "e2")
@@ -37,6 +40,7 @@ class TestLeagueBridge(unittest.TestCase):
     def test_assign_to_env(self):
         self.bridge.assign_to_env(0, "m1")
         self.mock_game.set_env_opponent.assert_called_with(0, "m1")
+
 
 if __name__ == "__main__":
     unittest.main()

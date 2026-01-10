@@ -67,7 +67,7 @@ TRUESKILL_TAU = 0  # Dynamic factor
 TRUESKILL_DRAW_PROBABILITY = 0.01  # Probability of draw
 
 # Default evaluation games
-N_ROBIN_ROUNDS = 10 # Brute force for precision
+N_ROBIN_ROUNDS = 10  # Brute force for precision
 EVAL_REPORTS_DIR = "eval_reports"
 EVAL_DEFAULT_DEVICE = "trt"
 
@@ -217,11 +217,11 @@ class TrainingConfig:
     # Order: Learn coherence first (o2/attention), then resist exploits (o1/MLP)
     pfsp_baseline_curriculum: List[Tuple[int, List[str]]] = field(
         default_factory=lambda: [
-            (0, ["v", "w"]),                   # Stage 1: Easy warmup (0-500k)
-            (500_000, ["aa", "er"]),           # Stage 2: Medium bots (500k-2M)
-            (2_000_000, ["er", "o2t"]),        # Stage 3: Attention anchor (2M-5M)
-            (5_000_000, ["o2t", "o1t"]),       # Stage 4: Both NN styles (5M-10M)
-            (10_000_000, ["e2", "o1t", "o2t"]),# Stage 5: Boss + both anchors (10M+)
+            (0, ["v", "w"]),  # Stage 1: Easy warmup (0-500k)
+            (500_000, ["aa", "er"]),  # Stage 2: Medium bots (500k-2M)
+            (2_000_000, ["er", "o2t"]),  # Stage 3: Attention anchor (2M-5M)
+            (5_000_000, ["o2t", "o1t"]),  # Stage 4: Both NN styles (5M-10M)
+            (10_000_000, ["e2", "o1t", "o2t"]),  # Stage 5: Boss + both anchors (10M+)
         ]
     )
 

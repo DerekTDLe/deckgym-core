@@ -2,7 +2,7 @@
 """
 Opponent Pool Management for League Training.
 
-Handles the collection of checkpoints and baselines, including statistics 
+Handles the collection of checkpoints and baselines, including statistics
 tracking and eviction logic.
 """
 
@@ -17,7 +17,7 @@ from deckgym.config import PFSP_NEUTRAL_WINRATE
 class OpponentPool:
     """
     Manages the pool of opponents (checkpoints and baselines).
-    
+
     Responsibilities:
     - Maintaining the set of active opponents.
     - Tracking win/loss/draw statistics.
@@ -28,7 +28,7 @@ class OpponentPool:
         self.pool_size = pool_size
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # {name: {"path": str, "onnx_path": str, "wins": int, "losses": int, "draws": int, "added_at_step": int, "is_baseline": bool, "baseline_code": str}}
         self.opponents: Dict[str, Dict] = {}
 
@@ -86,26 +86,29 @@ class OpponentPool:
                 data["losses"] = round(data["losses"] * scale)
                 data["draws"] = round(data["draws"] * scale)
 
-    def get_eviction_candidates(self, exclude_names: List[str] = None) -> List[Tuple[str, float, int]]:
+    def get_eviction_candidates(
+        self, exclude_names: List[str] = None
+    ) -> List[Tuple[str, float, int]]:
         """
         Get non-baseline opponents ranked for eviction.
         Returns: List of (name, priority, added_at_step)
         """
         exclude_names = exclude_names or []
-        
+
         # Filter for models (non-baselines) that aren't excluded
         models = {
-            n: d for n, d in self.opponents.items() 
+            n: d
+            for n, d in self.opponents.items()
             if not d.get("is_baseline", False) and n not in exclude_names
         }
-        
+
         candidates = []
         for name, data in models.items():
             total = data["wins"] + data["losses"] + data["draws"]
             # We use a simple winrate for eviction sorting (priorities are for selection)
             winrate = (data["wins"] + 1) / (total + 2)
             candidates.append((name, winrate, int(data.get("added_at_step", 0))))
-            
+
         # Sort by winrate (lowest first), then age (oldest first)
         candidates.sort(key=lambda x: (x[1], x[2]))
         return candidates
@@ -116,7 +119,7 @@ class OpponentPool:
             p = Path(data["path"])
             if p.exists():
                 p.unlink()
-        
+
         if data.get("onnx_path"):
             p = Path(data["onnx_path"])
             if p.exists():
@@ -132,4 +135,6 @@ class OpponentPool:
 
     @property
     def baseline_codes(self) -> List[str]:
-        return [d["baseline_code"] for d in self.opponents.values() if d.get("is_baseline")]
+        return [
+            d["baseline_code"] for d in self.opponents.values() if d.get("is_baseline")
+        ]
