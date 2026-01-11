@@ -190,7 +190,9 @@ class PFSPCallback(BaseCallback):
             if sp_winrate >= min_wr_to_add or self.pool.model_count < 2:
                 self._add_to_pool()
 
+            # Reset all stats at each refresh (even if agent not added)
             self.pool.reset_statistics()
+            self.pool.reset_total_statistics()
 
     def _on_step(self) -> bool:
         """Called at each env step - track outcomes and reassign."""

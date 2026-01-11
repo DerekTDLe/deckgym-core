@@ -53,11 +53,18 @@ class OpponentPool:
         return self.opponents.get(name)
 
     def reset_statistics(self):
-        """Reset win/loss/draw statistics for all opponents."""
+        """Reset per-rollout win/loss/draw statistics for all opponents."""
         for data in self.opponents.values():
             data["wins"] = 0
             data["losses"] = 0
             data["draws"] = 0
+
+    def reset_total_statistics(self):
+        """Reset total (cumulative) statistics for all opponents.
+        
+        Call this when pool composition changes (eviction/addition).
+        """
+        for data in self.opponents.values():
             data["total_wins"] = 0
             data["total_losses"] = 0
             data["total_draws"] = 0
