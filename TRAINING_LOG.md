@@ -598,10 +598,10 @@ Run #5 successfully validated all modern Transformer improvements:
 
 ## Run #6: Multi-Head Pooling Architecture
 
-**Date**: 2026-01-07 (pending)  
+**Date**: 2026-01-07 (ended)  
 **Model**: Attention-based (multi-head pooling)  
 **Config**: `configs/large_model_3.yaml` (updated)  
-**Status**: [READY] Awaiting launch
+**Status**: [ENDED]
 
 ### Architectural Changes from Run #5
 
@@ -712,7 +712,7 @@ The 4 queries can specialize in different aspects:
 **Date**: 2026-01-07 (Launched)  
 **Model**: Multi-Head Attention (Run #6 architecture refined)  
 **Config**: `configs/baseline.yaml`  
-**Status**: [IN PROGRESS] Transitioned to pure self-play
+**Status**: [ENDED] Transitioned to pure self-play
 
 ### Key Changes (Major Refactor)
 
@@ -1157,7 +1157,11 @@ python scripts/evaluate.py eval --model ./checkpoints/rl_bot_17000000_steps.zip 
 **Date**: 2026-01-10  
 **Model**: Pure MLP (no attention)  
 **Config**: `configs/mlp_baseline.yaml`  
-**Status**: [IN PROGRESS] Training, comparison with attention model ongoing
+**Status**: ✅ [COMPLETED] Crushed attention baseline
+
+### Final Results
+
+Run #11 completed on 2026-01-10. The MLP model decisively beat the attention baseline in head-to-head, validating that the attention architecture had a bottleneck issue rather than a fundamental advantage.
 
 ### Objectives
 
@@ -1297,12 +1301,53 @@ Where:
 
 ---
 
-## Run #12: Optimized Attention with Bottleneck Fix (PLANNED)
+## Run #12: Optimized Attention with Bottleneck Fix
 
-**Date**: 2026-01-XX (after Run #11 MLP completes)  
+**Date**: 2026-01-10 (started)  
 **Model**: Attention-based (bottleneck fixed)  
 **Config**: `configs/attention_enhanced.yaml`  
-**Status**: [PLANNED] Waiting for MLP to finish training
+**Status**: 🔥 [IN PROGRESS] Crushing both baselines
+
+### 🚀 Breakthrough Results
+
+Run #12 is showing **significant improvements** over all previous runs:
+
+| Metric | MLP (Run #11) | Attention Baseline | **Run #12** |
+|--------|---------------|-------------------|-------------|
+| **vs e2 (WR)** | 35% (max) | 40% | **50%** ✅ |
+| **Explained Variance** | 0.65 | 0.75 | 0.70 |
+
+> [!IMPORTANT]
+> **50% WR against e2 is significant** — e2 (Expectiminimax depth 2) is omniscient across 2 turns. Matching it means the RL agent is playing near-optimal in many situations.
+
+### Training Dynamics Observations
+
+#### Consistent Training Patterns Across Models
+
+All modern runs (Run #10+) show remarkably similar training dynamics:
+
+| Metric | Trend |
+|--------|-------|
+| `approx_kl` | Peaks at ~7M steps, then linearly decreases |
+| `clip_fraction` | Peaks at ~7M steps, then linearly decreases |
+| `loss`, `value_loss`, `entropy_loss` | Nearly identical curves across models |
+| `action_per_turn_mean` | Very close across all models |
+| `ep_len_mean` | MLP ~2pts higher than attention models |
+
+#### Key Differences
+
+| Metric | MLP | Attention |
+|--------|-----|-----------|
+| `explained_variance` | -0.05 worse | Better |
+| `approx_kl` peak | ~3x lower | Higher |
+| `clip_fraction` peak | ~3x lower | Higher |
+
+**Interpretation**: MLP has smoother policy updates (lower KL/clipping), but attention models learn value functions better (higher explained variance).
+
+### Convergence Note
+
+> [!NOTE]
+> 30M steps is sufficient to "bake" model behavior but not for full convergence. Models continue improving slowly past 30M.
 
 ### Motivation
 
