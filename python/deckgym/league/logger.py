@@ -151,8 +151,7 @@ class LeagueLogger:
         Agent winrate against ALL opponents EXCEPT omniscient bots.
         Includes: self-play, fair baselines, ONNX models.
         
-        If rollout_results is provided, calculates from current rollout only.
-        Otherwise uses cumulative stats.
+        Uses weighted average (by games played), not simple mean of winrates.
         """
         names = []
         for name, data in self.pool.opponents.items():
@@ -165,20 +164,31 @@ class LeagueLogger:
         if not names:
             return 0.5
 
+        total_wins = 0
+        total_games = 0
+
         if rollout_results is not None:
-            # Per-rollout calculation
-            winrates = []
+            # Per-rollout calculation (weighted)
             for n in names:
-                wr = self._get_winrate_from_rollout(n, rollout_results)
-                if wr is not None:
-                    winrates.append(wr)
-            if winrates:
-                return float(np.mean(winrates))
-            return 0.5
+                if n in rollout_results:
+                    r = rollout_results[n]
+                    games = r["wins"] + r["losses"] + r["draws"]
+                    agent_wins = r["losses"]  # Agent wins = opponent losses
+                    total_wins += agent_wins
+                    total_games += games
         else:
-            # Cumulative calculation
-            winrates = [self._get_winrate(n) for n in names]
-            return float(np.mean(winrates))
+            # Cumulative calculation (weighted)
+            for n in names:
+                data = self.pool.get_data(n)
+                if data:
+                    games = data["wins"] + data["losses"] + data["draws"]
+                    agent_wins = data["losses"]
+                    total_wins += agent_wins
+                    total_games += games
+
+        if total_games > 0:
+            return total_wins / total_games
+        return 0.5
 
     def get_e2_winrate(
         self, rollout_results: Optional[Dict[str, Dict[str, int]]] = None
