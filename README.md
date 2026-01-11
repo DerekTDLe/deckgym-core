@@ -240,9 +240,9 @@ The agent learns through continuous self-play against its own previous versions 
 | Tier | Participant | Win% | Rating | Steps |
 |:----:|-------------|-----:|-------:|------:|
 | **S+** | **Expectiminimax(2)** 🎯 | 79.0% | 1765 | — |
-| **S** | Attention (30M) | 69.8% | 1659 | 30M |
+| **S** | Attention (last) | 69.8% | 1659 | 30M |
 | **S** | Attention (best) | 68.5% | 1648 | 26.6M |
-| **A** | MLP (3M) | 65.8% | 1620 | 3M |
+| **A** | MLP (last) | 65.8% | 1620 | 30M |
 | **A** | MLP (best) | 65.3% | 1614 | 28.7M |
 | **B** | MLP (outlier) | 59.0% | 1552 | 3.5M |
 | **B** | MLP (first beat ER) | 54.5% | 1513 | — |

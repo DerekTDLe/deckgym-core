@@ -192,7 +192,7 @@ The default curriculum progressively introduces harder opponents:
 The evaluation system in `evaluate.py` has been simplified into a professional tournament tool using **TrueSkill** (revamped from Elo).
 
 ### 1. Tournament Format
-- **Round Robin x5**: The `bench` command runs 5 full Round Robin cycles. Every participant plays every other participant, ensuring statistical significance.
+- **Round Robin xN**: The `bench` command runs `N` full Round Robin cycles. Every participant plays every other participant, ensuring statistical significance. Set standard here is around 100.
 - **Unique Deck Sampling**: For every single match, two unique decks are sampled via `MetaDeckLoader`. This prevents models from over-fitting to specific matchups or deck variants.
 - **Fixed Model Environment**: TrueSkill parameters are tuned for rating static checkpoints:
   - `mu=1500`, `sigma=500` (Initial state)
@@ -226,7 +226,8 @@ With [mlp_baseline.yaml](configs/mlp_baseline.yaml) presets
 
 Attention:
 With [attention_baseline.yaml](configs/attention_baseline.yaml) presets
-~440 it/s (on RTX 3050).
+or [attention_enhanced.yaml](configs/attention_enhanced.yaml) presets
+~440 it/s .
 
 - **Adaptability**: Training now uses pure self-play by default, sampling from 1k+ meta decks via `MetaDeckLoader`.
 
@@ -237,4 +238,3 @@ python python/scripts/train.py --config configs/baseline.yaml
 ## TODO
 
 - For the card features, implement a more refined feature about evolution, if it can evolve at all, what is the final stage (1,2)?, is it the final stage?, etc.
-- [!] Important Issue and oversight : [meta_deck.json](meta_deck.json) does not specify energy types, this is not a problem since the simulator choose the "optimal ones", but it can miss some nuances, especially for unusual decks (Lopunny-Magnezone(B2) for example is Fighting only, not electric) and allow things like "Colorless" and "Dragon" energy that are not allowed to be generated in a deck in the actual game, thus bricking multi-type decks. Maybe the solution is to specify it for each archetypes? Will look at that.
