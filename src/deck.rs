@@ -61,13 +61,9 @@ impl Deck {
             cards.extend(vec![card; count as usize]);
         }
 
-        // If empty energy types set, populate it with the energy types from the cards
+        // If empty energy types set, infer from attack costs using expert heuristic
         if energy_types.is_empty() {
-            cards.iter().for_each(|x| {
-                if let Card::Pokemon(pokemon_card) = x {
-                    energy_types.insert(pokemon_card.energy_type);
-                }
-            });
+            energy_types = Self::infer_energy_types_from_attacks(&cards);
         }
 
         Ok(Self {
@@ -126,6 +122,140 @@ impl Deck {
         } else {
             self.cards.shuffle(rng);
         }
+    }
+
+    /// Expert heuristic for inferring deck energy types from attack costs.
+    /// 
+    /// Algorithm:
+    /// 1. Analyze attack costs (prefer 2nd attack), excluding splashable/self-charging Pokemon
+    /// 2. If no types found: re-include passe-partout, find baby types, exclude them, use remaining
+    /// 3. Fallback to card energy_type field if single non-Colorless type
+    /// 4. If Irida trainer present → Water
+    /// 5. Ultimate fallback → Lightning
+    fn infer_energy_types_from_attacks(cards: &[Card]) -> HashSet<EnergyType> {
+        // Pokemon to exclude from initial analysis (splashable + self-charging)
+        const EXCLUDED_POKEMON: &[&str] = &[
+            // Splashable (passe-partout)
+            "Froakie", "Frogadier", "Greninja", "Greninja ex",
+            "Druddigon", "Oricorio", "Sylveon ex", "Decidueye ex",
+            // Self-charging abilities
+            "Magnemite", "Magneton", "Magnezone",
+            "Ralts", "Kirlia", "Gardevoir",
+            "Leafeon ex", "Flareon ex", "Charmeleon",
+            "Giratina ex", "Zeraora",
+            "Deino", "Zweilous", "Hydreigon",
+            // Self-charging attacks
+            "Manaphy", "Moltres ex",
+        ];
+
+        // Passe-partout cards (subset that we re-include in step 2)
+        const PASSE_PARTOUT: &[&str] = &[
+            "Froakie", "Frogadier", "Greninja", "Greninja ex",
+            "Druddigon", "Oricorio", "Sylveon ex", "Decidueye ex",
+        ];
+
+        // Helper: get non-Colorless energy types from attack (prefer 2nd attack)
+        let get_attack_energies = |pokemon: &crate::models::PokemonCard| -> Vec<EnergyType> {
+            let attack = if pokemon.attacks.len() > 1 {
+                &pokemon.attacks[1]
+            } else if !pokemon.attacks.is_empty() {
+                &pokemon.attacks[0]
+            } else {
+                return vec![];
+            };
+            attack
+                .energy_required
+                .iter()
+                .filter(|e| **e != EnergyType::Colorless)
+                .copied()
+                .collect()
+        };
+
+        // Helper: check if Pokemon is a "baby" (basic with no attacks or colorless-only)
+        let is_baby = |pokemon: &crate::models::PokemonCard| -> bool {
+            if pokemon.stage != 0 {
+                return false;
+            }
+            // Check if all attacks are colorless-only
+            pokemon.attacks.iter().all(|atk| {
+                atk.energy_required.is_empty()
+            })
+        };
+
+        // Step 1: Analyze attack costs, excluding specific cards
+        let mut energy_types: HashSet<EnergyType> = HashSet::new();
+        for card in cards {
+            if let Card::Pokemon(pokemon) = card {
+                if EXCLUDED_POKEMON.contains(&pokemon.name.as_str()) {
+                    continue;
+                }
+                for energy in get_attack_energies(pokemon) {
+                    energy_types.insert(energy);
+                }
+            }
+        }
+
+        if !energy_types.is_empty() {
+            return energy_types;
+        }
+
+        // Step 2: No types found - re-include passe-partout, exclude baby types
+        let mut baby_types: HashSet<EnergyType> = HashSet::new();
+        let mut passe_partout_types: HashSet<EnergyType> = HashSet::new();
+
+        for card in cards {
+            if let Card::Pokemon(pokemon) = card {
+                if is_baby(pokemon) {
+                    baby_types.insert(pokemon.energy_type);
+                }
+                if PASSE_PARTOUT.contains(&pokemon.name.as_str()) {
+                    for energy in get_attack_energies(pokemon) {
+                        passe_partout_types.insert(energy);
+                    }
+                }
+            }
+        }
+
+        // Remove baby types from passe-partout types
+        for bt in &baby_types {
+            passe_partout_types.remove(bt);
+        }
+
+        if !passe_partout_types.is_empty() {
+            return passe_partout_types;
+        }
+
+        // Step 3: Fallback to card energy_type field
+        let mut card_types: HashSet<EnergyType> = HashSet::new();
+        for card in cards {
+            if let Card::Pokemon(pokemon) = card {
+                if pokemon.energy_type != EnergyType::Colorless {
+                    card_types.insert(pokemon.energy_type);
+                }
+            }
+        }
+        if card_types.len() == 1 {
+            return card_types;
+        }
+
+        // Step 4: Check for Irida trainer → Water
+        let has_irida = cards.iter().any(|card| {
+            if let Card::Trainer(trainer) = card {
+                trainer.name == "Irida"
+            } else {
+                false
+            }
+        });
+        if has_irida {
+            let mut result = HashSet::new();
+            result.insert(EnergyType::Water);
+            return result;
+        }
+
+        // Step 5: Ultimate fallback → Lightning
+        let mut result = HashSet::new();
+        result.insert(EnergyType::Lightning);
+        result
     }
 }
 
@@ -273,5 +403,96 @@ Trainer: 12
 2 Professor's Research P-A 7"#;
         let deck = Deck::from_string(string).expect("Failed to parse deck from string");
         assert_eq!(deck.cards.len(), 20);
+    }
+
+    #[test]
+    fn test_infer_energy_from_attacks_water() {
+        // Deck with Water pokemon (Suicune ex), no Energy: line
+        // Suicune ex has Water attacks, should infer Water type
+        let string = r#"2 Suicune ex A4a 20
+2 Suicune ex A4a 20
+2 Suicune ex A4a 20
+2 Suicune ex A4a 20
+2 Suicune ex A4a 20
+2 Suicune ex A4a 20
+2 Suicune ex A4a 20
+2 Professor's Research P-A 007
+2 Poké Ball P-A 005
+2 Potion P-A 001"#;
+        let deck = Deck::from_string(string).expect("Failed to parse deck");
+        assert!(deck.energy_types.contains(&EnergyType::Water));
+    }
+
+    #[test]
+    fn test_infer_excludes_greninja_and_uses_fallback() {
+        // Deck with only Greninja (excluded) + Irida trainer should fallback to Water
+        let string = r#"2 Froakie A1 87
+2 Frogadier A1 88
+2 Greninja A1 89
+2 Froakie A1 87
+2 Frogadier A1 88
+2 Greninja A1 89
+2 Irida A2a 72
+2 Professor's Research P-A 007
+2 Poké Ball P-A 005
+2 Potion P-A 001"#;
+        let deck = Deck::from_string(string).expect("Failed to parse deck");
+        assert!(deck.energy_types.contains(&EnergyType::Water));
+    }
+
+    #[test]
+    fn test_infer_ultimate_fallback_lightning() {
+        // Deck with only colorless Pokemon, no Irida → Lightning fallback
+        let string = r#"2 Chansey A1 107
+2 Chansey A1 107
+2 Chansey A1 107
+2 Chansey A1 107
+2 Chansey A1 107
+2 Chansey A1 107
+2 Chansey A1 107
+2 Professor's Research P-A 007
+2 Poké Ball P-A 005
+2 Potion P-A 001"#;
+        let deck = Deck::from_string(string).expect("Failed to parse deck");
+        assert!(deck.energy_types.contains(&EnergyType::Lightning));
+    }
+
+    #[test]
+    fn test_infer_passe_partout_with_baby_exclusion() {
+        // Deck with Oricorio (passe-partout), Mantyke (Water baby), Greninja line (passe-partout Water)
+        // Algorithm: exclude all passe-partout+self-charging → empty
+        // Step 2: re-include passe-partout (Greninja=Water, Oricorio=Lightning), find baby (Mantyke=Water)
+        // Exclude Water from types → Oricorio A3066 has Lightning attacks
+        let string = r#"2 Oricorio A3 66
+2 Mantyke A4a 23
+2 Froakie A1 87
+2 Frogadier A1 88
+2 Greninja A1 89
+2 Froakie A1 87
+2 Frogadier A1 88
+2 Greninja A1 89
+2 Professor's Research P-A 007
+2 Poké Ball P-A 005"#;
+        let deck = Deck::from_string(string).expect("Failed to parse deck");
+        // Should fallback to Lightning since all Water energy is excluded by Mantyke baby
+        assert!(deck.energy_types.contains(&EnergyType::Lightning));
+    }
+
+    #[test]
+    fn test_infer_giratina_darkrai_darkness() {
+        // Giratina ex is excluded (self-charging), but Darkrai ex is not
+        // Should infer Darkness type from Darkrai ex's attack costs
+        let string = r#"2 Darkrai ex A2 110
+2 Giratina ex A2b 35
+2 Darkrai ex A2 110
+2 Giratina ex A2b 35
+2 Giratina ex A2b 35
+2 Giratina ex A2b 35
+2 Professor's Research P-A 007
+2 Poké Ball P-A 005
+2 Potion P-A 001
+2 Rocky Helmet A2 148"#;
+        let deck = Deck::from_string(string).expect("Failed to parse deck");
+        assert!(deck.energy_types.contains(&EnergyType::Darkness));
     }
 }
