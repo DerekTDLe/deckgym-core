@@ -125,7 +125,7 @@ impl Deck {
     }
 
     /// Expert heuristic for inferring deck energy types from attack costs.
-    /// 
+    ///
     /// Algorithm:
     /// 1. Analyze attack costs (prefer 2nd attack), excluding splashable/self-charging Pokemon
     /// 2. If no types found: re-include passe-partout, find baby types, exclude them, use remaining
@@ -136,22 +136,44 @@ impl Deck {
         // Pokemon to exclude from initial analysis (splashable + self-charging)
         const EXCLUDED_POKEMON: &[&str] = &[
             // Splashable (passe-partout)
-            "Froakie", "Frogadier", "Greninja", "Greninja ex",
-            "Druddigon", "Oricorio", "Sylveon ex", "Decidueye ex",
+            "Froakie",
+            "Frogadier",
+            "Greninja",
+            "Greninja ex",
+            "Druddigon",
+            "Oricorio",
+            "Sylveon ex",
+            "Decidueye ex",
             // Self-charging abilities
-            "Magnemite", "Magneton", "Magnezone",
-            "Ralts", "Kirlia", "Gardevoir",
-            "Leafeon ex", "Flareon ex", "Charmeleon",
-            "Giratina ex", "Zeraora",
-            "Deino", "Zweilous", "Hydreigon",
+            "Magnemite",
+            "Magneton",
+            "Magnezone",
+            "Ralts",
+            "Kirlia",
+            "Gardevoir",
+            "Leafeon ex",
+            "Flareon ex",
+            "Charmeleon",
+            "Giratina ex",
+            "Zeraora",
+            "Deino",
+            "Zweilous",
+            "Hydreigon",
             // Self-charging attacks
-            "Manaphy", "Moltres ex",
+            "Manaphy",
+            "Moltres ex",
         ];
 
         // Passe-partout cards (subset that we re-include in step 2)
         const PASSE_PARTOUT: &[&str] = &[
-            "Froakie", "Frogadier", "Greninja", "Greninja ex",
-            "Druddigon", "Oricorio", "Sylveon ex", "Decidueye ex",
+            "Froakie",
+            "Frogadier",
+            "Greninja",
+            "Greninja ex",
+            "Druddigon",
+            "Oricorio",
+            "Sylveon ex",
+            "Decidueye ex",
         ];
 
         // Helper: get non-Colorless energy types from attack (prefer 2nd attack)
@@ -177,9 +199,10 @@ impl Deck {
                 return false;
             }
             // Check if all attacks are colorless-only
-            pokemon.attacks.iter().all(|atk| {
-                atk.energy_required.is_empty()
-            })
+            pokemon
+                .attacks
+                .iter()
+                .all(|atk| atk.energy_required.is_empty())
         };
 
         // Step 1: Analyze attack costs, excluding specific cards
