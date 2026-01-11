@@ -24,7 +24,7 @@ from deckgym.league.pool import OpponentPool
 
 def _display_width(s: str) -> int:
     """Calculate the display width of a string in terminal columns.
-    
+
     Accounts for:
     - Wide characters (CJK, emojis) that take 2 columns
     - Zero-width characters (combining marks, variation selectors)
@@ -33,18 +33,18 @@ def _display_width(s: str) -> int:
     for char in s:
         cat = unicodedata.category(char)
         # Skip zero-width characters (Mn=Mark Nonspacing, Me=Mark Enclosing, Cf=Format)
-        if cat in ('Mn', 'Me', 'Cf'):
+        if cat in ("Mn", "Me", "Cf"):
             continue
         east_asian_width = unicodedata.east_asian_width(char)
         # Wide (W) and Fullwidth (F) characters take 2 columns
-        if east_asian_width in ('W', 'F'):
+        if east_asian_width in ("W", "F"):
             width += 2
         else:
             width += 1
     return width
 
 
-def _pad_center(s: str, width: int, fillchar: str = ' ') -> str:
+def _pad_center(s: str, width: int, fillchar: str = " ") -> str:
     """Center a string to a given display width, accounting for unicode."""
     display_w = _display_width(s)
     padding = width - display_w
@@ -55,7 +55,7 @@ def _pad_center(s: str, width: int, fillchar: str = ' ') -> str:
     return fillchar * left + s + fillchar * right
 
 
-def _pad_left(s: str, width: int, fillchar: str = ' ') -> str:
+def _pad_left(s: str, width: int, fillchar: str = " ") -> str:
     """Left-align a string to a given display width, accounting for unicode."""
     display_w = _display_width(s)
     padding = width - display_w
@@ -64,7 +64,7 @@ def _pad_left(s: str, width: int, fillchar: str = ' ') -> str:
     return s + fillchar * padding
 
 
-def _pad_right(s: str, width: int, fillchar: str = ' ') -> str:
+def _pad_right(s: str, width: int, fillchar: str = " ") -> str:
     """Right-align a string to a given display width, accounting for unicode."""
     display_w = _display_width(s)
     padding = width - display_w
@@ -79,16 +79,16 @@ def _truncate_to_width(s: str, max_width: int) -> str:
     result = []
     for char in s:
         cat = unicodedata.category(char)
-        if cat in ('Mn', 'Me', 'Cf'):
+        if cat in ("Mn", "Me", "Cf"):
             char_width = 0
         else:
             east_asian_width = unicodedata.east_asian_width(char)
-            char_width = 2 if east_asian_width in ('W', 'F') else 1
+            char_width = 2 if east_asian_width in ("W", "F") else 1
         if width + char_width > max_width:
             break
         result.append(char)
         width += char_width
-    return ''.join(result)
+    return "".join(result)
 
 
 class LeagueLogger:
@@ -150,7 +150,7 @@ class LeagueLogger:
         """
         Agent winrate against ALL opponents EXCEPT omniscient bots.
         Includes: self-play, fair baselines, ONNX models.
-        
+
         Uses weighted average (by games played), not simple mean of winrates.
         """
         names = []
@@ -229,7 +229,7 @@ class LeagueLogger:
         rollout_results: Optional[Dict[str, Dict[str, int]]] = None,
     ):
         """Record league metrics to TensorBoard/Console.
-        
+
         Args:
             rollout_count: Current rollout number.
             rollout_results: Per-rollout stats {name: {wins, losses, draws}}.
@@ -257,11 +257,13 @@ class LeagueLogger:
         print(f"\n┌{'─'*col_width}┐")
         print(f"│{_pad_center('LEAGUE STATUS', col_width)}│")
         print(f"├{'─'*col_width}┤")
-        
-        pool_line = f"  Rollout: {rollout_count:<10} Pool: {self.pool.total_count} agents"
+
+        pool_line = (
+            f"  Rollout: {rollout_count:<10} Pool: {self.pool.total_count} agents"
+        )
         print(f"│{_pad_left(pool_line, col_width)}│")
         print(f"├{'─'*col_width}┤")
-        
+
         wr_global_line = f"  📊 WR Global (e2 excl.):  {global_wr:>6.1%}"
         wr_e2_line = f"  🎯 WR vs e2:              {e2_str:>6}"
         print(f"│{_pad_left(wr_global_line, col_width)}│")
@@ -292,7 +294,9 @@ class LeagueLogger:
         print(f"\n┌{'─'*total_width}┐")
         print(f"│{_pad_center('DETAILED OPPONENT BREAKDOWN', total_width)}│")
         print(f"├{'─'*col1_width}┬{'─'*col2_width}┬{'─'*col3_width}┤")
-        print(f"│{_pad_center('Opponent', col1_width)}│{_pad_center('This Rollout', col2_width)}│{_pad_center('All-Time', col3_width)}│")
+        print(
+            f"│{_pad_center('Opponent', col1_width)}│{_pad_center('This Rollout', col2_width)}│{_pad_center('All-Time', col3_width)}│"
+        )
         print(f"├{'─'*col1_width}┼{'─'*col2_width}┼{'─'*col3_width}┤")
 
         for name in sorted_names:
@@ -332,7 +336,9 @@ class LeagueLogger:
             )
             t_str = f"{t_wr:5.1f}% {tl:3}-{tw:3}-{td:3}"
 
-            print(f"│{_pad_center(display, col1_width)}│{_pad_center(r_str, col2_width)}│{_pad_center(t_str, col3_width)}│")
+            print(
+                f"│{_pad_center(display, col1_width)}│{_pad_center(r_str, col2_width)}│{_pad_center(t_str, col3_width)}│"
+            )
 
         print(f"└{'─'*col1_width}┴{'─'*col2_width}┴{'─'*col3_width}┘")
         print()

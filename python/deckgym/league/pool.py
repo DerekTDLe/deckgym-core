@@ -61,7 +61,7 @@ class OpponentPool:
 
     def reset_total_statistics(self):
         """Reset total (cumulative) statistics for all opponents.
-        
+
         Call this when pool composition changes (eviction/addition).
         """
         for data in self.opponents.values():
