@@ -233,3 +233,7 @@ With [attention_baseline.yaml](configs/attention_baseline.yaml) presets
 ```bash
 python python/scripts/train.py --config configs/baseline.yaml
 ```
+
+## TODO
+
+- For the card features, implement a more refined feature about evolution, if it can evolve at all, what is the final stage (1,2)?, is it the final stage?, etc.
