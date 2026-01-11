@@ -237,3 +237,4 @@ python python/scripts/train.py --config configs/baseline.yaml
 ## TODO
 
 - For the card features, implement a more refined feature about evolution, if it can evolve at all, what is the final stage (1,2)?, is it the final stage?, etc.
+- [!] Important Issue and oversight : [meta_deck.json](meta_deck.json) does not specify energy types, this is not a problem since the simulator choose the "optimal ones", but it can miss some nuances, especially for unusual decks (Lopunny-Magnezone(B2) for example is Fighting only, not electric) and allow things like "Colorless" and "Dragon" energy that are not allowed to be generated in a deck in the actual game, thus bricking multi-type decks. Maybe the solution is to specify it for each archetypes? Will look at that.
