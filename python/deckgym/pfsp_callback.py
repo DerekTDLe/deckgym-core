@@ -178,7 +178,7 @@ class PFSPCallback(BaseCallback):
             self.pool.update_results(self.episode_results)
             # self.pool.apply_decay(self.winrate_window) # Decay is already applied in update_results in some versions, but here it is explicit
             self.pool.apply_decay(self.winrate_window)
-            self.league_logger.log_metrics(self.rollout_count)
+            self.league_logger.log_metrics(self.rollout_count, rollout_stats)
             self.league_logger.log_detailed_info(rollout_stats)
             self.episode_results.clear()
 

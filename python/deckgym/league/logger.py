@@ -123,7 +123,7 @@ class LeagueLogger:
         return baseline_code.lower().startswith("o")
 
     def _get_winrate(self, name: str) -> float:
-        """Get agent winrate against a specific opponent."""
+        """Get agent winrate against a specific opponent (cumulative stats)."""
         data = self.pool.get_data(name)
         if not data:
             return 0.5
@@ -132,10 +132,27 @@ class LeagueLogger:
             return data["losses"] / total  # Agent wins = opponent losses
         return 0.5
 
-    def get_global_winrate(self) -> float:
+    def _get_winrate_from_rollout(
+        self, name: str, rollout_results: Dict[str, Dict[str, int]]
+    ) -> Optional[float]:
+        """Get agent winrate from current rollout results only."""
+        if name not in rollout_results:
+            return None
+        r = rollout_results[name]
+        total = r["wins"] + r["losses"] + r["draws"]
+        if total > 0:
+            return r["losses"] / total  # Agent wins = opponent losses
+        return None
+
+    def get_global_winrate(
+        self, rollout_results: Optional[Dict[str, Dict[str, int]]] = None
+    ) -> float:
         """
         Agent winrate against ALL opponents EXCEPT omniscient bots.
         Includes: self-play, fair baselines, ONNX models.
+        
+        If rollout_results is provided, calculates from current rollout only.
+        Otherwise uses cumulative stats.
         """
         names = []
         for name, data in self.pool.opponents.items():
@@ -148,27 +165,69 @@ class LeagueLogger:
         if not names:
             return 0.5
 
-        winrates = [self._get_winrate(n) for n in names]
-        return float(np.mean(winrates))
+        if rollout_results is not None:
+            # Per-rollout calculation
+            winrates = []
+            for n in names:
+                wr = self._get_winrate_from_rollout(n, rollout_results)
+                if wr is not None:
+                    winrates.append(wr)
+            if winrates:
+                return float(np.mean(winrates))
+            return 0.5
+        else:
+            # Cumulative calculation
+            winrates = [self._get_winrate(n) for n in names]
+            return float(np.mean(winrates))
 
-    def get_e2_winrate(self) -> Optional[float]:
+    def get_e2_winrate(
+        self, rollout_results: Optional[Dict[str, Dict[str, int]]] = None
+    ) -> Optional[float]:
         """Agent winrate specifically against e2."""
         if "baseline_e2" not in self.pool.opponents:
             return None
+        if rollout_results is not None:
+            wr = self._get_winrate_from_rollout("baseline_e2", rollout_results)
+            if wr is not None:
+                return wr
         return self._get_winrate("baseline_e2")
 
-    def get_self_play_winrate(self) -> float:
+    def get_self_play_winrate(
+        self, rollout_results: Optional[Dict[str, Dict[str, int]]] = None
+    ) -> float:
         """Backward compatibility: average agent winrate against non-baseline opponents."""
         names = [n for n, d in self.pool.opponents.items() if not d.get("is_baseline")]
         if not names:
             return 0.5
-        winrates = [self._get_winrate(n) for n in names]
-        return float(np.mean(winrates))
 
-    def log_metrics(self, rollout_count: int):
-        """Record league metrics to TensorBoard/Console."""
-        global_wr = self.get_global_winrate()
-        e2_wr = self.get_e2_winrate()
+        if rollout_results is not None:
+            winrates = []
+            for n in names:
+                wr = self._get_winrate_from_rollout(n, rollout_results)
+                if wr is not None:
+                    winrates.append(wr)
+            if winrates:
+                return float(np.mean(winrates))
+            return 0.5
+        else:
+            winrates = [self._get_winrate(n) for n in names]
+            return float(np.mean(winrates))
+
+    def log_metrics(
+        self,
+        rollout_count: int,
+        rollout_results: Optional[Dict[str, Dict[str, int]]] = None,
+    ):
+        """Record league metrics to TensorBoard/Console.
+        
+        Args:
+            rollout_count: Current rollout number.
+            rollout_results: Per-rollout stats {name: {wins, losses, draws}}.
+                            If provided, metrics use per-rollout data.
+                            Otherwise falls back to cumulative stats.
+        """
+        global_wr = self.get_global_winrate(rollout_results)
+        e2_wr = self.get_e2_winrate(rollout_results)
 
         if self.logger:
             self.logger.record("pfsp/winrate_global", global_wr)
