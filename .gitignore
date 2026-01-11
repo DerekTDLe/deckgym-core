@@ -8,5 +8,4 @@ __pycache__/
 *.pyd
 
 # RL training artifacts
-logs/
 checkpoints/

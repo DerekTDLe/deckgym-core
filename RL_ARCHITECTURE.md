@@ -238,3 +238,10 @@ python python/scripts/train.py --config configs/baseline.yaml
 ## TODO
 
 - For the card features, implement a more refined feature about evolution, if it can evolve at all, what is the final stage (1,2)?, is it the final stage?, etc.
+
+## Author note
+
+- Unfortunately I discarded by accident the 3 tfevents from run #10 to #12, so it's impossible for me to provide them anymore.
+Also the logs for what I considered "deprecated" runs due to multiple factors (model instability, different observation space, etc.) were not kept either.
+I will ensure to keep preciously every "modern" run logs in the future as proof of work and indicators for anyone curious enought to review them.
+Checkpoints from "modern" run are fully still available and can be published on request.
