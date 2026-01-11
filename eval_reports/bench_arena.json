@@ -1,0 +1,158 @@
+{
+  "timestamp": "2026-01-11T17:41:44.678555",
+  "mode": "bench",
+  "meta": {
+    "directory": "models/arena/",
+    "games_per_match": 200,
+    "model_count": 9,
+    "participants": [
+      "att_best_26624k_steps",
+      "att_first_256k_steps",
+      "att_first_to_beat_er_512k_steps",
+      "att_last_30000k_steps",
+      "mlp_best_28672k_steps",
+      "mlp_first_256k_steps",
+      "mlp_first_to_beat_er_768k_steps",
+      "mlp_last_3000k",
+      "mlp_outlier_3538k_steps",
+      "Expectiminimax(2)",
+      "EvolutionRusher",
+      "AttachAttack",
+      "WeightedRandom"
+    ]
+  },
+  "ratings": {
+    "att_best_26624k_steps": {
+      "mu": 1648.1100780117654,
+      "sigma": 10.009434420213784,
+      "expose": 1618.081774751124
+    },
+    "att_first_256k_steps": {
+      "mu": 1208.901494361081,
+      "sigma": 10.388982296861046,
+      "expose": 1177.7345474704978
+    },
+    "att_first_to_beat_er_512k_steps": {
+      "mu": 1396.4398850367354,
+      "sigma": 9.578389545922647,
+      "expose": 1367.7047163989675
+    },
+    "att_last_30000k_steps": {
+      "mu": 1658.7663081964643,
+      "sigma": 10.108710460688446,
+      "expose": 1628.440176814399
+    },
+    "mlp_best_28672k_steps": {
+      "mu": 1613.6597447264846,
+      "sigma": 9.921945588632276,
+      "expose": 1583.8939079605877
+    },
+    "mlp_first_256k_steps": {
+      "mu": 1208.4088497392552,
+      "sigma": 10.419983260794618,
+      "expose": 1177.1488999568712
+    },
+    "mlp_first_to_beat_er_768k_steps": {
+      "mu": 1512.624075605697,
+      "sigma": 9.56712249111223,
+      "expose": 1483.9227081323604
+    },
+    "mlp_last_3000k": {
+      "mu": 1619.758663851214,
+      "sigma": 9.870543757193186,
+      "expose": 1590.1470325796342
+    },
+    "mlp_outlier_3538k_steps": {
+      "mu": 1551.6026837402214,
+      "sigma": 9.68424998655499,
+      "expose": 1522.5499337805566
+    },
+    "Expectiminimax(2)": {
+      "mu": 1765.1494617381084,
+      "sigma": 10.868696819640743,
+      "expose": 1732.5433712791862
+    },
+    "EvolutionRusher": {
+      "mu": 1369.5377883215367,
+      "sigma": 9.657882898596062,
+      "expose": 1340.5641396257486
+    },
+    "AttachAttack": {
+      "mu": 1164.4192342017377,
+      "sigma": 10.684562864522562,
+      "expose": 1132.3655456081701
+    },
+    "WeightedRandom": {
+      "mu": 1274.2685994661445,
+      "sigma": 10.144484723743341,
+      "expose": 1243.8351452949144
+    }
+  },
+  "stats": {
+    "att_best_26624k_steps": {
+      "wins": 1645,
+      "losses": 735,
+      "draws": 20
+    },
+    "att_first_256k_steps": {
+      "wins": 559,
+      "losses": 1768,
+      "draws": 73
+    },
+    "att_first_to_beat_er_512k_steps": {
+      "wins": 1015,
+      "losses": 1333,
+      "draws": 52
+    },
+    "att_last_30000k_steps": {
+      "wins": 1676,
+      "losses": 716,
+      "draws": 8
+    },
+    "mlp_best_28672k_steps": {
+      "wins": 1567,
+      "losses": 814,
+      "draws": 19
+    },
+    "mlp_first_256k_steps": {
+      "wins": 554,
+      "losses": 1771,
+      "draws": 75
+    },
+    "mlp_first_to_beat_er_768k_steps": {
+      "wins": 1309,
+      "losses": 1053,
+      "draws": 38
+    },
+    "mlp_last_3000k": {
+      "wins": 1580,
+      "losses": 804,
+      "draws": 16
+    },
+    "mlp_outlier_3538k_steps": {
+      "wins": 1416,
+      "losses": 964,
+      "draws": 20
+    },
+    "Expectiminimax(2)": {
+      "wins": 1897,
+      "losses": 492,
+      "draws": 11
+    },
+    "EvolutionRusher": {
+      "wins": 953,
+      "losses": 1413,
+      "draws": 34
+    },
+    "AttachAttack": {
+      "wins": 480,
+      "losses": 1870,
+      "draws": 50
+    },
+    "WeightedRandom": {
+      "wins": 734,
+      "losses": 1652,
+      "draws": 14
+    }
+  }
+}
