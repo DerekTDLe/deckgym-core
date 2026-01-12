@@ -25,6 +25,7 @@ pub mod temp_deck;
 pub mod test_helpers; // TODO: Compile/Expose only in test mode?
 pub mod tool_ids;
 pub mod vec_game;
+pub mod batched_runner;
 
 pub use ability_ids::AbilityId;
 pub use attack_ids::AttackId;
@@ -36,7 +37,8 @@ pub use optimize::{
     cli_optimize, optimize, optimize_with_configs, EnemyDeckConfig, OptimizationConfig,
     ParallelConfig, SimulationConfig,
 };
-pub use simulate::{simulate, Simulation, SimulationCallbacks};
+pub use simulate::{simulate, simulate_batched, Simulation, SimulationCallbacks};
+pub use batched_runner::{BatchedGameRunner, is_onnx_player};
 pub use simulation_event_handler::ComputedStats;
 pub use state::State;
 
