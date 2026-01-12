@@ -1,9 +1,9 @@
 use clap::{ArgAction, Parser, Subcommand};
 use colored::Colorize;
 use deckgym::optimize::{ParallelConfig, SimulationConfig};
-use deckgym::players::{parse_player_code, PlayerCode};
+use deckgym::players::{fill_code_array, parse_player_code, PlayerCode};
 use deckgym::simulate::initialize_logger;
-use deckgym::{cli_optimize, simulate, Deck};
+use deckgym::{cli_optimize, is_onnx_player, simulate, simulate_batched, Deck};
 use log::warn;
 use num_format::{Locale, ToFormattedString};
 use std::fs;
@@ -205,23 +205,41 @@ fn main() {
 
             warn!("Welcome to {} simulation!", "deckgym".blue().bold());
 
+            // Fill in default players if not specified
+            let player_codes = fill_code_array(players);
+
+            // Check if any player uses ONNX - use batched mode for GPU efficiency
+            let has_onnx = player_codes.iter().any(|p| is_onnx_player(p));
+
             // Check if deck_b_or_folder is a directory
             let path = std::path::Path::new(&deck_b_or_folder);
             if path.is_dir() {
+                // Folder mode: run against multiple decks
+                // Note: Batched mode not yet supported for folder mode
                 simulate_against_folder(
                     &deck_a,
                     &deck_b_or_folder,
-                    players,
+                    Some(player_codes),
                     num,
                     seed,
                     parallel,
                     threads,
                 );
+            } else if has_onnx {
+                // ONNX detected: use batched inference for GPU efficiency
+                simulate_batched(
+                    &deck_a,
+                    &deck_b_or_folder,
+                    player_codes,
+                    num,
+                    seed,
+                );
             } else {
+                // CPU-only: use standard rayon-based parallel simulation
                 simulate(
                     &deck_a,
                     &deck_b_or_folder,
-                    players,
+                    Some(player_codes),
                     num,
                     seed,
                     parallel,

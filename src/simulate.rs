@@ -354,6 +354,96 @@ pub fn print_stats(stats: &crate::simulation_event_handler::ComputedStats) {
     );
 }
 
+/// Run simulation with batched ONNX inference for maximum GPU utilization.
+///
+/// This function uses `BatchedGameRunner` to step all games in lockstep and batch
+/// ONNX inference calls across all active games. Much faster than the standard
+/// `simulate()` when using ONNX players.
+///
+/// # Arguments
+/// * `deck_a_path` - Path to deck A file
+/// * `deck_b_path` - Path to deck B file
+/// * `player_codes` - Player codes for both players (at least one should be ONNX)
+/// * `num_simulations` - Number of games to run
+/// * `seed` - Optional random seed
+pub fn simulate_batched(
+    deck_a_path: &str,
+    deck_b_path: &str,
+    player_codes: Vec<PlayerCode>,
+    num_simulations: u32,
+    seed: Option<u64>,
+) {
+    use crate::batched_runner::BatchedGameRunner;
+    use std::time::Instant;
+
+    warn!(
+        "Running {} games with batched ONNX inference:",
+        num_simulations.to_formatted_string(&Locale::en),
+    );
+    warn!("\tPlayer 0: {:?}({})", player_codes[0], deck_a_path);
+    warn!("\tPlayer 1: {:?}({})", player_codes[1], deck_b_path);
+
+    let start = Instant::now();
+
+    // Create and run the batched runner
+    let runner = match BatchedGameRunner::new(
+        deck_a_path,
+        deck_b_path,
+        player_codes,
+        num_simulations,
+        seed,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("Failed to create BatchedGameRunner: {}", e);
+            return;
+        }
+    };
+
+    let outcomes = runner.run_all();
+    let duration = start.elapsed();
+
+    // Compute statistics from outcomes
+    let mut player_a_wins = 0u32;
+    let mut player_b_wins = 0u32;
+    let mut ties = 0u32;
+
+    for outcome in &outcomes {
+        match outcome {
+            Some(crate::state::GameOutcome::Win(0)) => player_a_wins += 1,
+            Some(crate::state::GameOutcome::Win(1)) => player_b_wins += 1,
+            Some(crate::state::GameOutcome::Tie) => ties += 1,
+            _ => {}
+        }
+    }
+
+    let total = outcomes.len() as f64;
+    let avg_duration = duration / num_simulations;
+
+    // Print statistics
+    warn!(
+        "Ran {} simulations in {} ({} per game)!",
+        num_simulations.to_formatted_string(&Locale::en),
+        humantime::format_duration(duration),
+        humantime::format_duration(avg_duration)
+    );
+    warn!(
+        "Player 0 won: {} ({:.2}%)",
+        player_a_wins.to_formatted_string(&Locale::en),
+        (player_a_wins as f64 / total) * 100.0
+    );
+    warn!(
+        "Player 1 won: {} ({:.2}%)",
+        player_b_wins.to_formatted_string(&Locale::en),
+        (player_b_wins as f64 / total) * 100.0
+    );
+    warn!(
+        "Draws: {} ({:.2}%)",
+        ties.to_formatted_string(&Locale::en),
+        (ties as f64 / total) * 100.0
+    );
+}
+
 // Set up the logger according to the given verbosity.
 pub fn initialize_logger(verbose: u8) {
     let level = match verbose {

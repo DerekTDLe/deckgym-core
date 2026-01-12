@@ -220,7 +220,7 @@ fn get_player(deck: Deck, player: &PlayerCode) -> Result<Box<dyn Player>, String
 /// Get the Nth newest ONNX model from models/ directory.
 /// Index is 1-based: 1 = newest, 2 = second newest, etc.
 #[cfg(feature = "onnx")]
-fn get_nth_onnx_model(index: usize) -> Result<String, String> {
+pub fn get_nth_onnx_model(index: usize) -> Result<String, String> {
     let models_dir = Path::new("models");
     if !models_dir.exists() {
         return Err("models/ directory not found".to_string());
