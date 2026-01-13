@@ -18,7 +18,7 @@ pub use expectiminimax_player::{ExpectiMiniMaxPlayer, ValueFunction};
 pub use human_player::HumanPlayer;
 pub use mcts_player::MctsPlayer;
 #[cfg(feature = "onnx")]
-pub use onnx_player::{BatchedOnnxInference, OnnxPlayer};
+pub use onnx_player::{print_available_providers, BatchedOnnxInference, OnnxPlayer};
 pub use random_player::RandomPlayer;
 pub use value_function_player::ValueFunctionPlayer;
 pub use value_functions::*;

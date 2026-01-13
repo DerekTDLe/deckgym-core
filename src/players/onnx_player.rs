@@ -14,6 +14,25 @@ use ort::{
     value::TensorRef,
 };
 
+/// Print available execution providers (call once at startup for debugging)
+#[cfg(feature = "onnx")]
+pub fn print_available_providers() {
+    use ort::execution_providers::ExecutionProvider;
+
+    // Check CUDA availability (but actual usability depends on cuDNN)
+    let cuda_ep = CUDAExecutionProvider::default();
+    let cuda_compiled = cuda_ep.is_available().unwrap_or(false);
+
+    let trt_ep = TensorRTExecutionProvider::default();
+    let trt_compiled = trt_ep.is_available().unwrap_or(false);
+
+    if cuda_compiled || trt_compiled {
+        eprintln!("  [ONNX] Compiled with: CUDA={}, TensorRT={} (requires cuDNN at runtime)",
+            if cuda_compiled { "yes" } else { "no" },
+            if trt_compiled { "yes" } else { "no" });
+    }
+}
+
 use rand::rngs::StdRng;
 use rand::Rng;
 
@@ -273,18 +292,43 @@ pub struct BatchedOnnxInference {
 #[cfg(feature = "onnx")]
 impl BatchedOnnxInference {
     pub fn new(model_path: &str, deterministic: bool, device: &str) -> Result<Self, String> {
-        let providers = get_execution_providers(device);
+        use ort::execution_providers::ExecutionProvider;
 
-        let session = Session::builder()
-            .map_err(|e| format!("Failed to create session builder: {}", e))?
-            .with_execution_providers(providers)
-            .map_err(|e| format!("Failed to set execution providers: {}", e))?
+        let mut builder = Session::builder()
+            .map_err(|e| format!("Failed to create session builder: {}", e))?;
+
+        // Register execution providers based on device selection
+        // Note: GPU requires LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+        match device.to_lowercase().as_str() {
+            "cuda" => {
+                let _ = CUDAExecutionProvider::default()
+                    .with_device_id(0)
+                    .register(&mut builder);
+            }
+            "trt" | "tensorrt" => {
+                let _ = TensorRTExecutionProvider::default().register(&mut builder);
+            }
+            "auto" => {
+                // Try TensorRT first, then CUDA (will fall back to CPU if both fail)
+                let _ = TensorRTExecutionProvider::default().register(&mut builder);
+                let _ = CUDAExecutionProvider::default()
+                    .with_device_id(0)
+                    .register(&mut builder);
+            }
+            _ => {
+                // CPU - no additional providers needed
+            }
+        }
+
+
+        let session = builder
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| format!("Failed to set optimization level: {}", e))?
-            .with_intra_threads(1)
+            .with_intra_threads(4)  // Use more threads for CPU
             .map_err(|e| format!("Failed to set thread count: {}", e))?
             .commit_from_file(model_path)
             .map_err(|e| format!("Failed to load ONNX model: {}", e))?;
+
 
         Ok(Self {
             session,
