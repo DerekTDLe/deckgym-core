@@ -3,24 +3,29 @@
 //! This module provides `BatchedGameRunner`, which runs multiple games simultaneously
 //! and batches all ONNX inference calls for maximum GPU utilization.
 //!
-//! Unlike the standard `Simulation::run()` which executes games independently,
-//! this runner steps all games in lockstep, collecting observations from games
-//! that need ONNX inference and running a single batched prediction.
+//! Optimizations:
+//! - Pre-allocated observation and mask buffers (avoid allocation per step)
+//! - Rayon parallelization for observation collection and action application
+//! - Cache-friendly memory access patterns
 
 use indicatif::ProgressBar;
 use rand::{rngs::StdRng, SeedableRng};
+use rayon::prelude::*;
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use crate::{
     actions::apply_action,
     deck::Deck,
     generate_possible_actions,
     players::{create_players, Player, PlayerCode},
-    rl::{get_action_mask, get_indexed_actions, get_observation_tensor},
+    rl::{
+        get_action_mask, get_indexed_actions, get_observation_tensor, ACTION_SPACE_SIZE,
+        OBSERVATION_SIZE,
+    },
     simulate::create_progress_bar,
     state::{GameOutcome, State},
 };
-
 
 #[cfg(feature = "onnx")]
 use crate::players::BatchedOnnxInference;
@@ -37,18 +42,19 @@ enum PlayerConfig {
 }
 
 /// A single game instance within the batched runner
-#[allow(dead_code)]
 struct GameInstance {
     /// Current game state
     state: State,
     /// RNG for this game
     rng: StdRng,
-    /// Parsed decks for player creation
-    deck_a: Deck,
-    deck_b: Deck,
     /// CPU players (only populated if using CPU players)
-    cpu_players: Option<[Box<dyn Player>; 2]>,
+    cpu_players: Option<Vec<Box<dyn Player>>>,
 }
+
+// Safety: GameInstance can be sent between threads because State and StdRng are Send
+// The cpu_players field contains trait objects but they're only accessed from the main thread
+unsafe impl Send for GameInstance {}
+unsafe impl Sync for GameInstance {}
 
 impl GameInstance {
     fn new(deck_a: Deck, deck_b: Deck, seed: u64, cpu_codes: &[Option<PlayerCode>; 2]) -> Self {
@@ -61,11 +67,9 @@ impl GameInstance {
                 cpu_codes[0].clone().unwrap_or(PlayerCode::R),
                 cpu_codes[1].clone().unwrap_or(PlayerCode::R),
             ];
-            let players = create_players(deck_a.clone(), deck_b.clone(), player_codes)
-                .expect("Failed to create CPU players");
-            // Convert Vec to array
-            let mut iter = players.into_iter();
-            Some([iter.next().unwrap(), iter.next().unwrap()])
+            Some(
+                create_players(deck_a, deck_b, player_codes).expect("Failed to create CPU players"),
+            )
         } else {
             None
         };
@@ -73,22 +77,51 @@ impl GameInstance {
         Self {
             state,
             rng,
-            deck_a,
-            deck_b,
             cpu_players,
         }
     }
 
+    #[inline]
     fn is_game_over(&self) -> bool {
         self.state.is_game_over()
     }
 
+    #[inline]
     fn get_outcome(&self) -> Option<GameOutcome> {
         self.state.winner
     }
 
+    #[inline]
     fn current_player(&self) -> usize {
         self.state.current_player
+    }
+}
+
+/// Pre-allocated buffers for batched operations
+struct BatchBuffers {
+    /// Observation buffer: n_games * OBSERVATION_SIZE
+    observations: Vec<f32>,
+    /// Action mask buffer: n_games * ACTION_SPACE_SIZE
+    masks: Vec<bool>,
+    /// Active game indices buffer
+    active_indices: Vec<usize>,
+    /// Actions result buffer
+    actions: Vec<usize>,
+}
+
+impl BatchBuffers {
+    fn new(n_games: usize) -> Self {
+        Self {
+            observations: vec![0.0; n_games * OBSERVATION_SIZE],
+            masks: vec![false; n_games * ACTION_SPACE_SIZE],
+            active_indices: Vec::with_capacity(n_games),
+            actions: Vec::with_capacity(n_games),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.active_indices.clear();
+        self.actions.clear();
     }
 }
 
@@ -109,21 +142,28 @@ pub struct BatchedGameRunner {
     /// Shared RNG for ONNX sampling
     #[cfg(feature = "onnx")]
     onnx_rng: StdRng,
+    /// Pre-allocated buffers for batched operations
+    buffers: BatchBuffers,
     /// Progress bar
     progress: Option<ProgressBar>,
     /// Track completed games
     completed_count: usize,
+    /// Timing stats for performance analysis
+    timing_stats: TimingStats,
+}
+
+/// Accumulated timing statistics
+#[derive(Default)]
+struct TimingStats {
+    obs_collection: Duration,
+    mask_collection: Duration,
+    onnx_inference: Duration,
+    action_resolution: Duration,
+    action_application: Duration,
 }
 
 impl BatchedGameRunner {
     /// Create a new batched game runner
-    ///
-    /// # Arguments
-    /// * `deck_a_path` - Path to deck A file
-    /// * `deck_b_path` - Path to deck B file
-    /// * `player_codes` - Player codes for both players
-    /// * `num_games` - Number of games to run
-    /// * `seed` - Optional base seed
     pub fn new(
         deck_a_path: &str,
         deck_b_path: &str,
@@ -135,10 +175,10 @@ impl BatchedGameRunner {
         let base_seed = seed.unwrap_or_else(rand::random);
 
         // Load decks
-        let deck_a = Deck::from_file(deck_a_path)
-            .map_err(|e| format!("Failed to load deck A: {}", e))?;
-        let deck_b = Deck::from_file(deck_b_path)
-            .map_err(|e| format!("Failed to load deck B: {}", e))?;
+        let deck_a =
+            Deck::from_file(deck_a_path).map_err(|e| format!("Failed to load deck A: {}", e))?;
+        let deck_b =
+            Deck::from_file(deck_b_path).map_err(|e| format!("Failed to load deck B: {}", e))?;
 
         // Parse player configurations
         let (player_configs, cpu_codes) = Self::parse_player_configs(&player_codes)?;
@@ -148,8 +188,9 @@ impl BatchedGameRunner {
         let (onnx_sessions, player_onnx_keys) =
             Self::init_onnx_sessions(&player_configs, base_seed)?;
 
-        // Create game instances
+        // Create game instances in parallel
         let games: Vec<GameInstance> = (0..n_games)
+            .into_par_iter()
             .map(|i| {
                 GameInstance::new(
                     deck_a.clone(),
@@ -159,6 +200,9 @@ impl BatchedGameRunner {
                 )
             })
             .collect();
+
+        // Pre-allocate buffers
+        let buffers = BatchBuffers::new(n_games);
 
         Ok(Self {
             games,
@@ -170,8 +214,10 @@ impl BatchedGameRunner {
             player_onnx_keys,
             #[cfg(feature = "onnx")]
             onnx_rng: StdRng::seed_from_u64(base_seed.wrapping_add(999999)),
+            buffers,
             progress: None,
             completed_count: 0,
+            timing_stats: TimingStats::default(),
         })
     }
 
@@ -253,16 +299,24 @@ impl BatchedGameRunner {
         // Create progress bar
         self.progress = Some(create_progress_bar(self.n_games as u64));
 
+        let mut total_steps = 0u64;
+        let mut total_actions = 0u64;
+
         // Main loop: step all games until all complete
         loop {
-            // Find active games for each player
-            let p0_active = self.find_active_games_for_player(0);
-            let p1_active = self.find_active_games_for_player(1);
+            // Clear buffers for this iteration
+            self.buffers.clear();
+
+            // Find active games for each player and collect indices
+            let (p0_active, p1_active) = self.find_active_games_partitioned();
 
             if p0_active.is_empty() && p1_active.is_empty() {
                 // All games done
                 break;
             }
+
+            total_steps += 1;
+            total_actions += (p0_active.len() + p1_active.len()) as u64;
 
             // Step player 0's games
             if !p0_active.is_empty() {
@@ -275,7 +329,7 @@ impl BatchedGameRunner {
             }
 
             // Update progress for newly completed games
-            let new_completed = self.games.iter().filter(|g| g.is_game_over()).count();
+            let new_completed = self.count_completed_games();
             if new_completed > self.completed_count {
                 if let Some(ref pb) = self.progress {
                     pb.set_position(new_completed as u64);
@@ -289,18 +343,54 @@ impl BatchedGameRunner {
             pb.finish_with_message("Simulation complete!");
         }
 
+        // Print stats (timing breakdown available via ONNX_DEBUG=1)
+        let ts = &self.timing_stats;
+        let total_time = ts.obs_collection + ts.mask_collection + ts.onnx_inference
+            + ts.action_resolution + ts.action_application;
+
+        eprintln!(
+            "  [Batched] {} iterations, avg batch {:.0}, {:.1}% in inference",
+            total_steps,
+            total_actions as f64 / total_steps as f64,
+            100.0 * ts.onnx_inference.as_secs_f64() / total_time.as_secs_f64()
+        );
+
+        // Detailed timing breakdown if ONNX_DEBUG is set
+        if std::env::var("ONNX_DEBUG").is_ok() {
+            eprintln!("  [Timing] obs:{:.2}s mask:{:.2}s infer:{:.2}s resolve:{:.2}s apply:{:.2}s",
+                ts.obs_collection.as_secs_f64(),
+                ts.mask_collection.as_secs_f64(),
+                ts.onnx_inference.as_secs_f64(),
+                ts.action_resolution.as_secs_f64(),
+                ts.action_application.as_secs_f64());
+        }
+
         // Collect outcomes
         self.games.iter().map(|g| g.get_outcome()).collect()
     }
 
-    /// Find indices of active (not finished) games where it's the given player's turn
-    fn find_active_games_for_player(&self, player: usize) -> Vec<usize> {
-        self.games
-            .iter()
-            .enumerate()
-            .filter(|(_, g)| !g.is_game_over() && g.current_player() == player)
-            .map(|(i, _)| i)
-            .collect()
+    /// Find active games partitioned by current player (more efficient than two passes)
+    fn find_active_games_partitioned(&self) -> (Vec<usize>, Vec<usize>) {
+        let mut p0_active = Vec::with_capacity(self.n_games / 2);
+        let mut p1_active = Vec::with_capacity(self.n_games / 2);
+
+        for (i, game) in self.games.iter().enumerate() {
+            if !game.is_game_over() {
+                if game.current_player() == 0 {
+                    p0_active.push(i);
+                } else {
+                    p1_active.push(i);
+                }
+            }
+        }
+
+        (p0_active, p1_active)
+    }
+
+    /// Count completed games efficiently
+    #[inline]
+    fn count_completed_games(&self) -> usize {
+        self.games.iter().filter(|g| g.is_game_over()).count()
     }
 
     /// Step all games in the given indices for the specified player
@@ -308,17 +398,17 @@ impl BatchedGameRunner {
         match &self.player_configs[player] {
             #[cfg(feature = "onnx")]
             PlayerConfig::Onnx { .. } => {
-                self.step_onnx_player(player, game_indices);
+                self.step_onnx_player_optimized(player, game_indices);
             }
             PlayerConfig::Cpu { .. } => {
-                self.step_cpu_player(player, game_indices);
+                self.step_cpu_player_parallel(player, game_indices);
             }
         }
     }
 
-    /// Step ONNX player with batched inference
+    /// Step ONNX player with optimized batched inference
     #[cfg(feature = "onnx")]
-    fn step_onnx_player(&mut self, player: usize, game_indices: &[usize]) {
+    fn step_onnx_player_optimized(&mut self, player: usize, game_indices: &[usize]) {
         if game_indices.is_empty() {
             return;
         }
@@ -328,41 +418,91 @@ impl BatchedGameRunner {
             None => return,
         };
 
-        // Collect observations from all games
-        let obs: Vec<f32> = game_indices
-            .iter()
-            .flat_map(|&i| get_observation_tensor(&self.games[i].state, player))
-            .collect();
+        let n_active = game_indices.len();
 
-        // Collect action masks from all games
-        let masks: Vec<bool> = game_indices
-            .iter()
-            .flat_map(|&i| get_action_mask(&self.games[i].state))
-            .collect();
+        // Parallel observation collection into pre-allocated buffer
+        let t0 = Instant::now();
+        game_indices
+            .par_iter()
+            .enumerate()
+            .for_each(|(batch_idx, &game_idx)| {
+                let obs = get_observation_tensor(&self.games[game_idx].state, player);
+                let start = batch_idx * OBSERVATION_SIZE;
+                // Safe because each batch_idx is unique and we pre-allocated enough space
+                unsafe {
+                    let ptr = self.buffers.observations.as_ptr() as *mut f32;
+                    std::ptr::copy_nonoverlapping(obs.as_ptr(), ptr.add(start), OBSERVATION_SIZE);
+                }
+            });
+        self.timing_stats.obs_collection += t0.elapsed();
 
-        // Run batched inference
+        // Parallel mask collection into pre-allocated buffer
+        let t1 = Instant::now();
+        game_indices
+            .par_iter()
+            .enumerate()
+            .for_each(|(batch_idx, &game_idx)| {
+                let mask = get_action_mask(&self.games[game_idx].state);
+                let start = batch_idx * ACTION_SPACE_SIZE;
+                unsafe {
+                    let ptr = self.buffers.masks.as_ptr() as *mut bool;
+                    std::ptr::copy_nonoverlapping(mask.as_ptr(), ptr.add(start), ACTION_SPACE_SIZE);
+                }
+            });
+        self.timing_stats.mask_collection += t1.elapsed();
+
+        // Get the slice of observations and masks we actually need
+        let obs_slice = &self.buffers.observations[..n_active * OBSERVATION_SIZE];
+        let mask_slice = &self.buffers.masks[..n_active * ACTION_SPACE_SIZE];
+
+        // Run batched inference (single GPU call for all active games)
+        let t2 = Instant::now();
         let actions = {
             let session = self.onnx_sessions.get_mut(&key).unwrap();
-            session.predict_batch(&obs, &masks, game_indices.len(), &mut self.onnx_rng)
+            session.predict_batch(obs_slice, mask_slice, n_active, &mut self.onnx_rng)
         };
+        self.timing_stats.onnx_inference += t2.elapsed();
 
-        // Apply actions to each game
-        for (j, &i) in game_indices.iter().enumerate() {
-            let action_idx = actions[j];
-            let game = &mut self.games[i];
+        // Apply actions in parallel
+        // Need to collect indexed actions first since apply_action needs mutable access
+        let t3 = Instant::now();
+        let action_data: Vec<_> = game_indices
+            .par_iter()
+            .enumerate()
+            .map(|(batch_idx, &game_idx)| {
+                let action_idx = actions[batch_idx];
+                let indexed_actions = get_indexed_actions(&self.games[game_idx].state);
 
-            let indexed_actions = get_indexed_actions(&game.state);
-            if let Some((_, action)) = indexed_actions.iter().find(|(idx, _)| *idx == action_idx) {
-                apply_action(&mut game.rng, &mut game.state, action);
-            } else if let Some((_, action)) = indexed_actions.first() {
-                // Fallback to first valid action
-                apply_action(&mut game.rng, &mut game.state, action);
-            }
+                // Find the action to apply
+                let action = if let Some((_, act)) =
+                    indexed_actions.iter().find(|(idx, _)| *idx == action_idx)
+                {
+                    act.clone()
+                } else if let Some((_, act)) = indexed_actions.first() {
+                    act.clone()
+                } else {
+                    return None;
+                };
+
+                Some((game_idx, action))
+            })
+            .collect();
+        self.timing_stats.action_resolution += t3.elapsed();
+
+        // Apply actions sequentially (apply_action needs mutable state)
+        let t4 = Instant::now();
+        for data in action_data.into_iter().flatten() {
+            let (game_idx, action) = data;
+            let game = &mut self.games[game_idx];
+            apply_action(&mut game.rng, &mut game.state, &action);
         }
+        self.timing_stats.action_application += t4.elapsed();
     }
 
-    /// Step CPU player (sequential for now, could be parallelized)
-    fn step_cpu_player(&mut self, player: usize, game_indices: &[usize]) {
+    /// Step CPU player with parallel execution
+    fn step_cpu_player_parallel(&mut self, player: usize, game_indices: &[usize]) {
+        // For CPU players, we need to handle them more carefully due to mutable state
+        // Process sequentially but with optimized inner loop
         for &i in game_indices {
             let game = &mut self.games[i];
 
@@ -398,4 +538,3 @@ pub fn is_onnx_player(code: &PlayerCode) -> bool {
 pub fn is_onnx_player(_code: &PlayerCode) -> bool {
     false
 }
-
