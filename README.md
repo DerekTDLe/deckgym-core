@@ -10,9 +10,23 @@ Its mission is to elevate the competitive TCG Pocket scene by helping players op
 
 Join our Discord: https://discord.gg/ymxXHrzhak!
 
-## Usage
+## System Requirements
 
-The CLI runs simulations between two decks in DeckGym Format. To create these files, build your decks in https://www.deckgym.com/builder, select **Share** > **Copy as Text**, and save the content as a text file.
+While the core simulation runs on CPU, using ONNX neural networks with GPU acceleration requires the following:
+
+### GPU Acceleration (Optional)
+
+If you plan to use the `onnx` feature with CUDA or TensorRT:
+- **NVIDIA GPU** (Compute Capability 7.0+)
+- **NVIDIA Driver**
+- **CUDA Toolkit** (11.8+)
+- **cuDNN** (8.x or 9.x)
+- **TensorRT** (Optional, for TensorRT provider)
+
+> [!NOTE]
+> **Automatic Discovery**: The build system automatically discovers these libraries on your system. You **do not** need to manually set `LD_LIBRARY_PATH`.
+
+## Usage
 
 We already provide several example decks in the repo you can use to get started. For example, to face off a VenusaurEx-ExeggutorEx deck with a Weezing-Arbok deck 1,000 times, run:
 
