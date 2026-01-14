@@ -49,6 +49,8 @@ struct GameInstance {
     rng: StdRng,
     /// CPU players (only populated if using CPU players)
     cpu_players: Option<Vec<Box<dyn Player>>>,
+    /// Track total actions/steps in this game to detect infinite loops
+    step_count: usize,
 }
 
 // Safety: GameInstance can be sent between threads because State and StdRng are Send
@@ -78,6 +80,7 @@ impl GameInstance {
             state,
             rng,
             cpu_players,
+            step_count: 0,
         }
     }
 
@@ -148,6 +151,10 @@ pub struct BatchedGameRunner {
     progress: Option<ProgressBar>,
     /// Track completed games
     completed_count: usize,
+    /// Offset for global progress (used in matrix simulations)
+    progress_offset: usize,
+    /// Total games for global progress
+    progress_total: usize,
     /// Timing stats for performance analysis
     timing_stats: TimingStats,
 }
@@ -163,22 +170,16 @@ struct TimingStats {
 }
 
 impl BatchedGameRunner {
-    /// Create a new batched game runner
+    /// Create a new batched game runner with multiple deck pairs
     pub fn new(
-        deck_a_path: &str,
-        deck_b_path: &str,
+        deck_pairs: Vec<(Deck, Deck)>,
         player_codes: Vec<PlayerCode>,
-        num_games: u32,
         seed: Option<u64>,
+        progress_offset: usize,
+        progress_total: usize,
     ) -> Result<Self, String> {
-        let n_games = num_games as usize;
+        let n_games = deck_pairs.len();
         let base_seed = seed.unwrap_or_else(rand::random);
-
-        // Load decks
-        let deck_a =
-            Deck::from_file(deck_a_path).map_err(|e| format!("Failed to load deck A: {}", e))?;
-        let deck_b =
-            Deck::from_file(deck_b_path).map_err(|e| format!("Failed to load deck B: {}", e))?;
 
         // Parse player configurations
         let (player_configs, cpu_codes) = Self::parse_player_configs(&player_codes)?;
@@ -189,12 +190,13 @@ impl BatchedGameRunner {
             Self::init_onnx_sessions(&player_configs, base_seed)?;
 
         // Create game instances in parallel
-        let games: Vec<GameInstance> = (0..n_games)
+        let games: Vec<GameInstance> = deck_pairs
             .into_par_iter()
-            .map(|i| {
+            .enumerate()
+            .map(|(i, (deck_a, deck_b))| {
                 GameInstance::new(
-                    deck_a.clone(),
-                    deck_b.clone(),
+                    deck_a,
+                    deck_b,
                     base_seed.wrapping_add(i as u64),
                     &cpu_codes,
                 )
@@ -217,6 +219,8 @@ impl BatchedGameRunner {
             buffers,
             progress: None,
             completed_count: 0,
+            progress_offset,
+            progress_total,
             timing_stats: TimingStats::default(),
         })
     }
@@ -318,14 +322,33 @@ impl BatchedGameRunner {
             total_steps += 1;
             total_actions += (p0_active.len() + p1_active.len()) as u64;
 
+            if total_steps % 10 == 0 {
+                log::info!("[{}] Iteration {}, active games: {}", "INFO", total_steps, p0_active.len() + p1_active.len());
+            }
+
             // Step player 0's games
             if !p0_active.is_empty() {
+                for &idx in &p0_active {
+                    self.games[idx].step_count += 1;
+                }
                 self.step_player(0, &p0_active);
             }
 
             // Step player 1's games
             if !p1_active.is_empty() {
+                for &idx in &p1_active {
+                    self.games[idx].step_count += 1;
+                }
                 self.step_player(1, &p1_active);
+            }
+
+            // Safety check for infinite loops
+            const MAX_STEPS_PER_GAME: usize = 2000;
+            for game in &mut self.games {
+                if !game.is_game_over() && game.step_count > MAX_STEPS_PER_GAME {
+                    log::warn!("[WARNING] Game exceeded {} steps. Forcing Tie.", MAX_STEPS_PER_GAME);
+                    game.state.winner = Some(GameOutcome::Tie);
+                }
             }
 
             // Update progress for newly completed games
@@ -334,6 +357,11 @@ impl BatchedGameRunner {
                 if let Some(ref pb) = self.progress {
                     pb.set_position(new_completed as u64);
                 }
+                
+                // Print a parsable progress line for Python UI
+                let global_completed = self.progress_offset + new_completed;
+                log::info!("[{}] [#######] {}/{}", "PROGRESS", global_completed, self.progress_total);
+
                 self.completed_count = new_completed;
             }
         }
@@ -489,42 +517,69 @@ impl BatchedGameRunner {
             .collect();
         self.timing_stats.action_resolution += t3.elapsed();
 
-        // Apply actions sequentially (apply_action needs mutable state)
+        // Apply actions in parallel (apply_action needs mutable state, but each game is independent)
         let t4 = Instant::now();
-        for data in action_data.into_iter().flatten() {
-            let (game_idx, action) = data;
-            let game = &mut self.games[game_idx];
-            apply_action(&mut game.rng, &mut game.state, &action);
+        let mut actions_to_apply = vec![None; self.games.len()];
+        for data in action_data {
+            if let Some((idx, action)) = data {
+                actions_to_apply[idx] = Some(action);
+            }
         }
+
+        self.games
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(i, game)| {
+                if let Some(action) = &actions_to_apply[i] {
+                    apply_action(&mut game.rng, &mut game.state, action);
+                }
+            });
         self.timing_stats.action_application += t4.elapsed();
     }
 
     /// Step CPU player with parallel execution
     fn step_cpu_player_parallel(&mut self, player: usize, game_indices: &[usize]) {
-        // For CPU players, we need to handle them more carefully due to mutable state
-        // Process sequentially but with optimized inner loop
-        for &i in game_indices {
-            let game = &mut self.games[i];
-
-            // Get possible actions
-            let (_, actions) = generate_possible_actions(&game.state);
-            if actions.is_empty() {
-                continue;
-            }
-
-            // Use CPU player to select action
-            let action = if actions.len() == 1 {
-                actions[0].clone()
-            } else if let Some(ref mut players) = game.cpu_players {
-                players[player].decision_fn(&mut game.rng, &game.state, &actions)
-            } else {
-                // Fallback to random
-                use rand::seq::SliceRandom;
-                actions.choose(&mut game.rng).unwrap().clone()
-            };
-
-            apply_action(&mut game.rng, &mut game.state, &action);
+        if game_indices.is_empty() {
+            return;
         }
+
+        let t0 = Instant::now();
+        
+        // Create a mask for active games for fast lookup in par_iter
+        let mut mask = vec![false; self.games.len()];
+        for &idx in game_indices {
+            mask[idx] = true;
+        }
+
+        // Use Rayon to process all games in parallel
+        // Each GameInstance owns its RNG and CPU players, so this is safe and fast
+        self.games
+            .par_iter_mut()
+            .enumerate()
+            .filter(|(i, _)| mask[*i])
+            .for_each(|(_, game)| {
+                // Get possible actions
+                let (_, actions) = generate_possible_actions(&game.state);
+                if actions.is_empty() {
+                    return;
+                }
+
+                // Use CPU player to select action
+                let action = if actions.len() == 1 {
+                    actions[0].clone()
+                } else if let Some(ref mut players) = game.cpu_players {
+                    players[player].decision_fn(&mut game.rng, &game.state, &actions)
+                } else {
+                    // Fallback to random
+                    use rand::seq::SliceRandom;
+                    actions.choose(&mut game.rng).unwrap().clone()
+                };
+
+                apply_action(&mut game.rng, &mut game.state, &action);
+            });
+
+        // We'll attribute this to action_resolution for now in the stats
+        self.timing_stats.action_resolution += t0.elapsed();
     }
 }
 
