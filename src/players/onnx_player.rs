@@ -93,7 +93,7 @@ fn get_execution_providers(
             vec![CUDAExecutionProvider::default().build()]
         }
         _ => {
-            vec![CUDAExecutionProvider::default().build()]
+            vec![]
         }
     }
 }
@@ -294,7 +294,7 @@ impl BatchedOnnxInference {
 
                 // Register execution providers based on device selection
                 match device.to_lowercase().as_str() {
-                    "cuda" | "trt" | "tensorrt" | "auto" => {
+                    "cuda" | "auto" => {
                         if let Err(e) = CUDAExecutionProvider::default()
                             .with_device_id(0)
                             .register(&mut builder) {

@@ -213,15 +213,15 @@ class TrainingConfig:
     #   v=ValueFunction, w=WeightedRandom, aa=AttachAttack, er=EvolutionRusher
     #   e2/e3/e4=Expectiminimax(depth) - omniscient, excluded from global WR
     #   o[n][device]=ONNX model (n=index from newest, device=c/g/t for cpu/cuda/trt)
-    #     Examples: o1t = newest ONNX on TensorRT, o2c = 2nd newest on CPU
+    #     Examples: o1 = newest ONNX on CUDA, o2c = 2nd newest on CPU
     # Order: Learn coherence first (o2/attention), then resist exploits (o1/MLP)
     pfsp_baseline_curriculum: List[Tuple[int, List[str]]] = field(
         default_factory=lambda: [
             (0, ["v", "w"]),  # Stage 1: Easy warmup (0-500k)
             (500_000, ["aa", "er"]),  # Stage 2: Medium bots (500k-2M)
-            (2_000_000, ["er", "o2t"]),  # Stage 3: Attention anchor (2M-5M)
-            (5_000_000, ["o2t", "o1t"]),  # Stage 4: Both NN styles (5M-10M)
-            (10_000_000, ["e2", "o1t", "o2t"]),  # Stage 5: Boss + both anchors (10M+)
+            (2_000_000, ["er", "o2"]),  # Stage 3: Attention anchor (2M-5M)
+            (5_000_000, ["o2t", "o1"]),  # Stage 4: Both NN styles (5M-10M)
+            (10_000_000, ["e2", "o1", "o2"]),  # Stage 5: Boss + both anchors (10M+)
         ]
     )
 
