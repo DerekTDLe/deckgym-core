@@ -86,7 +86,6 @@ training:
   pfsp_add_every_n_rollouts: 8
   pfsp_select_every_n_rollouts: 2
   pfsp_priority_exponent: 3.0 # Focus more on harder opponents (was 2.0)
-  pfsp_winrate_window: 300
   pfsp_checkpoint_dir: "./checkpoints/attention_enhanced_finetune/pfsp_pool/"
 
 environment:

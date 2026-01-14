@@ -193,7 +193,6 @@ training:
   pfsp_add_every_n_rollouts: 8
   pfsp_select_every_n_rollouts: 2
   pfsp_priority_exponent: 2.0
-  pfsp_winrate_window: 200
   pfsp_checkpoint_dir: "./checkpoints/attention_enhanced/pfsp_pool/"
 
 environment:

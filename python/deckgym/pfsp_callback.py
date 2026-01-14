@@ -32,7 +32,6 @@ class PFSPCallback(BaseCallback):
         pool_size: int = DEFAULT_CONFIG.pfsp_pool_size,
         add_to_pool_every_n_rollouts: int = DEFAULT_CONFIG.pfsp_add_every_n_rollouts,
         priority_exponent: float = DEFAULT_CONFIG.pfsp_priority_exponent,
-        winrate_window: int = DEFAULT_CONFIG.pfsp_winrate_window,
         checkpoint_dir: str = DEFAULT_CONFIG.pfsp_checkpoint_dir,
         # Baseline curriculum parameters (baseline_slots is now dynamic)
         baseline_max_allocation: float = DEFAULT_CONFIG.pfsp_baseline_max_allocation,
@@ -45,7 +44,6 @@ class PFSPCallback(BaseCallback):
         self.env = env
         self.n_envs = n_envs
         self.add_to_pool_every_n_rollouts = add_to_pool_every_n_rollouts
-        self.winrate_window = winrate_window
 
         # Initialize modular components
         self.pool = OpponentPool(pool_size, checkpoint_dir)
@@ -176,8 +174,6 @@ class PFSPCallback(BaseCallback):
                     rollout_stats[opp_name]["draws"] += 1
 
             self.pool.update_results(self.episode_results)
-            # self.pool.apply_decay(self.winrate_window) # Decay is already applied in update_results in some versions, but here it is explicit
-            self.pool.apply_decay(self.winrate_window)
             self.league_logger.log_metrics(self.rollout_count, rollout_stats)
             self.league_logger.log_detailed_info(rollout_stats)
             self.episode_results.clear()
@@ -198,7 +194,7 @@ class PFSPCallback(BaseCallback):
                 # Reset ALL statistics only when pool composition changes
 
             elif self.verbose > 0:
-                print(f"[PFSP] Agent rejected: Winrate {sp_winrate:.1%} is below required {min_wr_to_add:.1%}")
+                print(f"[PFSP] Agent rejected: Winrate {all_time_wr:.1%} is below required {min_wr_to_add:.1%}")
             # Reset all stats at each refresh (even if agent not added)
             self.pool.reset_statistics()
             self.pool.reset_total_statistics()
