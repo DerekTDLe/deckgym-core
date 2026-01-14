@@ -18,9 +18,7 @@ fn main() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 if line.contains("libcudnn.so") || 
-                   line.contains("libcublas.so") || 
-                   line.contains("libnvinfer.so") ||
-                   line.contains("libnvonnxparser.so") {
+                   line.contains("libcublas.so") {
                     if let Some(path_part) = line.split("=>").last() {
                         if let Some(parent) = Path::new(path_part.trim()).parent() {
                             paths.insert(parent.to_path_buf());
@@ -33,9 +31,9 @@ fn main() {
         // 2. Add standard fallback paths
         let fallbacks = [
             "/usr/local/cuda/lib64", 
+            "/usr/local/cuda/targets/x86_64-linux/lib",
             "/usr/lib/x86_64-linux-gnu", 
             "/lib/x86_64-linux-gnu",
-            "/usr/local/tensorrt/lib"
         ];
         for fb in fallbacks {
             if Path::new(fb).exists() {
@@ -44,6 +42,8 @@ fn main() {
         }
 
         // 3. Emit linker arguments to embed these paths in RPATH
+        // $ORIGIN allows the dynamic linker to look in the binary's directory
+        println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
         for path in paths {
             println!("cargo:rustc-link-arg=-Wl,-rpath,{}", path.display());
             // Also add to link search path just in case

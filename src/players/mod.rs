@@ -64,7 +64,7 @@ pub enum PlayerCode {
     #[cfg(feature = "onnx")]
     O {
         index: usize,   // 1-indexed: o1 = newest model, o2 = second newest, etc.
-        device: String, // c=cpu, g=cuda, t=trt, or auto
+        device: String, // c=cpu, g=cuda, or auto
     },
 }
 /// Custom parser function enforcing case-insensitivity
@@ -103,13 +103,11 @@ pub fn parse_player_code(s: &str) -> Result<PlayerCode, String> {
     if lower.starts_with('o') && lower.len() > 1 {
         let rest = &lower[1..];
 
-        // Check for device suffix (last char: c, g, t)
+        // Check for device suffix (last char: c, g)
         let (num_part, device) = if rest.ends_with('c') {
             (&rest[..rest.len() - 1], "cpu")
         } else if rest.ends_with('g') {
             (&rest[..rest.len() - 1], "cuda")
-        } else if rest.ends_with('t') {
-            (&rest[..rest.len() - 1], "trt")
         } else {
             (rest, "auto")
         };
