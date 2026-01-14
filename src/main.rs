@@ -3,10 +3,12 @@ use colored::Colorize;
 use deckgym::optimize::{ParallelConfig, SimulationConfig};
 use deckgym::players::{fill_code_array, parse_player_code, PlayerCode};
 use deckgym::simulate::initialize_logger;
-use deckgym::{cli_optimize, is_onnx_player, simulate, simulate_batched, Deck};
+use deckgym::state::GameOutcome;
+use deckgym::{
+    cli_optimize, is_onnx_player, simulate, simulate_batched, BatchedGameRunner, Deck,
+};
 use log::warn;
-use num_format::{Locale, ToFormattedString};
-use std::fs;
+
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -90,95 +92,172 @@ enum Commands {
     },
 }
 
-/// Simulate games between one deck and multiple decks in a folder
 fn simulate_against_folder(
-    deck_a_path: &str,
-    decks_folder: &str,
+    path_a: &str,
+    path_b: &str,
     players: Option<Vec<PlayerCode>>,
-    total_num_simulations: u32,
+    num_games_total: u32,
     seed: Option<u64>,
     parallel: bool,
     num_threads: Option<usize>,
 ) {
-    // Read all deck files from the folder
-    let deck_paths: Vec<String> = fs::read_dir(decks_folder)
-        .expect("Failed to read decks folder")
-        .filter_map(|entry| {
-            let entry = entry.ok()?;
-            if entry.path().is_file() {
-                Some(entry.path().to_str()?.to_string())
-            } else {
-                None
-            }
-        })
-        .collect();
+    let player_codes = fill_code_array(players);
+    let has_onnx = player_codes.iter().any(|p| is_onnx_player(p));
 
-    // Load and validate decks
-    let valid_decks: Vec<(String, Deck)> = deck_paths
-        .iter()
-        .filter_map(|path| {
-            let deck = Deck::from_file(path).ok()?;
-            if deck.cards.len() == 20 {
-                Some((path.clone(), deck))
-            } else {
-                warn!("Skipping deck {} (invalid)", path);
-                None
-            }
-        })
-        .collect();
+    // Helper to get all decks in a path (file or folder)
+    let get_decks = |path: &str| -> Vec<String> {
+        let p = std::path::Path::new(path);
+        if p.is_dir() {
+            std::fs::read_dir(p)
+                .expect("Failed to read directory")
+                .filter_map(|e| {
+                    let path = e.ok()?.path();
+                    if path.is_file() && (path.extension() == Some(std::ffi::OsStr::new("txt")) || path.extension() == Some(std::ffi::OsStr::new("json"))) {
+                        Some(path.to_string_lossy().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            vec![path.to_string()]
+        }
+    };
 
-    if valid_decks.is_empty() {
-        warn!("No valid decks found in folder: {}", decks_folder);
+    let decks_a_paths = get_decks(path_a);
+    let decks_b_paths = get_decks(path_b);
+
+    if decks_a_paths.is_empty() || decks_b_paths.is_empty() {
+        warn!("No decks found in directory!");
         return;
     }
 
+    // Pre-load all decks to avoid redundant Disk I/O during matrix generation
+    println!("Loading {} decks...", decks_a_paths.len() + decks_b_paths.len());
+    let decks_a: Vec<Deck> = decks_a_paths.iter()
+        .map(|p| Deck::from_file(p).expect("Failed to load deck A"))
+        .collect();
+    let decks_b: Vec<Deck> = decks_b_paths.iter()
+        .map(|p| Deck::from_file(p).expect("Failed to load deck B"))
+        .collect();
+
+    let num_matchups = (decks_a.len() * decks_b.len()) as u32;
+    let games_per_matchup = num_games_total / num_matchups;
+    let remainder = num_games_total % num_matchups;
+
     warn!(
-        "Found {} valid deck files in folder",
-        valid_decks.len().to_formatted_string(&Locale::en)
+        "Running {} total games across {} matchups ({}/{} decks)...",
+        num_games_total,
+        num_matchups,
+        decks_a.len(),
+        decks_b.len()
     );
 
-    // Calculate games per deck (distribute evenly)
-    let num_decks = valid_decks.len() as u32;
-    let games_per_deck = total_num_simulations / num_decks;
-    let remainder = total_num_simulations % num_decks;
-
-    warn!(
-        "Running {} total games ({} per deck)",
-        total_num_simulations.to_formatted_string(&Locale::en),
-        games_per_deck.to_formatted_string(&Locale::en)
-    );
-
-    // Run simulations against each deck
-    for (i, (deck_path, _)) in valid_decks.iter().enumerate() {
-        let deck_name = deck_path.split('/').next_back().unwrap_or(deck_path);
-        let games_for_this_deck = if i < remainder as usize {
-            games_per_deck + 1
-        } else {
-            games_per_deck
-        };
-
-        if games_for_this_deck == 0 {
-            continue;
+    if has_onnx {
+        // Optimized case: Load all matchups into a single batch
+        let mut deck_pairs = Vec::with_capacity(num_games_total as usize);
+        let mut matchup_idx = 0;
+        for deck_a in &decks_a {
+            for deck_b in &decks_b {
+                let count = if matchup_idx < remainder {
+                    games_per_matchup + 1
+                } else {
+                    games_per_matchup
+                };
+                
+                if count > 0 {
+                    for _ in 0..count {
+                        deck_pairs.push((deck_a.clone(), deck_b.clone()));
+                    }
+                }
+                matchup_idx += 1;
+            }
         }
 
-        warn!("\n{}", "=".repeat(60));
-        warn!(
-            "Simulating against deck {}/{}: {}",
-            i + 1,
-            num_decks,
-            deck_name
-        );
-        warn!("{}", "=".repeat(60));
+        if !deck_pairs.is_empty() {
+            let mut outcomes = Vec::with_capacity(deck_pairs.len());
+            
+            let mut completed_before = 0;
+            // Split into chunks to avoid CUDA OOM and improve progress feedback
+            const MAX_BATCH_SIZE: usize = 1024;
+            for chunk in deck_pairs.chunks(MAX_BATCH_SIZE) {
+                let chunk_vec = chunk.to_vec();
+                let runner = BatchedGameRunner::new(
+                    chunk_vec, 
+                    player_codes.clone(), 
+                    seed,
+                    completed_before,
+                    num_games_total as usize
+                ).expect("Failed to create BatchRunner");
+                let chunk_outcomes = runner.run_all();
+                outcomes.extend(chunk_outcomes);
+                completed_before += chunk.len();
+            }
+            
+            // Collect results back into matchups
+            let mut matchup_idx = 0;
+            let mut outcome_idx = 0;
+            let mut a_wins_total = 0;
+            let mut b_wins_total = 0;
+            let mut ties_total = 0;
 
-        simulate(
-            deck_a_path,
-            deck_path,
-            players.clone(),
-            games_for_this_deck,
-            seed,
-            parallel,
-            num_threads,
-        );
+            for (i, _) in decks_a.iter().enumerate() {
+                for (j, _) in decks_b.iter().enumerate() {
+                    let count = if matchup_idx < remainder {
+                        games_per_matchup + 1
+                    } else {
+                        games_per_matchup
+                    };
+
+                    if count > 0 {
+                        let mut w = 0;
+                        let mut l = 0;
+                        let mut t = 0;
+                        for _ in 0..count {
+                            match outcomes[outcome_idx] {
+                                Some(GameOutcome::Win(0)) => w += 1,
+                                Some(GameOutcome::Win(1)) => l += 1,
+                                Some(GameOutcome::Tie) | None => t += 1,
+                                _ => {}
+                            }
+                            outcome_idx += 1;
+                        }
+                        
+                        // Print parseable result for Python
+                        warn!("RESULT: {} VS {} | WINS: {} LOSSES: {} TIES: {}", decks_a_paths[i], decks_b_paths[j], w, l, t);
+                        
+                        a_wins_total += w;
+                        b_wins_total += l;
+                        ties_total += t;
+                    }
+                    matchup_idx += 1;
+                }
+            }
+
+            let total = outcomes.len() as f64;
+            warn!("\nSummary Results (All Matchups Combined):");
+            warn!("Player 0 won: {} ({:.2}%)", a_wins_total, (a_wins_total as f64 / total) * 100.0);
+            warn!("Player 1 won: {} ({:.2}%)", b_wins_total, (b_wins_total as f64 / total) * 100.0);
+            warn!("Draws: {} ({:.2}%)", ties_total, (ties_total as f64 / total) * 100.0);
+        }
+    } else {
+        // Sequential/CPU fallback (though rarely used now for scientific eval)
+        let mut matchup_idx = 0;
+        for (i, _) in decks_a.iter().enumerate() {
+            for (j, _) in decks_b.iter().enumerate() {
+                let count = if matchup_idx < remainder {
+                    games_per_matchup + 1
+                } else {
+                    games_per_matchup
+                };
+
+                if count > 0 {
+                    warn!("\nMatchup {}/{}: {} vs {}", matchup_idx + 1, num_matchups, decks_a_paths[i], decks_b_paths[j]);
+                    simulate(&decks_a_paths[i], &decks_b_paths[j], Some(player_codes.clone()), count, seed, parallel, num_threads);
+                }
+                matchup_idx += 1;
+            }
+        }
     }
 
     warn!("\n{}", "=".repeat(60));
@@ -204,6 +283,8 @@ fn main() {
             initialize_logger(verbose);
 
             warn!("Welcome to {} simulation!", "deckgym".blue().bold());
+            #[cfg(feature = "onnx")]
+            deckgym::players::print_available_providers();
 
             // Fill in default players if not specified
             let player_codes = fill_code_array(players);
@@ -211,11 +292,8 @@ fn main() {
             // Check if any player uses ONNX - use batched mode for GPU efficiency
             let has_onnx = player_codes.iter().any(|p| is_onnx_player(p));
 
-            // Check if deck_b_or_folder is a directory
-            let path = std::path::Path::new(&deck_b_or_folder);
-            if path.is_dir() {
-                // Folder mode: run against multiple decks
-                // Note: Batched mode not yet supported for folder mode
+            // Check if either is a directory
+            if std::path::Path::new(&deck_a).is_dir() || std::path::Path::new(&deck_b_or_folder).is_dir() {
                 simulate_against_folder(
                     &deck_a,
                     &deck_b_or_folder,

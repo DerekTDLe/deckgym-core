@@ -385,13 +385,31 @@ pub fn simulate_batched(
 
     let start = Instant::now();
 
+    // Load decks
+    let deck_a = match Deck::from_file(deck_a_path) {
+        Ok(d) => d,
+        Err(e) => {
+            warn!("Failed to load deck A: {}", e);
+            return;
+        }
+    };
+    let deck_b = match Deck::from_file(deck_b_path) {
+        Ok(d) => d,
+        Err(e) => {
+            warn!("Failed to load deck B: {}", e);
+            return;
+        }
+    };
+
+    let deck_pairs = vec![(deck_a, deck_b); num_simulations as usize];
+
     // Create and run the batched runner
     let runner = match BatchedGameRunner::new(
-        deck_a_path,
-        deck_b_path,
+        deck_pairs,
         player_codes,
-        num_simulations,
         seed,
+        0,
+        num_simulations as usize
     ) {
         Ok(r) => r,
         Err(e) => {
