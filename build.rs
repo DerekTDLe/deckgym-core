@@ -13,7 +13,7 @@ fn main() {
         let mut paths = HashSet::new();
 
         // 1. Try ldconfig to find where the libraries actually live on this system
-        // We look for CUDA, cuDNN, and TensorRT libraries
+        // We look for CUDA, cuDNN libraries
         if let Ok(output) = Command::new("ldconfig").arg("-p").output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {

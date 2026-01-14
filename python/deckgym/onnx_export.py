@@ -156,11 +156,9 @@ def _validate_onnx_export(
 
     # ONNX output
     try:
-        # Try to use TensorRT or CUDA if available
+        # Try to use CUDA if available
         available_providers = ort.get_available_providers()
         providers = []
-        if "TensorrtExecutionProvider" in available_providers:
-            providers.append("TensorrtExecutionProvider")
         if "CUDAExecutionProvider" in available_providers:
             providers.append("CUDAExecutionProvider")
         providers.append("CPUExecutionProvider")
