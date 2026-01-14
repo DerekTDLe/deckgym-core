@@ -54,7 +54,7 @@ training:
   use_batched_env: true
   device: "auto"
   onnx_device: "auto"
-  pfsp_opponent_device: "trt" # GPU wont OOM with current settings
+  pfsp_opponent_device: "auto" # GPU wont OOM with current settings
   frozen_opponent_update_rollouts: 8
 
   # PFSP settings
