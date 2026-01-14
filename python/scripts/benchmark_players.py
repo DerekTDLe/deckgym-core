@@ -20,17 +20,16 @@ PLAYERS = [
     ("e3", "ExpectiMiniMax (depth 3)"),
     ("o1c", "ONNX CPU"),
     ("o1g", "ONNX GPU"),
-    ("o1t", "ONNX TensorRT"),
 ]
 
-NUM_GAMES = 200
+NUM_GAMES = 1000
 DECK_A = "example_decks/venusaur-exeggutor.txt"
 DECK_B = "example_decks/altaria.txt"
 # Should not matter
 
 
-def run_benchmark(player_code: str) -> tuple[float, float, float]:
-    """Run benchmark for a player and return (steps/sec, avg_plys, total_time_sec)."""
+def run_benchmark(player_code: str) -> float:
+    """Run benchmark for a player and return total_time_sec."""
     cmd = ["cargo", "run", "--release"]
 
     # Add --features onnx for ONNX-based players
@@ -46,15 +45,12 @@ def run_benchmark(player_code: str) -> tuple[float, float, float]:
             str(NUM_GAMES),
             "--players",
             f"{player_code},{player_code}",
+            "--parallel"
         ]
     )
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     output = result.stdout + result.stderr
-
-    # Parse average plys per game
-    plys_match = re.search(r"Average number of plys per game: ([\d.]+)", output)
-    avg_plys = float(plys_match.group(1)) if plys_match else 0.0
 
     # Parse total time - format: "Ran X simulations in Xm Xs Xms..." or "Xs Xms..."
     total_time_sec = 0.0
@@ -80,45 +76,38 @@ def run_benchmark(player_code: str) -> tuple[float, float, float]:
             if time_match:
                 total_time_sec = int(time_match.group(1)) / 1000.0
 
-    # Calculate steps per second
-    total_steps = avg_plys * NUM_GAMES
-    steps_per_sec = total_steps / total_time_sec if total_time_sec > 0 else 0.0
-
-    return steps_per_sec, avg_plys, total_time_sec
+    return total_time_sec
 
 
 def main():
-    print("=" * 72)
-    print("Player Baseline Benchmark (Steps per Second)")
-    print(f"Running {NUM_GAMES} games per player (both sides same player)")
-    print("=" * 72)
+    print("=" * 60)
+    print("Player Baseline Benchmark (Games per Second)")
+    print(f"Running {NUM_GAMES} games per player")
+    print("=" * 60)
     print()
 
     results = []
 
     for code, name in PLAYERS:
-        print(f"Benchmarking {name}...", end=" ", flush=True)
+        print(f"Benchmarking {name:.<30}", end=" ", flush=True)
         try:
-            steps_per_sec, avg_plys, total_time = run_benchmark(code)
-            results.append((name, code, steps_per_sec, avg_plys, total_time))
-            print(
-                f"{steps_per_sec:.0f} steps/s (avg {avg_plys:.1f} plys/game, {total_time:.2f}s total)"
-            )
+            total_time = run_benchmark(code)
+            gps = NUM_GAMES / total_time if total_time > 0 else 0.0
+            results.append((name, code, gps, total_time))
+            print(f"{gps:>10.1f} games/s ({total_time:.2f}s)")
         except Exception as e:
             print(f"ERROR: {e}")
-            results.append((name, code, 0.0, 0.0, 0.0))
+            results.append((name, code, 0.0, 0.0))
 
     print()
-    print("=" * 72)
-    print("Results (sorted by steps/second)")
-    print("=" * 72)
-    print(
-        f"{'Player':<30} {'Code':<6} {'Steps/s':>12} {'Plys/game':>10} {'Time (s)':>10}"
-    )
-    print("-" * 72)
+    print("=" * 60)
+    print("Results (sorted by games/second)")
+    print("=" * 60)
+    print(f"{'Player':<30} {'Code':<6} {'Games/s':>12} {'Time (s)':>10}")
+    print("-" * 60)
 
-    for name, code, sps, plys, time in sorted(results, key=lambda x: -x[2]):
-        print(f"{name:<30} {code:<6} {sps:>12,.0f} {plys:>10.1f} {time:>10.2f}")
+    for name, code, gps, time in sorted(results, key=lambda x: -x[2]):
+        print(f"{name:<30} {code:<6} {gps:>12.1f} {time:>10.2f}")
 
 
 if __name__ == "__main__":
