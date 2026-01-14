@@ -9,7 +9,7 @@
 use ndarray::Array2;
 #[cfg(feature = "onnx")]
 use ort::{
-    execution_providers::{CUDAExecutionProvider, TensorRTExecutionProvider},
+    execution_providers::{CUDAExecutionProvider, ExecutionProvider},
     session::{builder::GraphOptimizationLevel, Session},
     value::TensorRef,
 };
@@ -21,15 +21,10 @@ pub fn print_available_providers() {
 
     // Check CUDA availability (but actual usability depends on cuDNN)
     let cuda_ep = CUDAExecutionProvider::default();
-    let cuda_compiled = cuda_ep.is_available().unwrap_or(false);
-
-    let trt_ep = TensorRTExecutionProvider::default();
-    let trt_compiled = trt_ep.is_available().unwrap_or(false);
-
-    if cuda_compiled || trt_compiled {
-        eprintln!("  [ONNX] Compiled with: CUDA={}, TensorRT={} (requires cuDNN at runtime)",
-            if cuda_compiled { "yes" } else { "no" },
-            if trt_compiled { "yes" } else { "no" });
+    if cuda_ep.is_available().unwrap_or(false) {
+        eprintln!("  [ONNX] CUDA provider: AVAILABLE");
+    } else {
+        eprintln!("  [ONNX] CUDA provider: NOT AVAILABLE");
     }
 }
 
@@ -94,23 +89,11 @@ fn get_execution_providers(
         "cpu" => {
             vec![]
         }
-        "cuda" => {
+        "auto" | "cuda" => {
             vec![CUDAExecutionProvider::default().build()]
         }
-        "trt" | "tensorrt" => {
-            vec![TensorRTExecutionProvider::default().build()]
-        }
-        "auto" => {
-            vec![
-                TensorRTExecutionProvider::default().build(),
-                CUDAExecutionProvider::default().build(),
-            ]
-        }
         _ => {
-            vec![
-                TensorRTExecutionProvider::default().build(),
-                CUDAExecutionProvider::default().build(),
-            ]
+            vec![CUDAExecutionProvider::default().build()]
         }
     }
 }
@@ -285,50 +268,57 @@ impl Player for OnnxPlayer {
 /// This is faster than individual calls when processing multiple environments.
 #[cfg(feature = "onnx")]
 pub struct BatchedOnnxInference {
-    session: Session,
+    session: Arc<Mutex<Session>>,
     deterministic: bool,
 }
 
 #[cfg(feature = "onnx")]
 impl BatchedOnnxInference {
     pub fn new(model_path: &str, deterministic: bool, device: &str) -> Result<Self, String> {
-        use ort::execution_providers::ExecutionProvider;
+        let cache = get_session_cache();
+        let cache_key = format!("batched:{}:{}", model_path, device);
 
-        let mut builder = Session::builder()
-            .map_err(|e| format!("Failed to create session builder: {}", e))?;
+        let session = {
+            let mut guard = cache
+                .lock()
+                .map_err(|e| format!("Cache lock poisoned: {}", e))?;
 
-        // Register execution providers based on device selection
-        // Note: GPU requires LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
-        match device.to_lowercase().as_str() {
-            "cuda" => {
-                let _ = CUDAExecutionProvider::default()
-                    .with_device_id(0)
-                    .register(&mut builder);
+            if let Some(cached) = guard.get(&cache_key) {
+                // Reuse cached session - we need to extract the inner Session
+                // This is a bit tricky because OnnxPlayer stores Arc<Mutex<Session>>
+                // We'll just cache Session directly for batched too.
+                Arc::clone(cached)
+            } else {
+                let mut builder = Session::builder()
+                    .map_err(|e| format!("Failed to create session builder: {}", e))?;
+
+                // Register execution providers based on device selection
+                match device.to_lowercase().as_str() {
+                    "cuda" | "trt" | "tensorrt" | "auto" => {
+                        if let Err(e) = CUDAExecutionProvider::default()
+                            .with_device_id(0)
+                            .register(&mut builder) {
+                                eprintln!("  [ONNX] Warning: Failed to register CUDA provider: {}. Falling back to CPU.", e);
+                            } else {
+                                eprintln!("  [ONNX] CUDA provider registered successfully.");
+                            }
+                    }
+                    _ => {}
+                }
+
+                let new_session = builder
+                    .with_optimization_level(GraphOptimizationLevel::Level3)
+                    .map_err(|e| format!("Failed to set optimization level: {}", e))?
+                    .with_intra_threads(4)
+                    .map_err(|e| format!("Failed to set thread count: {}", e))?
+                    .commit_from_file(model_path)
+                    .map_err(|e| format!("Failed to load ONNX model: {}", e))?;
+
+                let arc_session = Arc::new(Mutex::new(new_session));
+                guard.insert(cache_key, Arc::clone(&arc_session));
+                arc_session
             }
-            "trt" | "tensorrt" => {
-                let _ = TensorRTExecutionProvider::default().register(&mut builder);
-            }
-            "auto" => {
-                // Try TensorRT first, then CUDA (will fall back to CPU if both fail)
-                let _ = TensorRTExecutionProvider::default().register(&mut builder);
-                let _ = CUDAExecutionProvider::default()
-                    .with_device_id(0)
-                    .register(&mut builder);
-            }
-            _ => {
-                // CPU - no additional providers needed
-            }
-        }
-
-
-        let session = builder
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| format!("Failed to set optimization level: {}", e))?
-            .with_intra_threads(4)  // Use more threads for CPU
-            .map_err(|e| format!("Failed to set thread count: {}", e))?
-            .commit_from_file(model_path)
-            .map_err(|e| format!("Failed to load ONNX model: {}", e))?;
-
+        };
 
         Ok(Self {
             session,
@@ -365,8 +355,8 @@ impl BatchedOnnxInference {
 
         // Run inference
         let all_logits = {
-            let outputs = self
-                .session
+            let mut session = self.session.lock().expect("Session lock poisoned");
+            let outputs = session
                 .run(ort::inputs![tensor])
                 .expect("Batched ONNX inference failed");
 
