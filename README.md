@@ -130,27 +130,24 @@ cargo run --bin card_status -- --first-incomplete
 
 The tool displays a summary showing total cards, completion percentage, and a breakdown of missing implementations by type (attacks, abilities, tools, trainer logic).
 
-**Player Performance Benchmark**
-
-Compare decision-making speed of different player strategies:
+Compare decision-making speed of different player strategies (running 1000 games in parallel):
 
 ```bash
 python python/scripts/benchmark_players.py
 ```
 
-| Player | Code | Steps/s | Notes |
+| Player | Code | Games/s | Notes |
 |--------|------|---------|-------|
-| Random | `r` | ~345,000 | Fastest baseline, no decision logic |
-| WeightedRandom | `w` | ~273,000 | Slight heuristics overhead |
-| AttachAttack | `aa` | ~154,000 | Simple attach-then-attack strategy |
-| EvolutionRusher | `er` | ~144,000 | Prioritizes evolutions |
-| EndTurn | `et` | ~135,000 | Always ends turn immediately |
-| ValueFunction | `v` | ~15,000 | Evaluates board state heuristically |
-| ExpectiMiniMax (d=2) | `e2` | ~1,500 | Tree search, 2 plies deep |
-| **ONNX Neural Net (CPU)** | `o1c` | **~930** | Attention model (15MB), single inference |
-| **ONNX Neural Net (GPU)** | `o1g` | **~930** | Attention model (15MB), single inference |
-| **ONNX Neural Net (TensorRT)** | `o1t` | **~930** | Attention model (15MB), single inference |
-| ExpectiMiniMax (d=3) | `e3` | ~450 | Exponentially slower with depth |
+| AttachAttack | `aa` | ~30300 | Simple heuristic, highly parallelizable |
+| EvolutionRusher | `er` | ~20000 | Prioritizes evolutions |
+| WeightedRandom | `w` | ~15000 | Slight heuristics overhead |
+| Random | `r` | ~10600 | Baseline random policy |
+| EndTurn | `et` | ~4200 | Always ends turn immediately |
+| ValueFunction | `v` | ~900 | Evaluates board state heuristically |
+| **ONNX o1 (GPU)** | `o1g` | **~210** | **Flagship Model** (Attention-based) |
+| ExpectiMiniMax (d=2) | `e2` | ~150 | Search tree with depth 2 |
+| ExpectiMiniMax (d=3) | `e3` | ~40 | Search tree with depth 3 |
+| **ONNX o1 (CPU)** | `o1c` | **~35** | Attention model (15MB) |
 | **MCTSPlayer** | `m[n]` | Varies | Omniscient search (lookahead) |
 
 > [!NOTE]
@@ -240,25 +237,13 @@ The agent learns through continuous self-play against its own previous versions 
 | **Stability** | Rust-side `catch_unwind` prevents game-state crashes |
 | **YAML Config** | Fully configurable via `configs/template.yaml` |
 
-### Benchmark Tournament Results (vs e2)
+| Tier | Participant | Win% (vs e2) | Evaluation Mode |
+|:----:|-------------|-----:|:--- |
+| **S+** | **Expectiminimax(2)** 🎯 | 50% | Reference (Cheating) |
+| **S** | **ONNX o1 (best)** 🚀 | **45.02%** | **Extensive Chaos** |
 
-| Tier | Participant | Win% | Rating | Steps |
-|:----:|-------------|-----:|-------:|------:|
-| **S+** | **Expectiminimax(2)** 🎯 | 79.0% | 1765 | — |
-| **S** | Attention (last) | 69.8% | 1659 | 30M |
-| **S** | Attention (best) | 68.5% | 1648 | 26.6M |
-| **A** | MLP (last) | 65.8% | 1620 | 30M |
-| **A** | MLP (best) | 65.3% | 1614 | 28.7M |
-| **B** | MLP (outlier) | 59.0% | 1552 | 3.5M |
-| **B** | MLP (first beat ER) | 54.5% | 1513 | — |
-| **B** | Attention (first beat ER) | 42.3% | 1396 | — |
-| **C** | EvolutionRusher 🤖 | 39.7% | 1370 | — |
-| **C** | WeightedRandom | 30.6% | 1274 | — |
-| **D** | Attention (256k) | 23.3% | 1209 | 256k |
-| **D** | MLP (256k) | 23.1% | 1208 | 256k |
-| **D** | AttachAttack | 20.0% | 1164 | — |
-
-Attention (best) and MLP (best) are the currently used baselines.
+> [!TIP]
+> **Context on o1 Performance**: While `o1` consistently maintained a >50% winrate during training (stochastic sampling), its definitive **45.02%** winrate on the **Extensive Chaos** benchmark reflects a more rigorous, deterministic evaluation across 396 unique archetypes. This makes `o1` our first non-cheating agent to break the 40% barrier against a cheating minimax reference.
 
 ### Usefull Commands
 
