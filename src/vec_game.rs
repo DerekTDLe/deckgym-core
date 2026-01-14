@@ -318,6 +318,8 @@ impl VecGame {
             env.opponent_type = None;
             env.players = None;
         }
+        // Also clear the cache to be safe
+        crate::players::onnx_player::clear_onnx_cache();
     }
 
     /// Add an ONNX model to the opponent pool
@@ -453,6 +455,8 @@ impl VecGame {
         for idx in &mut self.env_opponent_indices {
             *idx = None;
         }
+        // Force-clear the global session cache to release VRAM
+        crate::players::onnx_player::clear_onnx_cache();
     }
 
     /// Remove a specific opponent from the pool (frees GPU memory for ONNX)
@@ -497,6 +501,11 @@ impl VecGame {
             Some(idx) => idx,
             None => return false,
         };
+
+        // If it's an ONNX opponent, remove from global cache to release VRAM
+        if let Some(Some(onnx)) = self.onnx_pool.get(opp_idx) {
+            crate::players::onnx_player::remove_model_from_cache(&onnx.model_path, &onnx.device);
+        }
 
         self.onnx_pool.remove(opp_idx);
         self.onnx_pool_names.remove(opp_idx);

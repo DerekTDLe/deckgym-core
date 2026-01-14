@@ -183,13 +183,22 @@ class PFSPCallback(BaseCallback):
             self.episode_results.clear()
 
         # Add current agent to pool
+        # "All-Time" means cumulative winrate reset at each refresh 
         if self.rollout_count % self.add_to_pool_every_n_rollouts == 0:
-            sp_winrate = self.league_logger.get_self_play_winrate()
+            # Use All-Time (cumulative) winrate for the addition decision
+            all_time_wr = self.league_logger.get_global_winrate(rollout_results=None)
             min_wr_to_add = getattr(self.env.config, "pfsp_min_winrate_to_add", 0.50)
 
-            if sp_winrate >= min_wr_to_add or self.pool.model_count < 2:
-                self._add_to_pool()
+            if self.verbose > 0:
+                print(f"\n[PFSP] --- Pool Refresh Check (Rollout {self.rollout_count}) ---")
+                print(f"[PFSP] All-Time WR: {all_time_wr:.1%} (Required: {min_wr_to_add:.1%})")
 
+            if all_time_wr >= min_wr_to_add or self.pool.model_count < self.pool.pool_size:
+                self._add_to_pool()
+                # Reset ALL statistics only when pool composition changes
+
+            elif self.verbose > 0:
+                print(f"[PFSP] Agent rejected: Winrate {sp_winrate:.1%} is below required {min_wr_to_add:.1%}")
             # Reset all stats at each refresh (even if agent not added)
             self.pool.reset_statistics()
             self.pool.reset_total_statistics()
@@ -268,13 +277,6 @@ class PFSPCallback(BaseCallback):
         if self.verbose > 0:
             print(f"[PFSP] Saved and added model: {name}")
         gc.collect()
-
-    def get_pool_stats(self) -> Dict:
-        """Backward compatibility for stats."""
-        return {
-            "pool_size": self.pool.total_count,
-            "self_play_winrate": self.league_logger.get_self_play_winrate(),
-        }
 
     def _add_onnx_baseline_to_rust(self, name: str, code: str):
         """Resolve an ONNX baseline code to a path and add it to Rust ONNX pool."""
