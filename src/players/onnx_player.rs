@@ -63,6 +63,31 @@ fn get_session_cache() -> &'static SessionCache {
     ONNX_SESSION_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Clear the global ONNX session cache to free GPU memory.
+#[cfg(feature = "onnx")]
+pub fn clear_onnx_cache() {
+    if let Some(cache) = ONNX_SESSION_CACHE.get() {
+        if let Ok(mut guard) = cache.lock() {
+            guard.clear();
+            eprintln!("  [ONNX] Session cache cleared (GPU memory released)");
+        }
+    }
+}
+
+/// Remove a specific model from the cache.
+#[cfg(feature = "onnx")]
+pub fn remove_model_from_cache(model_path: &str, device: &str) {
+    if let Some(cache) = ONNX_SESSION_CACHE.get() {
+        if let Ok(mut guard) = cache.lock() {
+            let normal_key = format!("{}:{}", model_path, device);
+            let batched_key = format!("batched:{}:{}", model_path, device);
+            guard.remove(&normal_key);
+            guard.remove(&batched_key);
+            eprintln!("  [ONNX] Model removed from cache: {}", model_path);
+        }
+    }
+}
+
 /// A player that uses an ONNX model for decision-making.
 ///
 /// The model takes a game observation and outputs action logits.
@@ -72,12 +97,18 @@ pub struct OnnxPlayer {
     session: Arc<Mutex<Session>>,
     deterministic: bool,
     deck: Deck,
+    model_path: String,
+    device: String,
 }
 
 #[cfg(feature = "onnx")]
 impl Debug for OnnxPlayer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "OnnxPlayer {{ deterministic: {} }}", self.deterministic)
+        write!(
+            f,
+            "OnnxPlayer {{ model: {}, device: {}, deterministic: {} }}",
+            self.model_path, self.device, self.deterministic
+        )
     }
 }
 
@@ -151,6 +182,8 @@ impl OnnxPlayer {
             session,
             deterministic,
             deck,
+            model_path: model_path.to_string(),
+            device: device.to_string(),
         })
     }
 
@@ -270,6 +303,8 @@ impl Player for OnnxPlayer {
 pub struct BatchedOnnxInference {
     session: Arc<Mutex<Session>>,
     deterministic: bool,
+    pub model_path: String,
+    pub device: String,
 }
 
 #[cfg(feature = "onnx")]
@@ -323,6 +358,8 @@ impl BatchedOnnxInference {
         Ok(Self {
             session,
             deterministic,
+            model_path: model_path.to_string(),
+            device: device.to_string(),
         })
     }
 

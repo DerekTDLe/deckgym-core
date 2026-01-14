@@ -5,7 +5,7 @@ mod expectiminimax_player;
 mod human_player;
 mod mcts_player;
 #[cfg(feature = "onnx")]
-mod onnx_player;
+pub mod onnx_player;
 mod random_player;
 mod value_function_player;
 pub mod value_functions;
@@ -18,7 +18,10 @@ pub use expectiminimax_player::{ExpectiMiniMaxPlayer, ValueFunction};
 pub use human_player::HumanPlayer;
 pub use mcts_player::MctsPlayer;
 #[cfg(feature = "onnx")]
-pub use onnx_player::{print_available_providers, BatchedOnnxInference, OnnxPlayer};
+pub use onnx_player::{
+    clear_onnx_cache, print_available_providers, remove_model_from_cache, BatchedOnnxInference,
+    OnnxPlayer,
+};
 pub use random_player::RandomPlayer;
 pub use value_function_player::ValueFunctionPlayer;
 pub use value_functions::*;
@@ -98,7 +101,7 @@ pub fn parse_player_code(s: &str) -> Result<PlayerCode, String> {
     }
 
     // Check if it starts with 'o' followed by digits and optional device suffix
-    // o1 = auto, o1c = cpu, o1g = cuda, o1t = tensorrt
+    // o1 = auto, o1c = cpu, o1g = cuda
     #[cfg(feature = "onnx")]
     if lower.starts_with('o') && lower.len() > 1 {
         let rest = &lower[1..];
