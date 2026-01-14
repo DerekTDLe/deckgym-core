@@ -10,3 +10,4 @@ __pycache__/
 # RL training artifacts
 checkpoints/
 models/arena/
+eval_reports/*.json
