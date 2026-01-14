@@ -83,15 +83,6 @@ class OpponentPool:
                     self.opponents[opp_name]["draws"] += 1
                     self.opponents[opp_name]["total_draws"] += 1
 
-    def apply_decay(self, window_size: int):
-        """Scale down statistics to keep within a rolling window."""
-        for opp_name, data in self.opponents.items():
-            total = data["wins"] + data["losses"] + data["draws"]
-            if total > window_size:
-                scale = window_size / total
-                data["wins"] = round(data["wins"] * scale)
-                data["losses"] = round(data["losses"] * scale)
-                data["draws"] = round(data["draws"] * scale)
 
     def get_eviction_candidates(
         self, exclude_names: List[str] = None

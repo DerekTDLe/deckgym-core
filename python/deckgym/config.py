@@ -200,7 +200,6 @@ class TrainingConfig:
     pfsp_add_every_n_rollouts: int = 8  # Add current agent to pool
     pfsp_select_every_n_rollouts: int = 2  # Select new opponent
     pfsp_priority_exponent: float = 2.0  # f(x) = x^p (higher = focus on hard opponents)
-    pfsp_winrate_window: int = 200  # Track winrate over N recent episodes
     pfsp_checkpoint_dir: str = "./checkpoints/pfsp_pool/"
     pfsp_min_winrate_to_add: float = 0.50  # Only add to pool if agent winrate >= this
 
@@ -300,7 +299,6 @@ class TrainingConfig:
             "pfsp_pool_size",
             "pfsp_add_every_n_rollouts",
             "pfsp_select_every_n_rollouts",
-            "pfsp_winrate_window",
             "n_envs",
             "max_turns",
             "max_actions_per_turn",
@@ -431,7 +429,6 @@ training:
   pfsp_add_every_n_rollouts: {self.pfsp_add_every_n_rollouts}
   pfsp_select_every_n_rollouts: {self.pfsp_select_every_n_rollouts}
   pfsp_priority_exponent: {self.pfsp_priority_exponent}
-  pfsp_winrate_window: {self.pfsp_winrate_window}
   pfsp_checkpoint_dir: "{self.pfsp_checkpoint_dir}"
   pfsp_baseline_curriculum: {self.pfsp_baseline_curriculum}
 
@@ -530,7 +527,6 @@ environment:
                 "pfsp_add_every_n_rollouts",
                 "pfsp_select_every_n_rollouts",
                 "pfsp_priority_exponent",
-                "pfsp_winrate_window",
                 "pfsp_checkpoint_dir",
                 "brutal_resume",
                 "pfsp_baseline_curriculum",

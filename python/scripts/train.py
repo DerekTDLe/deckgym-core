@@ -801,7 +801,6 @@ def train(config: TrainingConfig = DEFAULT_CONFIG):
                 add_to_pool_every_n_rollouts=config.pfsp_add_every_n_rollouts,
                 select_opponent_every_n_rollouts=config.pfsp_select_every_n_rollouts,
                 priority_exponent=config.pfsp_priority_exponent,
-                winrate_window=config.pfsp_winrate_window,
                 checkpoint_dir=config.pfsp_checkpoint_dir,
                 brutal_resume=config.brutal_resume,
                 verbose=1,

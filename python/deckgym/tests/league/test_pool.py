@@ -56,17 +56,6 @@ class TestOpponentPool(unittest.TestCase):
         self.assertEqual(data["losses"], 2)
         self.assertEqual(data["draws"], 1)
 
-    def test_apply_decay(self):
-        name = "opp1"
-        # Total = 100 + 50 + 50 = 200. Window = 100.
-        self.pool.add_opponent(name, {"wins": 100, "losses": 50, "draws": 50})
-        self.pool.apply_decay(window_size=100)
-
-        data = self.pool.get_data(name)
-        # Should be halved
-        self.assertEqual(data["wins"], 50)
-        self.assertEqual(data["losses"], 25)
-        self.assertEqual(data["draws"], 25)
 
     def test_eviction_candidates(self):
         # Pool size is 3

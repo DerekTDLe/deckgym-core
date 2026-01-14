@@ -15,7 +15,6 @@ PFSP addresses a key weakness of simple frozen opponent self-play: the agent can
 
 ### 2. **Win Rate Tracking**
 - Tracks agent's win rate against each opponent in the pool
-- Uses a sliding window (default: 200 recent episodes)
 - Win rates updated continuously during training
 
 ### 3. **Priority-Based Selection**
@@ -140,10 +139,6 @@ python python/scripts/evaluate.py full --games 300
   - `p=2.0`: Quadratic (focus on hard opponents)
   - `p=3.0`: Cubic (very aggressive, may ignore weak opponents)
 
-### `pfsp_winrate_window`
-- **Range**: 50-500
-- **Optimal**: 200
-- **Trade-off**: Larger = more stable, smaller = more reactive
 
 ## Implementation Details
 
