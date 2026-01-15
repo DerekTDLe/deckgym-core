@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark script to compare steps per second of various player baselines.
+Benchmark script to compare games per second of various player baselines.
 Usage: python python/scripts/benchmark_players.py
 """
 
@@ -23,9 +23,10 @@ PLAYERS = [
 ]
 
 NUM_GAMES = 1000
+# Deck content should not matter
 DECK_A = "example_decks/venusaur-exeggutor.txt"
 DECK_B = "example_decks/altaria.txt"
-# Should not matter
+
 
 
 def run_benchmark(player_code: str) -> float:

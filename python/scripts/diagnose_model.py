@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Clean diagnostic script for attention model."""
+"""Diagnostic script for attention model.
+Usage: python python/scripts/diagnose_model.py path/to/model.zip"""
 
 import argparse
 import numpy as np
@@ -45,11 +46,11 @@ def analyze_gradients(model):
             grad_norm = param.grad.norm().item()
             grad_stats[name] = grad_norm
 
-            status = "✅"
+            status = "[OK]"
             if grad_norm < 1e-6:
-                status = "❌ VANISHING"
+                status = "[CRITICAL] VANISHING"
             elif grad_norm > DIAG_LARGE_GRADIENT_THRESHOLD:
-                status = "⚠️  LARGE"
+                status = "[WARNING] LARGE"
 
             print(f"    {name:55s}: {grad_norm:10.6f} {status}")
 
@@ -61,11 +62,11 @@ def analyze_gradients(model):
 
         print(f"\n  Gradient Imbalance Ratio: {ratio:.1f}")
         if ratio > DIAG_GRADIENT_IMBALANCE_CRITICAL:
-            print(f"  ❌ CRITICAL: Ratio >{DIAG_GRADIENT_IMBALANCE_CRITICAL}")
+            print(f"  [CRITICAL] Ratio >{DIAG_GRADIENT_IMBALANCE_CRITICAL}")
         elif ratio > DIAG_GRADIENT_IMBALANCE_WARNING:
-            print(f"  ⚠️  WARNING: Ratio >{DIAG_GRADIENT_IMBALANCE_WARNING}")
+            print(f"  [WARNING] Ratio >{DIAG_GRADIENT_IMBALANCE_WARNING}")
         else:
-            print("  ✅ Balanced")
+            print("  [OK] Balanced")
 
         # Use the internal group diagnostics
         print("\n  Gradients by Component Group:")
@@ -91,11 +92,11 @@ def analyze_weights(model):
             mean = weights.mean()
             std = weights.std()
 
-            status = "✅"
+            status = "[OK]"
             if abs(mean) > 0.1:
-                status = "⚠️  High mean"
+                status = "[WARNING] High mean"
             if std < DIAG_WEIGHT_STD_MIN or std > DIAG_WEIGHT_STD_MAX:
-                status = "⚠️  Unusual std"
+                status = "[WARNING] Unusual std"
 
             print(f"  {name:55s}: μ={mean:7.4f}, σ={std:6.4f} {status}")
 
@@ -110,10 +111,10 @@ def analyze_attention_layers(model):
     has_attention = hasattr(model.policy.features_extractor, "attention_layers")
 
     if not has_attention:
-        print("  ⚠️  No attention layers found (MLP model)")
+        print("  [WARNING] No attention layers found (MLP model)")
         return
 
-    print("  ✅ Attention layers present")
+    print("  [OK] Attention layers present")
 
     # Perform a forward pass with tracking ENABLED
     model.policy.eval()
@@ -128,13 +129,13 @@ def analyze_attention_layers(model):
         logit_std = layer_stats["attn_logit_std"]
         entropy = layer_stats["attn_entropy"]
 
-        std_status = "✅"
+        std_status = "[OK]"
         if logit_std > DIAG_ATTENTION_LOGIT_STD_WARNING:
-            std_status = "⚠️  SATURATING (High Logits)"
+            std_status = "[WARNING] SATURATING (High Logits)"
 
-        entropy_status = "✅"
+        entropy_status = "[OK]"
         if entropy < DIAG_ATTENTION_ENTROPY_WARNING:
-            entropy_status = "⚠️  PEAKY (Low Entropy)"
+            entropy_status = "[WARNING] PEAKY (Low Entropy)"
 
         print(
             f"    {layer_name:10s}: Logit Std={logit_std:7.4f} {std_status}, Entropy={entropy:7.4f} {entropy_status}"
@@ -154,8 +155,8 @@ def analyze_attention_layers(model):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, required=True)
+    parser = argparse.ArgumentParser(description="Model Diagnostics, including gradient, weight and bias analysis.")
+    parser.add_argument("path/to/model", type=str, required=True)
     args = parser.parse_args()
 
     print("=" * 70)
@@ -187,11 +188,11 @@ def main():
         )
 
     if issues:
-        print("  ⚠️  Issues:")
+        print("  [WARNING] Issues:")
         for issue in issues:
             print(f"    - {issue}")
     else:
-        print("  ✅ No critical issues!")
+        print("  [OK] No critical issues!")
 
 
 if __name__ == "__main__":
