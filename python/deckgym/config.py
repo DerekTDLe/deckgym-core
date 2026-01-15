@@ -25,10 +25,10 @@ import math
 # =============================================================================
 
 # Card features
-GLOBAL_FEATURES = 41  # 1 turn + 2 points + 2 deck + 2 hand + 2 discard + 32 deck_energy
-FEATURES_PER_CARD = 121  # 113 intrinsic + 8 position
-MAX_CARDS_IN_GAME = 18  # 10 hand + 4 self board + 4 opponent board
-OBSERVATION_SIZE = GLOBAL_FEATURES + (MAX_CARDS_IN_GAME * FEATURES_PER_CARD)  # 2219
+GLOBAL_FEATURES = 42  # 1 turn + 3 points + 2 deck + 2 hand + 2 discard + 32 deck_energy
+FEATURES_PER_CARD = 343
+MAX_CARDS_IN_GAME = 40
+OBSERVATION_SIZE = GLOBAL_FEATURES + (MAX_CARDS_IN_GAME * FEATURES_PER_CARD)  # 13762
 
 # Action space
 ACTION_SPACE_SIZE = 175  # Must match src/rl/action_mask.rs
@@ -92,7 +92,7 @@ DIAG_ATTENTION_ENTROPY_WARNING = 0.5  # Attention too peaky if < 0.5
 # =============================================================================
 
 # Attention model defaults
-MODEL_EMBED_DIM_DEFAULT = 256  # Transformer embedding dimension
+MODEL_EMBED_DIM_DEFAULT = 512  # Transformer embedding dimension
 MODEL_NUM_HEADS_DEFAULT = 8  # Multi-head attention heads
 MODEL_NUM_LAYERS_DEFAULT = 3  # Number of transformer layers
 MODEL_ATTENTION_DROPOUT = 0.1  # Dropout in attention layers (reduced from 0.15)
@@ -103,12 +103,11 @@ MODEL_ATTENTION_TEMPERATURE = 1.0  # Softmax temperature (increase if saturating
 MODEL_INIT_RESIDUAL_SCALE = True  # Scale residual branch outputs for stability
 
 # Policy/Value network architecture (MLP heads after attention/pooling)
-# Reduced depth to improve gradient flow from loss to attention
-MODEL_POLICY_LAYERS_DEFAULT = (256, 128)  # Was (512, 256, 128)
-MODEL_VALUE_LAYERS_DEFAULT = (256, 128)  # Was (512, 256)
+MODEL_POLICY_LAYERS_DEFAULT = (512, 256, 128)
+MODEL_VALUE_LAYERS_DEFAULT = (512, 256)
 
 # Internal architecture scaling and thresholds
-MODEL_GLOBAL_PROJ_DIM = 128  # Projection size for non-card (global) features
+MODEL_GLOBAL_PROJ_DIM = 256  # Projection size for non-card (global) features
 MODEL_FF_EXPANSION_FACTOR = 4  # Transformer FF block expansion ratio
 MODEL_OUTPUT_PROJ_FACTOR = 2  # Output size = embed_dim * this factor
 MODEL_MASK_THRESHOLD = 1e-6  # Threshold to detect all-zero padding
