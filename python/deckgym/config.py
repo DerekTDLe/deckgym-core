@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Union
 import yaml
 import math
+import json
 
 
 # =============================================================================
@@ -429,7 +430,7 @@ training:
   pfsp_select_every_n_rollouts: {self.pfsp_select_every_n_rollouts}
   pfsp_priority_exponent: {self.pfsp_priority_exponent}
   pfsp_checkpoint_dir: "{self.pfsp_checkpoint_dir}"
-  pfsp_baseline_curriculum: {self.pfsp_baseline_curriculum}
+  pfsp_baseline_curriculum: {json.dumps(self.pfsp_baseline_curriculum)}
 
 environment:
   max_turns: {self.max_turns}
