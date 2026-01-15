@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Scientific Evaluation Script for DeckGym (Extensive Chaos Mode).
-Performs a full matrix cross-evaluation (396x396) to eliminate deck bias.
+Scientific Evaluation Script for DeckGym with 2 modes.
+Extensive Chaos: Performs a full matrix cross-evaluation (396x396) to eliminate deck bias.
+Generalization: Tests the model's ability to generalize to unseen decks.
 """
 
 import argparse
@@ -178,22 +179,17 @@ class ScientificEvaluator:
         
         # 4. Trials
         # Control Trial: players (o1, e2) using 2 control decks VS opponent (e2) using 10k meta decks
+        # Note o1 is used as an example, other ONNX models can be used instead.
         console.print("\n[bold cyan]--- PHASE 1: Control Trial ---[/bold cyan]")
         console.print(f"Goal: Measure performance of {self.model_code} and e2 on known meta decks vs 10k meta pool.")
-        
-        # We need a way to force the model code for each participant in the matrix.
-        # ScientificEvaluator.run_paradigm uses self.model_code for the first player.
-        # We need to run it twice: once for o1 and once for e2? 
-        # Actually, the user says "o1 et e2 vont alors affronter e2".
-        # This means we run the paradigm for o1 vs e2, and e2 vs e2.
         
         # Save original model_code
         original_model = self.model_code
         
-        # o1 Control
+        # ONNX Control
         self.model_code = original_model
-        results_control_o1 = self.run_paradigm("Control o1", control_decks, gen_opponent_pool, silent=True)
-        wr_control_o1 = self._get_wr(results_control_o1)
+        results_control_onnx = self.run_paradigm(f"Control {original_model}", control_decks, gen_opponent_pool, silent=True)
+        wr_control_onnx = self._get_wr(results_control_onnx)
         
         # e2 Control
         self.model_code = "e2"
@@ -204,10 +200,10 @@ class ScientificEvaluator:
         console.print("\n[bold cyan]--- PHASE 2: Generalization Trial ---[/bold cyan]")
         console.print(f"Goal: Measure performance of {original_model} and e2 on unseen decks vs 10k meta pool.")
         
-        # o1 Gen
+        # ONNX Gen
         self.model_code = original_model
-        results_gen_o1 = self.run_paradigm("Generalization o1", gen_decks, gen_opponent_pool, silent=True)
-        wr_gen_o1 = self._get_wr(results_gen_o1)
+        results_gen_onnx = self.run_paradigm(f"Generalization {original_model}", gen_decks, gen_opponent_pool, silent=True)
+        wr_gen_onnx = self._get_wr(results_gen_onnx)
         
         # e2 Gen
         self.model_code = "e2"
@@ -218,30 +214,30 @@ class ScientificEvaluator:
         self.model_code = original_model
         
         # 5. Metrics
-        drop_o1 = wr_control_o1 - wr_gen_o1
+        drop_onnx = wr_control_onnx - wr_gen_onnx
         drop_e2 = wr_control_e2 - wr_gen_e2
-        gen_score = drop_e2 - drop_o1
+        gen_score = drop_e2 - drop_onnx
         
         # 6. Report
         self._report_generalization(
-            wr_control_o1, wr_gen_o1, drop_o1,
+            wr_control_onnx, wr_gen_onnx, drop_onnx,
             wr_control_e2, wr_gen_e2, drop_e2,
             gen_score
         )
         
         # Save results
         all_results = {
-            "Control o1": results_control_o1,
+            "Control o1": results_control_onnx,
             "Control e2": results_control_e2,
-            "Generalization o1": results_gen_o1,
+            "Generalization o1": results_gen_onnx,
             "Generalization e2": results_gen_e2
         }
         
         # Additional data for save_results to include in markdown
         self.gen_protocol_data = {
-            "wr_control_o1": wr_control_o1,
-            "wr_gen_o1": wr_gen_o1,
-            "drop_o1": drop_o1,
+            "wr_control_onnx": wr_control_onnx,
+            "wr_gen_onnx": wr_gen_onnx,
+            "drop_onnx": drop_onnx,
             "wr_control_e2": wr_control_e2,
             "wr_gen_e2": wr_gen_e2,
             "drop_e2": drop_e2,
@@ -256,15 +252,15 @@ class ScientificEvaluator:
         total_games = sum(r.get("total", 0) for r in results)
         return total_wins / total_games if total_games > 0 else 0.0
 
-    def _report_generalization(self, wr_c_o1, wr_g_o1, drop_o1, wr_c_e2, wr_g_e2, drop_e2, score):
+    def _report_generalization(self, wr_c_onnx, wr_g_onnx, drop_onnx, wr_c_e2, wr_g_e2, drop_e2, score):
         table = Table(title="[bold yellow]Generalization Protocol Results[/bold yellow]", show_lines=True)
         table.add_column("Metric", style="cyan")
         table.add_column(f"{self.model_code}", justify="right", style="green")
         table.add_column("e2 (Reference)", justify="right", style="magenta")
         
-        table.add_row("Winrate Control", f"{wr_c_o1*100:.2f}%", f"{wr_c_e2*100:.2f}%")
-        table.add_row("Winrate Gen", f"{wr_g_o1*100:.2f}%", f"{wr_g_e2*100:.2f}%")
-        table.add_row("Performance Drop", f"[bold red]{drop_o1*100:.2f}%[/bold red]", f"[bold red]{drop_e2*100:.2f}%[/bold red]")
+        table.add_row("Winrate Control", f"{wr_c_onnx*100:.2f}%", f"{wr_c_e2*100:.2f}%")
+        table.add_row("Winrate Gen", f"{wr_g_onnx*100:.2f}%", f"{wr_g_e2*100:.2f}%")
+        table.add_row("Performance Drop", f"[bold red]{drop_onnx*100:.2f}%[/bold red]", f"[bold red]{drop_e2*100:.2f}%[/bold red]")
         
         console.print("\n")
         console.print(table)
