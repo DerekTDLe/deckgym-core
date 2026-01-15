@@ -137,6 +137,153 @@ class ScientificEvaluator:
 
         return matchups
 
+    def run_generalization_protocol(self):
+        """Execute the Generalization Protocol."""
+        self.analyze_data()
+        
+        # 0. Setup Seed
+        seed = 42
+        random.seed(seed)
+        np.random.seed(seed)
+        
+        # Force 1 game per matchup for speed and fairness in large pools
+        self.num_games = 1
+        
+        # 1. Sample 10k decks for reference opponent
+        console.print("[bold yellow]Sampling 10,000 decks for generalization opponent pool...[/bold yellow]")
+        gen_opponent_pool = self.loader.sample_n_deck_info(10000, mode="uniform")
+        
+        # 2. Sample 2 control decks
+        console.print("[bold yellow]Sampling 2 control decks...[/bold yellow]")
+        control_decks = self.loader.sample_n_deck_info(2, mode="uniform")
+        
+        # 3. Load 2 never-used decks
+        console.print("[bold yellow]Loading never-used decks...[/bold yellow]")
+        neverused_dir = Path("example_decks/neverused_decks")
+        neverused_files = sorted(list(neverused_dir.glob("*.txt")))
+        if len(neverused_files) < 2:
+            console.print("[red]Error: Need at least 2 decks in example_decks/neverused_decks[/red]")
+            return
+        
+        gen_decks = []
+        for fpath in neverused_files[:2]:
+            with open(fpath, "r") as f:
+                content = f.read()
+                gen_decks.append(DeckInfo(
+                    archetype=fpath.stem,
+                    strength=0.5,
+                    score=0.5,
+                    deck_string=content
+                ))
+        
+        # 4. Trials
+        # Control Trial: players (o1, e2) using 2 control decks VS opponent (e2) using 10k meta decks
+        console.print("\n[bold cyan]--- PHASE 1: Control Trial ---[/bold cyan]")
+        console.print(f"Goal: Measure performance of {self.model_code} and e2 on known meta decks vs 10k meta pool.")
+        
+        # We need a way to force the model code for each participant in the matrix.
+        # ScientificEvaluator.run_paradigm uses self.model_code for the first player.
+        # We need to run it twice: once for o1 and once for e2? 
+        # Actually, the user says "o1 et e2 vont alors affronter e2".
+        # This means we run the paradigm for o1 vs e2, and e2 vs e2.
+        
+        # Save original model_code
+        original_model = self.model_code
+        
+        # o1 Control
+        self.model_code = original_model
+        results_control_o1 = self.run_paradigm("Control o1", control_decks, gen_opponent_pool, silent=True)
+        wr_control_o1 = self._get_wr(results_control_o1)
+        
+        # e2 Control
+        self.model_code = "e2"
+        results_control_e2 = self.run_paradigm("Control e2", control_decks, gen_opponent_pool, silent=True)
+        wr_control_e2 = self._get_wr(results_control_e2)
+        
+        # Gen Trial: players (o1, e2) using 2 unseen decks VS opponent (e2) using 10k meta decks
+        console.print("\n[bold cyan]--- PHASE 2: Generalization Trial ---[/bold cyan]")
+        console.print(f"Goal: Measure performance of {original_model} and e2 on unseen decks vs 10k meta pool.")
+        
+        # o1 Gen
+        self.model_code = original_model
+        results_gen_o1 = self.run_paradigm("Generalization o1", gen_decks, gen_opponent_pool, silent=True)
+        wr_gen_o1 = self._get_wr(results_gen_o1)
+        
+        # e2 Gen
+        self.model_code = "e2"
+        results_gen_e2 = self.run_paradigm("Generalization e2", gen_decks, gen_opponent_pool, silent=True)
+        wr_gen_e2 = self._get_wr(results_gen_e2)
+        
+        # Restore original model_code
+        self.model_code = original_model
+        
+        # 5. Metrics
+        drop_o1 = wr_control_o1 - wr_gen_o1
+        drop_e2 = wr_control_e2 - wr_gen_e2
+        gen_score = drop_e2 - drop_o1
+        
+        # 6. Report
+        self._report_generalization(
+            wr_control_o1, wr_gen_o1, drop_o1,
+            wr_control_e2, wr_gen_e2, drop_e2,
+            gen_score
+        )
+        
+        # Save results
+        all_results = {
+            "Control o1": results_control_o1,
+            "Control e2": results_control_e2,
+            "Generalization o1": results_gen_o1,
+            "Generalization e2": results_gen_e2
+        }
+        
+        # Additional data for save_results to include in markdown
+        self.gen_protocol_data = {
+            "wr_control_o1": wr_control_o1,
+            "wr_gen_o1": wr_gen_o1,
+            "drop_o1": drop_o1,
+            "wr_control_e2": wr_control_e2,
+            "wr_gen_e2": wr_gen_e2,
+            "drop_e2": drop_e2,
+            "gen_score": gen_score
+        }
+        
+        self.save_results(all_results)
+
+    def _get_wr(self, results: List[Dict]) -> float:
+        if not results: return 0.0
+        total_wins = sum(r.get("wins", 0) for r in results)
+        total_games = sum(r.get("total", 0) for r in results)
+        return total_wins / total_games if total_games > 0 else 0.0
+
+    def _report_generalization(self, wr_c_o1, wr_g_o1, drop_o1, wr_c_e2, wr_g_e2, drop_e2, score):
+        table = Table(title="[bold yellow]Generalization Protocol Results[/bold yellow]", show_lines=True)
+        table.add_column("Metric", style="cyan")
+        table.add_column(f"{self.model_code}", justify="right", style="green")
+        table.add_column("e2 (Reference)", justify="right", style="magenta")
+        
+        table.add_row("Winrate Control", f"{wr_c_o1*100:.2f}%", f"{wr_c_e2*100:.2f}%")
+        table.add_row("Winrate Gen", f"{wr_g_o1*100:.2f}%", f"{wr_g_e2*100:.2f}%")
+        table.add_row("Performance Drop", f"[bold red]{drop_o1*100:.2f}%[/bold red]", f"[bold red]{drop_e2*100:.2f}%[/bold red]")
+        
+        console.print("\n")
+        console.print(table)
+        
+        interpretation = ""
+        if score > 0.02:
+            interpretation = f"[bold green]{self.model_code} generalizes BETTER than e2[/bold green]"
+        elif score < -0.02:
+            interpretation = f"[bold red]{self.model_code} generalizes WORSE than e2[/bold red]"
+        else:
+            interpretation = "[bold yellow]Same generalization capability[/bold yellow]"
+            
+        console.print(Panel(
+            f"Generalization Score: [bold white]{score*100:.2f}%[/bold white]\n\n"
+            f"Interpretation: {interpretation}",
+            title="Final Verification",
+            border_style="blue"
+        ))
+
     def run_paradigm(self, name: str, player_pool: List[DeckInfo], opponent_pool: List[DeckInfo], silent: bool = False):
         """Execute a full paradigm evaluation using optimized matrix batching."""
         if not silent:
@@ -321,6 +468,19 @@ class ScientificEvaluator:
                 
                 ci = 1.96 * np.std(wrs) / math.sqrt(len(wrs))
                 f.write(f"| {name} | {global_wr*100:.2f}% | ±{ci*100:.2f}% | {len(results)} |\n")
+            
+            if hasattr(self, "gen_protocol_data"):
+                d = self.gen_protocol_data
+                f.write("\n## Generalization Analysis\n")
+                f.write(f"| Metric | {self.model_code} | e2 (Ref) |\n")
+                f.write("| :--- | :--- | :--- |\n")
+                f.write(f"| Winrate Control | {d['wr_control_o1']*100:.2f}% | {d['wr_control_e2']*100:.2f}% |\n")
+                f.write(f"| Winrate Gen | {d['wr_gen_o1']*100:.2f}% | {d['wr_gen_e2']*100:.2f}% |\n")
+                f.write(f"| Performance Drop | {d['drop_o1']*100:.2f}% | {d['drop_e2']*100:.2f}% |\n")
+                f.write(f"\n**Generalization Score: {d['gen_score']*100:.2f}%**\n")
+                
+                interpretation = "o1 generalizes BETTER" if d['gen_score'] > 0.02 else ("o1 generalizes WORSE" if d['gen_score'] < -0.02 else "Same generalization")
+                f.write(f"Interpretation: {interpretation}\n")
                 
         console.print(f"\n[bold green]Report saved to:[/bold green] {json_path}")
         console.print(f"[bold green]Markdown summary saved to:[/bold green] {md_path}")
@@ -354,12 +514,25 @@ class ScientificEvaluator:
 def main():
     parser = argparse.ArgumentParser(description="DeckGym Scientific Evaluation")
     parser.add_argument("--meta", default="meta_deck.json", help="Path to meta_deck.json")
-    parser.add_argument("--model", default="o1", help="Model code (e.g. o1, o1c, aa, r)")
+    
+    subparsers = parser.add_subparsers(dest="mode", help="Evaluation mode", required=True)
+    
+    # Chaos mode
+    chaos_parser = subparsers.add_parser("chaos", help="Extensive Chaos mode")
+    chaos_parser.add_argument("model", help="Model code (e.g. o1, o2c, etc.)")
+    
+    # Generalization mode
+    gen_parser = subparsers.add_parser("generalization", help="Generalization Protocol")
+    gen_parser.add_argument("model", help="Model code (e.g. o1, o2c, etc.)")
     
     args = parser.parse_args()
     
     evaluator = ScientificEvaluator(args.meta, args.model)
-    evaluator.run_all()
+    
+    if args.mode == "chaos":
+        evaluator.run_all()
+    elif args.mode == "generalization":
+        evaluator.run_generalization_protocol()
 
 if __name__ == "__main__":
     main()

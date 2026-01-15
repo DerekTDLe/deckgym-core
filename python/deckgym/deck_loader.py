@@ -237,6 +237,31 @@ class MetaDeckLoader:
             return random.choice(archetype.decks)
         return random.choice(self.decks)
 
+    def sample_n_deck_info(self, n: int, mode: str = "hierarchical") -> list[DeckInfo]:
+        """
+        Sample N decks with the specified strategy.
+        
+        Args:
+            n: Number of decks to sample
+            mode: Sampling mode ('uniform', 'hierarchical', 'weighted')
+        """
+        if n <= 0:
+            return []
+            
+        if mode == "uniform":
+            return random.choices(self.decks, k=n)
+        elif mode == "weighted":
+            weights = [max(d.strength, 0.01) for d in self.decks]
+            return random.choices(self.decks, weights=weights, k=n)
+        elif mode == "hierarchical":
+            # Archetype diversity: pick n archetypes (with replacement), 
+            # then pick 1 deck from each.
+            archetypes = list(self.archetypes.values())
+            sampled_archs = random.choices(archetypes, k=n)
+            return [random.choice(a.decks) for a in sampled_archs]
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
+
     def get_archetypes(self) -> list[str]:
         """Get list of all archetypes."""
         return list(self.archetypes.keys())
