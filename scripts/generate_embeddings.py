@@ -136,76 +136,90 @@ def generate():
         padding = np.zeros((reduced_embeddings.shape[0], 64 - reduced_embeddings.shape[1]))
         reduced_embeddings = np.hstack([reduced_embeddings, padding])
 
-    # 4. Save mapping normalized_text -> {embedding, type_references, mechanic_references}
-    os.makedirs("src/rl/generated", exist_ok=True)
-    
-    # Save names for Rust
-    with open("src/rl/generated/names.json", "w") as f:
-        json.dump(sorted_names, f, indent=2)
-
-    mapping = {}
+    # 4. Create mapping normalized_text -> {embedding, type_refs, mech_refs}
+    text_to_data = {}
     for idx, original_text in enumerate(unique_texts):
         norm_text = cleaned_texts[idx]
-        # Multiple original texts might map to the same normalized text
-        # We only need one entry per unique normalized text
-        if norm_text not in mapping:
-            mapping[norm_text] = {
+        if norm_text not in text_to_data:
+            text_to_data[norm_text] = {
                 "embedding": reduced_embeddings[idx].tolist(),
                 "type_refs": get_type_references(original_text),
                 "mech_refs": get_mechanic_references(original_text)
             }
 
-    with open("src/rl/generated/embeddings.json", "w") as f:
-        json.dump(mapping, f, indent=2)
-
-    # 5. Evolutionary metadata
-    print("Calculating card metadata...")
-    card_metadata = {}
+    # 5. Consolidated Card Features (Mapping ID -> Data)
+    print("Consolidating all features into card_features.json...")
+    card_features = {}
     
+    # Pre-calculate metadata maps
     evolves_to = {}
     evolves_from = {}
-    
     for card in db:
         if "evolves_from" in card:
-            name = card["name"]
-            ef = card["evolves_from"]
+            name, ef = card["name"], card["evolves_from"]
             if ef:
                 evolves_from[name] = ef
-                if ef not in evolves_to:
-                    evolves_to[ef] = []
-                evolves_to[ef].append(name)
+                evolves_to.setdefault(ef, []).append(name)
 
     def get_line_size(name):
         curr = name
-        while curr in evolves_from:
-            curr = evolves_from[curr]
-        root = curr
-        def max_depth(n):
-            if n not in evolves_to:
-                return 1
-            return 1 + max(max_depth(child) for child in evolves_to[n])
-        return max_depth(root)
+        while curr in evolves_from: curr = evolves_from[curr]
+        def max_dist(n):
+            if n not in evolves_to: return 1
+            return 1 + max(max_dist(c) for c in evolves_to[n])
+        return max_dist(curr)
 
     for item in db_raw:
-        card = None
-        if "Pokemon" in item:
-            card = item["Pokemon"]
-            name = card["name"]
-            line_size = get_line_size(name)
-            is_final_stage = name not in evolves_to
-            card_metadata[card["id"]] = {
-                "line_size": line_size,
-                "is_final_stage": 2 if is_final_stage else 1
-            }
-        elif "Trainer" in item:
-            card = item["Trainer"]
-            card_metadata[card["id"]] = {
-                "line_size": 0,
-                "is_final_stage": 0
-            }
+        card = item.get("Pokemon") or item.get("Trainer")
+        if not card: continue
+        
+        cid = card["id"]
+        
+        # Helper to get text data safely
+        def get_text_data(txt):
+            norm = clean_text(txt, names_regex)
+            return text_to_data.get(norm, {
+                "embedding": [0.0]*64, "type_refs": [0.0]*9, "mech_refs": [0.0]*9
+            })
 
-    with open("src/rl/generated/card_metadata.json", "w") as f:
-        json.dump(card_metadata, f, indent=2)
+        # Ability
+        ability_data = get_text_data(card["ability"]["effect"] if card.get("ability") else "")
+        
+        # Attacks
+        attacks = card.get("attacks", [])
+        atk1_data = get_text_data(attacks[0]["effect"] if len(attacks) > 0 else "")
+        atk2_data = get_text_data(attacks[1]["effect"] if len(attacks) > 1 else "")
+        
+        # Trainer Effect (Supporter/Item/Tool)
+        trainer_data = get_text_data(card.get("effect", ""))
+
+        # Metadata
+        if "Pokemon" in item:
+            line_size = get_line_size(card["name"])
+            is_final = 2 if card["name"] not in evolves_to else 1
+        else:
+            line_size, is_final = 0, 0
+
+        card_features[cid] = {
+            "ability": ability_data,
+            "atk1": atk1_data,
+            "atk2": atk2_data,
+            "supporter": trainer_data,
+            "line_size": line_size,
+            "is_final_stage": is_final
+        }
+
+    os.makedirs("src/rl/generated", exist_ok=True)
+    with open("src/rl/generated/card_features.json", "w") as f:
+        json.dump(card_features, f, indent=2)
+    
+    # Still save names for reference, though Rust won't need them for cleaning
+    with open("src/rl/generated/names.json", "w") as f:
+        json.dump(sorted_names, f, indent=2)
+
+    # We can stop generating the old separate files to save space
+    # with open("src/rl/generated/embeddings.json", "w") as f: 
+    #    json.dump(text_to_data, f, indent=2)
 
     print("Success! Generated files in src/rl/generated/")
 

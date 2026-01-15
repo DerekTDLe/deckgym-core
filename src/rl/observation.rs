@@ -13,75 +13,36 @@ use crate::state::State;
 // =============================================================================
 
 #[derive(Deserialize)]
-struct CardMetadata {
-    line_size: u8,
-    is_final_stage: u8, // 0: None, 1: False, 2: True
-}
-
-#[derive(Deserialize)]
-struct EmbeddingData {
+struct TextData {
     embedding: Vec<f32>,
     type_refs: Vec<f32>,
     mech_refs: Vec<f32>,
 }
 
+#[derive(Deserialize)]
+struct CardFeatures {
+    ability: TextData,
+    atk1: TextData,
+    atk2: TextData,
+    supporter: TextData,
+    line_size: u8,
+    is_final_stage: u8,
+}
+
 lazy_static! {
-    static ref EMBEDDING_MAP: HashMap<String, EmbeddingData> = {
-        let json_str = include_str!("generated/embeddings.json");
-        serde_json::from_str(json_str).expect("Failed to parse embeddings.json")
-    };
-    
-    static ref METADATA_MAP: HashMap<String, CardMetadata> = {
-        let json_str = include_str!("generated/card_metadata.json");
-        serde_json::from_str(json_str).expect("Failed to parse card_metadata.json")
+    static ref CARD_FEATURES_MAP: HashMap<String, CardFeatures> = {
+        let json_str = include_str!("generated/card_features.json");
+        serde_json::from_str(json_str).expect("Failed to parse card_features.json")
     };
     
     static ref EMPTY_EMBEDDING: Vec<f32> = vec![0.0; 64];
     static ref EMPTY_TYPE_REFS: Vec<f32> = vec![0.0; 9];
     static ref EMPTY_MECH_REFS: Vec<f32> = vec![0.0; 9];
-
-    static ref POKEMON_NAMES: Vec<String> = {
-        let json_str = include_str!("generated/names.json");
-        serde_json::from_str(json_str).expect("Failed to parse names.json")
-    };
-}
-
-fn clean_text(text: &str) -> String {
-    let mut cleaned = text.to_lowercase();
-    
-    // 1. Replace species names (from sorted list)
-    for name in &*POKEMON_NAMES {
-        cleaned = cleaned.replace(&name.to_lowercase(), "pokemon");
-    }
-    
-    // 2. Explicitly catch any remaining accented word
-    cleaned = cleaned.replace("pokémon", "pokemon");
-    
-    // 3. Normalize type symbols [g] -> grass
-    for (sym, full) in [
-        ("g", "grass"), ("r", "fire"), ("w", "water"), ("l", "lightning"),
-        ("p", "psychic"), ("f", "fighting"), ("d", "darkness"), ("m", "metal"),
-        ("c", "colorless")
-    ] {
-        cleaned = cleaned.replace(&format!("[{}]", sym), full);
-    }
-    
-    cleaned
-}
-
-fn get_embedding_data(text: Option<&str>) -> (&[f32], &[f32], &[f32]) {
-    if let Some(t) = text {
-        let cleaned = clean_text(t);
-        if let Some(data) = EMBEDDING_MAP.get(&cleaned) {
-            return (&data.embedding, &data.type_refs, &data.mech_refs);
-        }
-    }
-    (&EMPTY_EMBEDDING, &EMPTY_TYPE_REFS, &EMPTY_MECH_REFS)
 }
 
 fn encode_meta(card_id: &str, ready: f32, obs: &mut Vec<f32>) {
-    let (ls, fs) = if let Some(meta) = METADATA_MAP.get(card_id) {
-        (meta.line_size, meta.is_final_stage)
+    let (ls, fs) = if let Some(feat) = CARD_FEATURES_MAP.get(card_id) {
+        (feat.line_size, feat.is_final_stage)
     } else {
         (0, 0)
     };
@@ -280,15 +241,21 @@ fn encode_played_card(p: &PlayedCard, state: &State, loc: usize, allied: f32, sl
     obs.push(if p.asleep { 1.0 } else { 0.0 });
     obs.push(if p.paralyzed { 1.0 } else { 0.0 });
 
+    let features = CARD_FEATURES_MAP.get(&card_id);
+
     // Attacks 2 x 74 = 148
     let attacks = p.get_attacks();
     for i in 0..2 {
         if let Some(atk) = attacks.get(i) {
             obs.push(atk.fixed_damage as f32);
-            let (emb, t_refs, m_refs) = get_embedding_data(atk.effect.as_deref());
-            obs.extend_from_slice(emb);
-            merge_refs(&mut type_refs, t_refs);
-            merge_refs(&mut mech_refs, m_refs);
+            let data = match (i, features) {
+                (0, Some(f)) => &f.atk1,
+                (1, Some(f)) => &f.atk2,
+                _ => unreachable!(),
+            };
+            obs.extend_from_slice(&data.embedding);
+            merge_refs(&mut type_refs, &data.type_refs);
+            merge_refs(&mut mech_refs, &data.mech_refs);
             encode_energy_cost_9(&atk.energy_required, obs);
         } else {
             obs.extend_from_slice(&[0.0; 74]);
@@ -296,11 +263,14 @@ fn encode_played_card(p: &PlayedCard, state: &State, loc: usize, allied: f32, sl
     }
 
     // Talent 64
-    if let Card::Pokemon(pk) = &p.card {
-        let (emb, t_refs, m_refs) = get_embedding_data(pk.ability.as_ref().map(|a| a.effect.as_str()));
-        obs.extend_from_slice(emb);
-        merge_refs(&mut type_refs, t_refs);
-        merge_refs(&mut mech_refs, m_refs);
+    if let Card::Pokemon(_) = &p.card {
+        if let Some(f) = features {
+            obs.extend_from_slice(&f.ability.embedding);
+            merge_refs(&mut type_refs, &f.ability.type_refs);
+            merge_refs(&mut mech_refs, &f.ability.mech_refs);
+        } else {
+            obs.extend_from_slice(&EMPTY_EMBEDDING);
+        }
     } else {
         obs.extend_from_slice(&EMPTY_EMBEDDING);
     }
@@ -311,15 +281,10 @@ fn encode_played_card(p: &PlayedCard, state: &State, loc: usize, allied: f32, sl
     obs.push(allied);
 
     // Supporter 64
-    if let Card::Trainer(tr) = &p.card {
-        if tr.trainer_card_type == crate::models::TrainerType::Supporter {
-            let (emb, t_refs, m_refs) = get_embedding_data(Some(&tr.effect));
-            obs.extend_from_slice(emb);
-            merge_refs(&mut type_refs, t_refs);
-            merge_refs(&mut mech_refs, m_refs);
-        } else {
-            obs.extend_from_slice(&EMPTY_EMBEDDING);
-        }
+    if let (Card::Trainer(_), Some(f)) = (&p.card, features) {
+        obs.extend_from_slice(&f.supporter.embedding);
+        merge_refs(&mut type_refs, &f.supporter.type_refs);
+        merge_refs(&mut mech_refs, &f.supporter.mech_refs);
     } else {
         obs.extend_from_slice(&EMPTY_EMBEDDING);
     }
@@ -352,24 +317,33 @@ fn encode_static_card(c: &Card, loc: usize, allied: f32, slot: Option<usize>, ob
             obs.push((pk.retreat_cost.len() as f32 / 4.0).clamp(0.0, 1.0));
             obs.extend_from_slice(&[0.0; 4]); // no status
 
+            let features = CARD_FEATURES_MAP.get(&card_id);
+
             for i in 0..2 {
                 if let Some(atk) = pk.attacks.get(i) {
                     obs.push(atk.fixed_damage as f32);
-                    let (emb, t_refs, m_refs) = get_embedding_data(atk.effect.as_deref());
-                    obs.extend_from_slice(emb);
-                    merge_refs(&mut type_refs, t_refs);
-                    merge_refs(&mut mech_refs, m_refs);
+                    let data = match (i, features) {
+                        (0, Some(f)) => &f.atk1,
+                        (1, Some(f)) => &f.atk2,
+                        _ => unreachable!(),
+                    };
+                    obs.extend_from_slice(&data.embedding);
+                    merge_refs(&mut type_refs, &data.type_refs);
+                    merge_refs(&mut mech_refs, &data.mech_refs);
                     encode_energy_cost_9(&atk.energy_required, obs);
                 } else {
                     obs.extend_from_slice(&[0.0; 74]);
                 }
             }
-            let (emb, t_refs, m_refs) = get_embedding_data(pk.ability.as_ref().map(|a| a.effect.as_str()));
-            obs.extend_from_slice(emb);
-            merge_refs(&mut type_refs, t_refs);
-            merge_refs(&mut mech_refs, m_refs);
+            if let Some(f) = features {
+                obs.extend_from_slice(&f.ability.embedding);
+                merge_refs(&mut type_refs, &f.ability.type_refs);
+                merge_refs(&mut mech_refs, &f.ability.mech_refs);
+            } else {
+                obs.extend_from_slice(&EMPTY_EMBEDDING);
+            }
         },
-        Card::Trainer(tr) => {
+        Card::Trainer(_) => {
             obs.push(0.0); // hp
             encode_type_one_hot(None, obs);
             encode_weakness_one_hot(None, obs);
@@ -377,9 +351,9 @@ fn encode_static_card(c: &Card, loc: usize, allied: f32, slot: Option<usize>, ob
             obs.push(0.0); // ex
             obs.push(0.0); // mega
             obs.push(0.0); // pokemon
-            obs.push(if tr.trainer_card_type == crate::models::TrainerType::Tool { 1.0 } else { 0.0 });
+            obs.push(c.is_tool() as i32 as f32);
             obs.push(1.0); // trainer
-            obs.push(if tr.trainer_card_type == crate::models::TrainerType::Item { 1.0 } else { 0.0 });
+            obs.push(c.is_item() as i32 as f32);
             
             // Meta 8 + Retreat 1
             encode_meta(&card_id, 0.0, obs);
@@ -396,15 +370,10 @@ fn encode_static_card(c: &Card, loc: usize, allied: f32, slot: Option<usize>, ob
     obs.push(allied);
 
     // Supporter 64
-    if let Card::Trainer(tr) = c {
-        if tr.trainer_card_type == crate::models::TrainerType::Supporter {
-            let (emb, t_refs, m_refs) = get_embedding_data(Some(&tr.effect));
-            obs.extend_from_slice(emb);
-            merge_refs(&mut type_refs, t_refs);
-            merge_refs(&mut mech_refs, m_refs);
-        } else {
-            obs.extend_from_slice(&EMPTY_EMBEDDING);
-        }
+    if let (Card::Trainer(_), Some(f)) = (c, CARD_FEATURES_MAP.get(&card_id)) {
+        obs.extend_from_slice(&f.supporter.embedding);
+        merge_refs(&mut type_refs, &f.supporter.type_refs);
+        merge_refs(&mut mech_refs, &f.supporter.mech_refs);
     } else {
         obs.extend_from_slice(&EMPTY_EMBEDDING);
     }
@@ -517,13 +486,6 @@ impl CardExt for Card {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_observation_size() {
-        let state = State::default();
-        let obs = get_observation_tensor(&state, 0);
-        assert_eq!(obs.len(), OBSERVATION_SIZE);
-    }
 
     #[test]
     fn test_observation_size() {
