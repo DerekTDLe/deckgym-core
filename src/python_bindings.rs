@@ -823,7 +823,7 @@ impl PyGame {
     /// Get the maximum number of cards in game observation.
     #[staticmethod]
     fn max_cards_in_game() -> usize {
-        crate::rl::MAX_CARDS_IN_GAME
+        crate::rl::MAX_CARDS_IN_OBS
     }
 
     /// Get the size of the action space.

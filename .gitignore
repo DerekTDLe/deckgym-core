@@ -12,3 +12,6 @@ checkpoints/
 models/arena/
 eval_reports/*.json
 logs/
+src/rl/generated/embeddings.json
+src/rl/generated/card_metadata.json
+src/rl/generated/names.json
