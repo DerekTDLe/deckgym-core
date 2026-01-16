@@ -12,44 +12,45 @@ The agent uses a custom feature extractor (`CardAttentionExtractor`) that proces
 
 ### Observation Structure
 
-### Global Features (41 dims)
+### Global Features (42 dims)
 
 | Feature | Dimensions | Description |
 |---------|------------|-------------|
-| Turn count | 1 | Normalized by max turns |
-| Points | 2 | Self and opponent (normalized) |
-| Deck sizes | 2 | Self and opponent (normalized) |
-| Hand sizes | 2 | Self and opponent (normalized) |
-| Discard sizes | 2 | Self and opponent (normalized) |
-| Deck energy types | 32 | 8 energy types × 2 slots × 2 players (multi-hot) |
+| Turn count | 1 | Normalized by max turns (turn / 30) |
+| Points | 3 | Diff (persp - opp) / 2, self / 2, opponent / 2 |
+| Deck sizes | 2 | Self and opponent (normalized / 15) |
+| Hand sizes | 2 | Self and opponent (normalized / 10) |
+| Discard sizes | 2 | Self and opponent (normalized / 15) |
+| Deck energy types | 32 | 8 energy types × 2 slots × 2 players (one-hot) |
 
-### Card Features (121 dims per card × 18 cards = 2178 dims)
+### Card Features (343 dims per card × 40 cards = 13720 dims)
 
-Each card is encoded with intrinsic properties and position information:
+Each card is encoded with comprehensive text-enhanced properties and position information:
 
-#### Intrinsic Features (121 dims)
-- `is_pokemon` (1) - Pokemon vs Trainer
-- `stage` (1) - Basic/Stage1/Stage2 normalized
-- `energy_type` (10) - One-hot energy type
-- `hp_current`, `hp_max` (2) - Normalized HP
-- `weakness` (10) - One-hot weakness type
-- `ko_points` (1) - Points awarded on KO
-- `energy_attached` (10) - Per-type energy count
-- `attack_1` (4 + 13) - Damage, cost, effect flag, has_attack, effect categories (V3: 13 cats)
-- `attack_2` (4 + 13) - Same as attack_1
-- `status` (4) - Poison, sleep, paralysis, confusion
-- `ability_categories` (17) - Ability effect encoding (enhanced)
-- `supporter_categories` (14) - Supporter effect encoding (enhanced)
-- `retreat_cost` (1) - Normalized retreat cost
-- `attached_tool` (8) - One-hot tool type
+#### Properties & Flags (34 dims)
+- `hp` (1) - Raw remaining HP
+- `energy_type` (11) - One-hot (including None)
+- `weakness` (9) - One-hot (8 types + None)
+- `flags` (6) - ex, mega, pokemon, tool, trainer, item
+- `meta` (8) - Line size (4: None,1,2,3), final stage (3: None,F,T), ready (1)
 
-#### Position Features (8 dims)
-- `zone` (2) - One-hot: hand/board
-- `owner` (1) - 0=self, 1=opponent
-- `is_active` (1) - Active pokemon flag
-- `slot` (4) - One-hot board position (active + 3 bench)
+#### Stats & Status (5 dims)
+- `retreat_cost` (1) - Normalized (len / 4)
+- `status` (4) - Confused, burned, asleep, paralyzed
 
-### Total Observation Size: 2219 dims (41 + 18×121)
+#### Action Embeddings (304 dims)
+- `attack_1` (74) - Damage, Text Embedding (64), Energy Cost (9)
+- `attack_2` (74) - Damage, Text Embedding (64), Energy Cost (9)
+- `ability` (64) - Text Embedding
+- `supporter` (64) - Text Embedding
+- `references` (18) - Type references (9) and Mechanic references (9)
+
+#### Position Features (9 dims)
+- `location` (4) - One-hot: Deck, Board, Hand, Discard
+- `slot` (4) - One-hot board position (0-3)
+- `allied` (1) - 1.0=self, 0.0=opponent
+
+### Total Observation Size: 13762 dims (42 + 40×343)
 
 ## Neural Network Architecture (Dynamic Attention - Run #8)
 

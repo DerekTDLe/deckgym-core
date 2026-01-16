@@ -11,10 +11,15 @@ Key improvements over V1:
 Architecture:
     1. Split observation into (global_features, card_features)
     2. Pass cards through self-attention layers with pre-norm
-    3. Apply final LayerNorm (NEW)
+    3. Apply final LayerNorm
     4. Pool attended cards via learned queries
     5. Concatenate with global features
     6. Pass through policy/value heads
+
+Observation Space (V4):
+    - Total: 13762 dims
+    - Global: 42 dims
+    - Cards: 40 cards * 343 features/card
 """
 
 import math

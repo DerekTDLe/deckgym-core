@@ -156,7 +156,7 @@ def analyze_attention_layers(model):
 
 def main():
     parser = argparse.ArgumentParser(description="Model Diagnostics, including gradient, weight and bias analysis.")
-    parser.add_argument("path/to/model", type=str, required=True)
+    parser.add_argument("model", type=str, help="Path to the model .zip file")
     args = parser.parse_args()
 
     print("=" * 70)
