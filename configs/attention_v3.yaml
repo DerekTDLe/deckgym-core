@@ -49,7 +49,7 @@ ppo:
 
 training:
   total_timesteps: 100000000
-  checkpoint_freq: 10000
+  checkpoint_freq: 50000
   n_envs: 64
   use_batched_env: true
   device: "auto"
@@ -66,7 +66,7 @@ training:
   pfsp_select_every_n_rollouts: 2
   pfsp_priority_exponent: 2.0
   pfsp_checkpoint_dir: "./checkpoints/attention_v3/pfsp_pool/"
-  pfsp_baseline_curriculum: [[0, ["v", "w"]], [500000, ["aa", "er"]], [2000000, ["er"]], [5000000, ["e2"]]]
+  pfsp_baseline_curriculum: [[0, ["v", "w"]], [500000, ["aa", "er"]], [2000000, ["er"]], [4000000, ["e2"]]]
 
 environment:
   max_turns: 99

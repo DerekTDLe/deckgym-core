@@ -292,15 +292,49 @@ class PFSPCallback(BaseCallback):
         """Resolve a code like 'o1' to a path in models/."""
         import glob
         import os
+        import onnx
+        from deckgym.config import OBSERVATION_SIZE
 
         if not code.startswith("o"):
             return None
 
         # Search for .onnx files in models/ and subdirectories
-        models = glob.glob("models/*.onnx") + glob.glob("models/**/*.onnx")
-        if not models:
+        model_paths = glob.glob("models/*.onnx") + glob.glob("models/**/*.onnx")
+        if not model_paths:
             return None
 
         # Sort by modification time (newest first)
-        models.sort(key=os.path.getmtime, reverse=True)
-        return str(models[0])
+        model_paths.sort(key=os.path.getmtime, reverse=True)
+
+        # Parse index from code (e.g., 'o1' -> index 0, 'o2' -> index 1)
+        try:
+            # Extract number from 'o1', 'o1t', 'o1c', etc.
+            import re
+            match = re.search(r'o(\d+)', code)
+            idx = int(match.group(1)) - 1 if match else 0
+        except (ValueError, IndexError):
+            idx = 0
+
+        # Filter models by observation size
+        valid_models = []
+        for path in model_paths:
+            try:
+                m = onnx.load(path)
+                # Check input dimension (usually 'observation' at index 0)
+                input_dim = m.graph.input[0].type.tensor_type.shape.dim[1].dim_value
+                if input_dim == OBSERVATION_SIZE:
+                    valid_models.append(path)
+                elif self.verbose > 1:
+                    print(f"[PFSP] Skipping {path}: expected dim {OBSERVATION_SIZE}, got {input_dim}")
+            except Exception as e:
+                if self.verbose > 1:
+                    print(f"[PFSP] Could not head ONNX {path}: {e}")
+
+        if not valid_models:
+            if self.verbose > 0:
+                print(f"[PFSP WARNING] No ONNX models found with dim {OBSERVATION_SIZE} in models/")
+            return None
+
+        # Return the requested index (clamped to available models)
+        idx = min(idx, len(valid_models) - 1)
+        return str(valid_models[idx])
