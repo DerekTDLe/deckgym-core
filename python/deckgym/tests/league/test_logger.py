@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Tests for LeagueLogger."""
 import unittest
 from unittest.mock import MagicMock
 import numpy as np
@@ -11,83 +12,106 @@ class TestLeagueLogger(unittest.TestCase):
         self.pool = MagicMock(spec=OpponentPool)
         self.sb3_logger = MagicMock()
         self.league_logger = LeagueLogger(
-            pool=self.pool, logger=self.sb3_logger, verbose=1
+            pool=self.pool, logger=self.sb3_logger, verbose=0  # 0 to suppress output
         )
 
-    def test_is_fair_baseline(self):
-        self.assertTrue(self.league_logger._is_fair_baseline("er"))
-        self.assertTrue(self.league_logger._is_fair_baseline("et"))
-        self.assertFalse(self.league_logger._is_fair_baseline("e2"))
-        self.assertFalse(self.league_logger._is_fair_baseline("m1"))
-        self.assertTrue(self.league_logger._is_fair_baseline("v"))
+    def test_is_omniscient(self):
+        """Test omniscient baseline detection."""
+        # Omniscient (expectiminimax with depth)
+        self.assertTrue(self.league_logger._is_omniscient("e2"))
+        self.assertTrue(self.league_logger._is_omniscient("e3"))
+        self.assertTrue(self.league_logger._is_omniscient("e4"))
+        self.assertTrue(self.league_logger._is_omniscient("m1"))
+        
+        # Non-omniscient (er=evolution rusher, et=?)
+        self.assertFalse(self.league_logger._is_omniscient("er"))
+        self.assertFalse(self.league_logger._is_omniscient("et"))
+        self.assertFalse(self.league_logger._is_omniscient("v"))
+        self.assertFalse(self.league_logger._is_omniscient("w"))
+        self.assertFalse(self.league_logger._is_omniscient("aa"))
 
-    def test_calculate_winrate(self):
-        self.pool.get_data.side_effect = lambda name: {
-            "m1": {"wins": 10, "losses": 0, "draws": 0},  # WR (opp losses/total) = 0.0
-            "m2": {"wins": 0, "losses": 10, "draws": 0},  # WR (opp losses/total) = 1.0
-        }.get(name)
+    def test_is_onnx_model(self):
+        """Test ONNX model baseline detection."""
+        self.assertTrue(self.league_logger._is_onnx_model("o1"))
+        self.assertTrue(self.league_logger._is_onnx_model("o2t"))
+        self.assertTrue(self.league_logger._is_onnx_model("o1c"))
+        
+        self.assertFalse(self.league_logger._is_onnx_model("e2"))
+        self.assertFalse(self.league_logger._is_onnx_model("v"))
 
-        wr = self.league_logger.calculate_winrate(["m1", "m2"])
+    def test_get_winrate(self):
+        """Test winrate calculation from pool data."""
+        self.pool.get_data.return_value = {"wins": 10, "losses": 30, "draws": 0}
+        
+        # Agent wins = opponent losses, so WR = 30/40 = 0.75
+        wr = self.league_logger._get_winrate("test")
+        self.assertEqual(wr, 0.75)
+
+    def test_get_winrate_no_data(self):
+        """Test winrate default when no data."""
+        self.pool.get_data.return_value = None
+        
+        wr = self.league_logger._get_winrate("test")
         self.assertEqual(wr, 0.5)
 
     def test_get_self_play_winrate(self):
+        """Test self-play winrate calculation (non-baseline only)."""
         self.pool.opponents = {
-            "m1": {"wins": 0, "losses": 10, "draws": 0, "is_baseline": False},
-            "b1": {"wins": 10, "losses": 0, "draws": 0, "is_baseline": True},
+            "m1": {"wins": 10, "losses": 30, "draws": 0, "is_baseline": False},  # WR = 0.75
+            "m2": {"wins": 30, "losses": 10, "draws": 0, "is_baseline": False},  # WR = 0.25
+            "b1": {"wins": 10, "losses": 0, "draws": 0, "is_baseline": True},    # Excluded
         }
         self.pool.get_data.side_effect = lambda name: self.pool.opponents.get(name)
 
         wr = self.league_logger.get_self_play_winrate()
-        self.assertEqual(wr, 1.0)  # Only m1 is considered
+        # Average of 0.75 and 0.25 = 0.5
+        self.assertEqual(wr, 0.5)
 
-    def test_get_baseline_winrate(self):
+    def test_get_global_winrate(self):
+        """Test global winrate (excludes omniscient)."""
         self.pool.opponents = {
-            "b1": {
-                "wins": 10,
-                "losses": 0,
-                "draws": 0,
-                "is_baseline": True,
-                "baseline_code": "e2",
-            },  # Unfair
-            "b2": {
-                "wins": 0,
-                "losses": 10,
-                "draws": 0,
-                "is_baseline": True,
-                "baseline_code": "er",
-            },  # Fair
-            "m1": {"wins": 5, "losses": 5, "draws": 0, "is_baseline": False},
+            "m1": {"wins": 10, "losses": 40, "draws": 0, "is_baseline": False},  # Fair
+            "baseline_e2": {
+                "wins": 40, "losses": 10, "draws": 0, "is_baseline": True, 
+                "baseline_code": "e2"
+            },  # Omniscient - excluded
+            "baseline_er": {
+                "wins": 20, "losses": 20, "draws": 0, "is_baseline": True,
+                "baseline_code": "er"
+            },  # Fair baseline
         }
         self.pool.get_data.side_effect = lambda name: self.pool.opponents.get(name)
 
-        # Fair only
-        wr_fair = self.league_logger.get_baseline_winrate(only_fair=True)
-        self.assertEqual(wr_fair, 1.0)  # Only b2 (er) is considered
-
-        # All baselines
-        wr_all = self.league_logger.get_baseline_winrate(only_fair=False)
-        self.assertEqual(wr_all, 0.5)  # b1 and b2 considered
+        wr = self.league_logger.get_global_winrate()
+        # m1: 40 wins, 50 games; baseline_er: 20 wins, 40 games
+        # Total: 60 wins, 90 games = 66.7%
+        expected = 60 / 90
+        self.assertAlmostEqual(wr, expected, places=2)
 
     def test_log_metrics(self):
-        # Mock various winrates
-        self.league_logger.get_self_play_winrate = MagicMock(return_value=0.7)
-        self.league_logger.get_baseline_winrate = MagicMock(return_value=0.5)
-        self.league_logger.calculate_winrate = MagicMock(
-            side_effect=lambda names: 0.4 if "baseline_e2" in names else 0.6
-        )
-
-        self.pool.opponents = {"baseline_e2": {}, "baseline_er": {}}
+        """Test that log_metrics records to SB3 logger."""
+        self.pool.opponents = {
+            "m1": {"wins": 10, "losses": 40, "draws": 0, "is_baseline": False},
+        }
+        self.pool.get_data.side_effect = lambda name: self.pool.opponents.get(name)
 
         self.league_logger.log_metrics(rollout_count=100)
 
-        # Check SB3 logger records
-        self.sb3_logger.record.assert_any_call("pfsp/winrate_self_play", 0.7)
-        self.sb3_logger.record.assert_any_call("pfsp/winrate_baselines_fair", 0.5)
-        self.sb3_logger.record.assert_any_call("pfsp/winrate_e2", 0.4)
-        self.sb3_logger.record.assert_any_call("pfsp/winrate_er", 0.6)
-        self.sb3_logger.record.assert_any_call(
-            "pfsp/winrate_global_fair", 0.6
-        )  # mean(0.7, 0.5)
+        # Should record global winrate
+        self.sb3_logger.record.assert_any_call("pfsp/winrate_global", 0.8)
+
+    def test_log_metrics_with_rollout_results(self):
+        """Test log_metrics with per-rollout results."""
+        self.pool.opponents = {
+            "m1": {"wins": 0, "losses": 0, "draws": 0, "is_baseline": False},
+        }
+        rollout_results = {
+            "m1": {"wins": 5, "losses": 15, "draws": 0}  # Agent WR = 15/20 = 0.75
+        }
+
+        self.league_logger.log_metrics(rollout_count=100, rollout_results=rollout_results)
+
+        self.sb3_logger.record.assert_any_call("pfsp/winrate_global", 0.75)
 
 
 if __name__ == "__main__":
