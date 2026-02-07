@@ -14,7 +14,17 @@ from .deckgym import (
     get_player_types,
 )
 
+# Re-export from new package structure
+from .envs import DeckGymEnv, BatchedDeckGymEnv, SelfPlayEnv
+from .callbacks import EpisodeMetricsCallback, FrozenOpponentCallback, PFSPCallback
+from .models.extractors import (
+    CardAttentionExtractor,
+    CardAttentionPolicy,
+    create_attention_policy_kwargs,
+)
+
 __all__ = [
+    # Rust bindings
     "EnergyType",
     "Attack",
     "Ability",
@@ -28,4 +38,16 @@ __all__ = [
     "VecGame",
     "simulate",
     "get_player_types",
+    # Environments
+    "DeckGymEnv",
+    "BatchedDeckGymEnv",
+    "SelfPlayEnv",
+    # Callbacks
+    "EpisodeMetricsCallback",
+    "FrozenOpponentCallback",
+    "PFSPCallback",
+    # Models
+    "CardAttentionExtractor",
+    "CardAttentionPolicy",
+    "create_attention_policy_kwargs",
 ]
