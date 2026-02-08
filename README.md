@@ -150,13 +150,6 @@ python python/scripts/benchmark_players.py
 | **ONNX o1 (CPU)** | `o1c` | **~35** | Attention model (15MB) |
 | **MCTSPlayer** | `m[n]` | Varies | Omniscient search (lookahead) |
 
-> [!NOTE]
-> **Omniscience & "Cheating"**: Currently, `ExpectiMiniMaxPlayer` and `MCTSPlayer` have access to the full `State` object during their search, including hidden information like the opponent's hand and deck order. This makes them extremely difficult to beat and explains why a ~30% winrate against `e2` is considered an excellent performance for a non-cheating agent.
-> 
-> **Heuristics**: `EvolutionRusher` (`er`) is currently the strongest non-cheating heuristic baseline.
-
-> **Note**: ONNX performance is limited by single-sample inference overhead. In batch mode (training with `VecGame`), throughput is much higher. The `o[n]` player loads the *n* newest `.onnx` model from `models/` directory.
-
 **Temporary Deck Generator**
 
 Generate a valid temporary test deck for a specific card id (it considers the evolution chain of a card and the required energy types if its a pokemon card).
@@ -216,67 +209,3 @@ and manually copy-paste into the ever changing `src/actions/effect_mechanic_map.
 **Profiling Main Script**
 sudo cargo flamegraph --root --dev -- simulate example_decks/venusaur-exeggutor.txt example_decks/weezing-arbok.txt --num 1000 && open flamegraph.svg
 ```
-
-## Reinforcement Learning Agent
-
-The repository includes a deep reinforcement learning agent trained using PPO (Proximal Policy Optimization) with curriculum learning and Prioritized Fictitious Self-Play.
-
-### Architecture: Attention-Based Observation
-
-The agent uses a **card-level attention mechanism** that processes each card individually:
-
-| Feature | Value |
-|---------|-------|
-| Observation size | 2219 dims (41 global + 18 cards × 121 features) |
-| Architecture | Modern Transformer (3 layers, 8 heads, GELU) |
-| Card encoding | Intrinsic properties + Position (Hand + Board) |
-| Training Mode | **Pure Self-Play** (PFSP Enabled) |
-| Configuration | **Centralized** via `python/deckgym/config.py` |
-
-See [RL_ARCHITECTURE.md](RL_ARCHITECTURE.md) for detailed architecture documentation.
-
-### Pure Self-Play Training (Default)
-
-The agent learns through continuous self-play against its own previous versions using **Prioritized Fictitious Self-Play (PFSP)**. It faces 1k+ meta decks from step 1, ensuring high-quality adversarial gradients.
-
-| Feature | Description |
-|---------|-------------|
-| **Meta-Sampling** | Randomly samples from meta_deck.json every episode |
-| **PFSP Pool** | Manages a prioritized pool of historical versions based on winrate |
-| **Stability** | Rust-side `catch_unwind` prevents game-state crashes |
-| **YAML Config** | Fully configurable via `configs/template.yaml` |
-
-| Tier | Participant | Win% (vs e2) | Evaluation Mode |
-|:----:|-------------|-----:|:--- |
-| **S+** | **Expectiminimax(2)** 🎯 | 50% | Reference (Cheating) |
-| **S** | **ONNX o1 (best)** 🚀 | **45.02%** | **Extensive Chaos** |
-
-> [!TIP]
-> **Context on o1 Performance**: While `o1` consistently maintained a >50% winrate during training (stochastic sampling), its definitive **45.02%** winrate on the **Extensive Chaos** benchmark reflects a more rigorous, deterministic evaluation across 396 unique archetypes. This makes `o1` our first non-cheating agent to break the 40% barrier against a cheating minimax reference.
-
-### Usefull Commands
-
-```bash
-# Generate a training configuration template
-python python/deckgym/config.py --generate-template my_config.yaml
-
-# Train with pure self-play using YAML config
-python python/scripts/train.py --config my_config.yaml
-
-# Audit model or directory of models compared to TrueSkill baselines leaderboard
-python python/scripts/evaluate.py  audit checkpoints/rl_bot_xxx_steps.zip
-
-python python/scripts/evaluate.py  audit_dir checkpoints/
-
-# Diagnose model gradients, weights, biais
-python python/scripts/diagnose.py --model checkpoints/rl_bot_xxx_steps.zip
-
-# Export model .zip to .onnx
-python python/scripts/onnx_export.py checkpoints/rl_bot_xxx_steps.zip
-```
-*Note : Almost all of the .py scripts should have helpers, use -h --help to see them*
-
-### Hyperparameters
-
-See [RL_ARCHITECTURE.md](RL_ARCHITECTURE.md) for detailed hyperparameters information.
-
