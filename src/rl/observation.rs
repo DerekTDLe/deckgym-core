@@ -1,4 +1,5 @@
 // Observation Tensor Generation - V4: Comprehensive Text-Enhanced Encoding
+// TODO: Add support for Stadium cards. Extend text embeddings size. Will be in V5
 
 use std::collections::HashMap;
 use lazy_static::lazy_static;
@@ -35,7 +36,7 @@ lazy_static! {
         serde_json::from_str(json_str).expect("Failed to parse card_features.json")
     };
     
-    static ref EMPTY_EMBEDDING: Vec<f32> = vec![0.0; 64];
+    static ref EMPTY_EMBEDDING: Vec<f32> = vec![0.0; 128];
     static ref EMPTY_TYPE_REFS: Vec<f32> = vec![0.0; 9];
     static ref EMPTY_MECH_REFS: Vec<f32> = vec![0.0; 9];
 }
@@ -69,14 +70,14 @@ pub const MAX_CARDS_IN_OBS: usize = 40;
 
 // --- Feature Dimensions ---
 
-pub const FEATURES_PER_CARD: usize = 343;
+pub const FEATURES_PER_CARD: usize = 535;
 // Breakdown:
 // 1 (hp) + 11 (types) + 9 (weakness) + 6 (flags: ex, mega, pokemon, tool, trainer, item)
 // + 8 (meta: line_size (4: None,1,2,3), is_final (3: None,F,T), ready) + 1 (retreat) + 4 (status)
-// + 74 (atk1: 1 dmg, 64 emb, 9 en) + 74 (atk2: 1 dmg, 64 emb, 9 en)
-// + 64 (talent emb) + 4 (location one-hot) + 4 (slot one-hot) + 1 (allied) + 64 (supporter emb)
+// + 138 (atk1: 1 dmg, 128 emb, 9 en) + 138 (atk2: 1 dmg, 128 emb, 9 en)
+// + 128 (talent emb) + 4 (location one-hot) + 4 (slot one-hot) + 1 (allied) + 128 (supporter emb)
 // + 9 (type references) + 9 (mechanic references)
-// = 343
+// = 535
 
 pub const GLOBAL_FEATURES: usize = 1   // turn count
     + 3                                 // points (diff, self, opponent)
@@ -258,7 +259,7 @@ fn encode_played_card(p: &PlayedCard, state: &State, loc: usize, allied: f32, sl
             merge_refs(&mut mech_refs, &data.mech_refs);
             encode_energy_cost_9(&atk.energy_required, obs);
         } else {
-            obs.extend_from_slice(&[0.0; 74]);
+            obs.extend_from_slice(&[0.0; 138]);
         }
     }
 
@@ -332,7 +333,7 @@ fn encode_static_card(c: &Card, loc: usize, allied: f32, slot: Option<usize>, ob
                     merge_refs(&mut mech_refs, &data.mech_refs);
                     encode_energy_cost_9(&atk.energy_required, obs);
                 } else {
-                    obs.extend_from_slice(&[0.0; 74]);
+                    obs.extend_from_slice(&[0.0; 138]);
                 }
             }
             if let Some(f) = features {
@@ -359,7 +360,7 @@ fn encode_static_card(c: &Card, loc: usize, allied: f32, slot: Option<usize>, ob
             encode_meta(&card_id, 0.0, obs);
             obs.push(0.0); // retreat
             obs.extend_from_slice(&[0.0; 4]); // no status
-            obs.extend_from_slice(&[0.0; 148]); // no attacks
+            obs.extend_from_slice(&[0.0; 276]); // no attacks
             obs.extend_from_slice(&EMPTY_EMBEDDING); // no talent
         }
     }
