@@ -23,7 +23,7 @@ pub mod stadiums;
 pub mod state;
 pub mod temp_deck;
 pub mod test_helpers; // TODO: Compile/Expose only in test mode?
-pub mod tool_ids;
+pub mod tools;
 pub mod vec_game;
 pub mod batched_runner;
 
@@ -32,6 +32,7 @@ pub use attack_ids::AttackId;
 pub use deck::Deck;
 pub use game::Game;
 pub use hooks::to_playable_card;
+pub use move_generation::generate_possible_actions;
 pub use move_generation::generate_possible_trainer_actions;
 pub use optimize::{
     cli_optimize, optimize, optimize_with_configs, EnemyDeckConfig, OptimizationConfig,

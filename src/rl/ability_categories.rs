@@ -82,7 +82,6 @@ pub fn get_ability_effect_categories(ability_id: AbilityId) -> &'static [Ability
         AbilityId::A3b057SnorlaxExFullMouthManner => &[Protect, Passive],
         AbilityId::B1a065FurfrouFurCoat => &[Protect, Passive],
         AbilityId::B1a018WartortleShellShield => &[Protect, Passive],
-        AbilityId::A4a044DonphanExoskeleton => &[Protect, Passive],
         AbilityId::A2a071Arceus => &[Protect, Passive],
 
         // === BUFF ===
@@ -202,7 +201,6 @@ mod tests {
             A4a020SuicuneExLegendaryPulse,
             A4a022MiloticHealingRipples,
             A4a025RaikouExLegendaryPulse,
-            A4a044DonphanExoskeleton,
             B1073GreninjaExShiftingStream,
             B1121IndeedeeExWatchOver,
             B1157HydreigonRoarInUnison,

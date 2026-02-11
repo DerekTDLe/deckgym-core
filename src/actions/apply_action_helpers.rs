@@ -382,6 +382,8 @@ pub(crate) fn handle_damage_only(
         })
         .collect::<Vec<(u32, usize, usize)>>();
 
+    let mut knockouts: Vec<(usize, usize)> = Vec::new();
+
     // Handle each target individually
     for (damage, target_player, target_pokemon_idx) in modified_targets {
         let applied = checkapply_prevent_first_attack(
@@ -412,7 +414,7 @@ pub(crate) fn handle_damage_only(
                 target_pokemon_idx,
                 target_pokemon.get_remaining_hp()
             );
-            target_pokemon.remaining_hp
+            target_pokemon.get_remaining_hp()
         };
 
         if remaining_hp == 0 {

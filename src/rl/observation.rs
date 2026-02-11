@@ -218,7 +218,7 @@ fn encode_played_card(p: &PlayedCard, state: &State, loc: usize, allied: f32, sl
     let mut mech_refs = [0.0; 9];
     
     // Properties
-    obs.push(p.remaining_hp as f32); // HP raw
+    obs.push(p.get_remaining_hp() as f32); // HP raw
     encode_type_one_hot(p.get_energy_type(), obs); // Types 11
     encode_weakness_one_hot(p.card.get_weakness(), obs); // Weakness 9
     

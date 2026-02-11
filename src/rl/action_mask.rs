@@ -68,7 +68,6 @@ use crate::actions::{Action, SimpleAction};
 use crate::models::Card;
 use crate::move_generation::generate_possible_actions;
 use crate::state::State;
-use crate::tool_ids::ToolId;
 
 // --- Constants ---
 
@@ -81,26 +80,27 @@ pub const ACTION_SPACE_SIZE: usize = 175;
 struct HandMaps {
     /// Card ID -> hand index
     card_index: HashMap<String, usize>,
-    /// ToolId -> hand index (for tools specifically)
-    tool_index: HashMap<ToolId, usize>,
+    /// Tool card ID -> hand index (for tools specifically)
+    tool_index: HashMap<String, usize>,
 }
 
 /// Build index maps from the current player's hand.
 ///
 /// This creates two maps:
 /// - `card_index`: Maps card IDs to their position in hand
-/// - `tool_index`: Maps ToolIds to their position in hand (first occurrence only)
+/// - `tool_index`: Maps tool card IDs to their position in hand (first occurrence only)
 fn build_hand_maps(hand: &[Card]) -> HandMaps {
     let mut card_index = HashMap::with_capacity(hand.len());
     let mut tool_index = HashMap::new();
 
     for (idx, card) in hand.iter().enumerate() {
-        card_index.insert(card.get_id(), idx);
+        let card_id = card.get_id();
+        card_index.insert(card_id.clone(), idx);
 
         if let Card::Trainer(t) = card {
-            if let Some(tool_id) = ToolId::from_trainer_card(t) {
+            if t.trainer_card_type == crate::models::TrainerType::Tool {
                 // First occurrence wins (lowest index)
-                tool_index.entry(*tool_id).or_insert(idx);
+                tool_index.entry(card_id).or_insert(idx);
             }
         }
     }
@@ -236,10 +236,10 @@ fn action_to_index(action: &SimpleAction, maps: &HandMaps) -> Option<usize> {
         // Attach Tool (Targeted)
         SimpleAction::AttachTool {
             in_play_idx,
-            tool_id,
+            tool_card,
         } => {
             // Try to find the tool in hand (Direct Play)
-            if let Some(&idx) = maps.tool_index.get(tool_id) {
+            if let Some(&idx) = maps.tool_index.get(&tool_card.get_id()) {
                 if idx < 20 && *in_play_idx <= 3 {
                     // Hand Action: Play from Hand to Slot
                     Some(30 + (idx * 5) + 1 + in_play_idx)
@@ -273,8 +273,8 @@ fn action_to_index(action: &SimpleAction, maps: &HandMaps) -> Option<usize> {
         }
 
         // Hand Resolution Actions (Select Hand Card)
-        SimpleAction::DiscardOwnCard { card } => {
-            maps.card_index.get(&card.get_id()).and_then(|&idx| {
+        SimpleAction::DiscardOwnCards { cards } => {
+            maps.card_index.get(&cards.first().unwrap().get_id()).and_then(|&idx| {
                 if idx < 20 {
                     Some(140 + idx)
                 } else {
@@ -314,6 +314,8 @@ fn action_to_index(action: &SimpleAction, maps: &HandMaps) -> Option<usize> {
             is_turn_energy: false,
             ..
         } => Some(168), // Non-turn attach
+        SimpleAction::HealAndDiscardEnergy { .. } => Some(169),
+        SimpleAction::ReturnPokemonToHand { .. } => Some(170),
     };
 
     if index.is_none() {

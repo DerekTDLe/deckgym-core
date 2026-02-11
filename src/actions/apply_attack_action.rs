@@ -7,7 +7,7 @@ use crate::{
         apply_action_helpers::{handle_damage, handle_knockouts},
         apply_evolve,
         attack_helpers::{
-            collect_in_play_indices_by_type, energy_any_way_choices, generate_distributions,
+            collect_in_play_indices_by_type, energy_any_way_choices,
         },
         attacks::{BenchSide, Mechanic},
         effect_ability_mechanic_map::ability_mechanic_from_effect,

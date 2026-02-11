@@ -325,7 +325,17 @@ fn apply_heal_and_discard_energy(
     if healed == 0 {
         return;
     }
-    state.discard_energy_from_in_play(acting_player, position, discard_energies);
+    // Discard energy inline since the method doesn't exist on State
+    if !discard_energies.is_empty() {
+        let pokemon = state.in_play_pokemon[acting_player][position]
+            .as_mut()
+            .expect("Pokemon should be there if discarding energy from it");
+        for energy_type in discard_energies {
+            if let Some(pos) = pokemon.attached_energy.iter().position(|e| e == energy_type) {
+                pokemon.attached_energy.remove(pos);
+            }
+        }
+    }
 }
 
 fn apply_move_all_damage(actor: usize, state: &mut State, from: usize, to: usize) {
@@ -425,10 +435,8 @@ pub(crate) fn apply_evolve(
             panic!("Basic pokemon do not evolve from others...");
         }
 
-        let damage_taken = from_pokemon
-            .get_effective_total_hp()
-            .saturating_sub(from_pokemon.remaining_hp);
-        played_card.remaining_hp = played_card.remaining_hp.saturating_sub(damage_taken);
+        let damage_taken = from_pokemon.get_damage_counters();
+        played_card.apply_damage(damage_taken);
         played_card.attached_energy = from_pokemon.attached_energy.clone();
         played_card.attached_tool = from_pokemon.attached_tool.clone();
         played_card.cards_behind = from_pokemon.cards_behind.clone();

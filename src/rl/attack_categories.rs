@@ -4,7 +4,7 @@
 // to enable generalization in the RL observation tensor.
 
 /// TODO : refine the categories, it is a simple implementation
-use crate::actions::Mechanic;
+use crate::actions::attacks::Mechanic;
 
 /// Categories of attack effects for observation encoding.
 /// An attack can belong to multiple categories.
@@ -79,7 +79,7 @@ pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffe
         Mechanic::SelfDiscardEnergy { .. } => &[EnergyDiscard],
         Mechanic::SelfDiscardAllEnergy => &[EnergyDiscard],
         Mechanic::SelfDiscardRandomEnergy => &[EnergyDiscard, Variance, Disruption],
-        Mechanic::DiscardRandomGlobalEnergy => &[EnergyDiscard, Variance, Disruption],
+        Mechanic::DiscardRandomGlobalEnergy { .. } => &[EnergyDiscard, Variance, Disruption],
         Mechanic::DiscardEnergyFromOpponentActive => &[EnergyDiscard, Disruption],
         Mechanic::SelfChargeActive { .. } => &[EnergyGeneration],
         Mechanic::ChargeBench { .. } => &[EnergyGeneration],
@@ -139,6 +139,11 @@ pub fn get_attack_effect_categories(mechanic: &Mechanic) -> &'static [AttackEffe
         Mechanic::SearchToHandSupporterCard => &[CardAdvantage],
         Mechanic::MoveAllEnergyTypeToBench { .. } => &[EnergyGeneration],
         Mechanic::ExtraDamagePerRetreatCost { .. } => &[ConditionalDamage],
+        Mechanic::ChargeYourTypeAnyWay { .. } => &[EnergyGeneration],
+        Mechanic::MegaKangaskhanExDoublePunchingFamily => &[Variance],
+        Mechanic::ExtraDamagePerSupporterInDiscard { .. } => &[ConditionalDamage],
+        Mechanic::DrawCard { .. } => &[CardAdvantage],
+        Mechanic::DiscardHandCards { .. } => &[EnergyDiscard, Disruption],
     }
 }
 
