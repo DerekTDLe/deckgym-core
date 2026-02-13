@@ -45,4 +45,6 @@ MECH_MAP = {
     "bench": ["bench", "benched"],
     "your": ["your", "you"],
     "opponent": ["opponent", "opponent's"],
+    "stadium": ["stadium"],
+    "fossil": ["fossil"],
 }

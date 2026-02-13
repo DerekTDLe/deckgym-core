@@ -98,11 +98,12 @@ class PocketMapper:
         
         def get_text_data(text: str) -> Dict:
             """Get embedding data for a text, with fallback."""
+            from .config import TYPE_MAP, MECH_MAP
             if not text:
                 return {
                     "embedding": [0.0] * embedding_dim,
-                    "type_refs": [0.0] * 9,
-                    "mech_refs": [0.0] * 9,
+                    "type_refs": [0.0] * len(TYPE_MAP),
+                    "mech_refs": [0.0] * len(MECH_MAP),
                 }
             
             cleaned = cleaner.clean(text)

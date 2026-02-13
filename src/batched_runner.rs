@@ -11,6 +11,7 @@
 use indicatif::ProgressBar;
 use rand::{rngs::StdRng, SeedableRng};
 use rayon::prelude::*;
+#[cfg(feature = "onnx")]
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -19,10 +20,7 @@ use crate::{
     deck::Deck,
     generate_possible_actions,
     players::{create_players, Player, PlayerCode},
-    rl::{
-        get_action_mask, get_indexed_actions, get_observation_tensor, ACTION_SPACE_SIZE,
-        OBSERVATION_SIZE,
-    },
+    rl::{ACTION_SPACE_SIZE, OBSERVATION_SIZE},
     simulate::create_progress_bar,
     state::{GameOutcome, State},
 };
@@ -103,8 +101,10 @@ impl GameInstance {
 /// Pre-allocated buffers for batched operations
 struct BatchBuffers {
     /// Observation buffer: n_games * OBSERVATION_SIZE
+    #[allow(dead_code)]
     observations: Vec<f32>,
     /// Action mask buffer: n_games * ACTION_SPACE_SIZE
+    #[allow(dead_code)]
     masks: Vec<bool>,
     /// Active game indices buffer
     active_indices: Vec<usize>,

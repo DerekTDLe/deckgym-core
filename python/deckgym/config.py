@@ -26,10 +26,10 @@ import json
 # =============================================================================
 
 # Card features
-GLOBAL_FEATURES = 42  # 1 turn + 3 points + 2 deck + 2 hand + 2 discard + 32 deck_energy
-FEATURES_PER_CARD = 343
+GLOBAL_FEATURES = 171  # 1 turn + 3 points + 2 deck + 2 hand + 2 discard + 32 deck_energy + 1 has_stadium + 128 stadium_emb
+FEATURES_PER_CARD = 603
 MAX_CARDS_IN_GAME = 40
-OBSERVATION_SIZE = GLOBAL_FEATURES + (MAX_CARDS_IN_GAME * FEATURES_PER_CARD)  # 13762
+OBSERVATION_SIZE = GLOBAL_FEATURES + (MAX_CARDS_IN_GAME * FEATURES_PER_CARD)  # 24291
 
 # Action space
 ACTION_SPACE_SIZE = 175  # Must match src/rl/action_mask.rs

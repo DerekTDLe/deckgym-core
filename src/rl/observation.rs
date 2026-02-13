@@ -1,5 +1,5 @@
-// Observation Tensor Generation - V4: Comprehensive Text-Enhanced Encoding
-// TODO: Add support for Stadium cards. Extend text embeddings size. Will be in V5
+// Observation Tensor Generation - V5: Stadium Card Support
+// V5 adds active stadium encoding (128-dim text embedding + 1 presence flag) to global features.
 
 use std::collections::HashMap;
 use lazy_static::lazy_static;
@@ -38,7 +38,7 @@ lazy_static! {
     
     static ref EMPTY_EMBEDDING: Vec<f32> = vec![0.0; 128];
     static ref EMPTY_TYPE_REFS: Vec<f32> = vec![0.0; 9];
-    static ref EMPTY_MECH_REFS: Vec<f32> = vec![0.0; 9];
+    static ref EMPTY_MECH_REFS: Vec<f32> = vec![0.0; 11];
 }
 
 fn encode_meta(card_id: &str, ready: f32, obs: &mut Vec<f32>) {
@@ -70,21 +70,23 @@ pub const MAX_CARDS_IN_OBS: usize = 40;
 
 // --- Feature Dimensions ---
 
-pub const FEATURES_PER_CARD: usize = 535;
+pub const FEATURES_PER_CARD: usize = 603;
 // Breakdown:
-// 1 (hp) + 11 (types) + 9 (weakness) + 6 (flags: ex, mega, pokemon, tool, trainer, item)
+// 1 (hp) + 11 (types) + 9 (weakness) + 8 (flags: ex, mega, pokemon, tool, trainer, item, stadium, fossil)
 // + 8 (meta: line_size (4: None,1,2,3), is_final (3: None,F,T), ready) + 1 (retreat) + 4 (status)
 // + 138 (atk1: 1 dmg, 128 emb, 9 en) + 138 (atk2: 1 dmg, 128 emb, 9 en)
 // + 128 (talent emb) + 4 (location one-hot) + 4 (slot one-hot) + 1 (allied) + 128 (supporter emb)
-// + 9 (type references) + 9 (mechanic references)
-// = 535
+// + 9 (type references) + 11 (mechanic references)
+// = 603
 
 pub const GLOBAL_FEATURES: usize = 1   // turn count
     + 3                                 // points (diff, self, opponent)
     + 2                                 // deck sizes (self, opponent)
     + 2                                 // hand sizes (self, opponent)
     + 2                                 // discard sizes (self, opponent)
-    + 32;                               // energy generated (2 players * 2 slots * 8 units)
+    + 32                                // energy generated (2 players * 2 slots * 8 units)
+    + 1                                 // has_stadium flag
+    + 128;                              // stadium text embedding
 
 pub const OBSERVATION_SIZE: usize = GLOBAL_FEATURES + (MAX_CARDS_IN_OBS * FEATURES_PER_CARD);
 
@@ -210,25 +212,41 @@ fn encode_global_features(state: &State, perspective: usize, obs: &mut Vec<f32>)
             }
         }
     }
+
+    // Stadium encoding (129 dims: 1 flag + 128 embedding)
+    if let Some(stadium_card) = &state.active_stadium {
+        obs.push(1.0); // has_stadium flag
+        let card_id = stadium_card.get_id();
+        if let Some(f) = CARD_FEATURES_MAP.get(&card_id) {
+            obs.extend_from_slice(&f.supporter.embedding);
+        } else {
+            obs.extend_from_slice(&EMPTY_EMBEDDING);
+        }
+    } else {
+        obs.push(0.0); // no stadium
+        obs.extend_from_slice(&EMPTY_EMBEDDING);
+    }
 }
 
 fn encode_played_card(p: &PlayedCard, state: &State, loc: usize, allied: f32, slot: Option<usize>, obs: &mut Vec<f32>) {
     let card_id = p.get_id();
     let mut type_refs = [0.0; 9];
-    let mut mech_refs = [0.0; 9];
+    let mut mech_refs = [0.0; 11];
     
     // Properties
     obs.push(p.get_remaining_hp() as f32); // HP raw
     encode_type_one_hot(p.get_energy_type(), obs); // Types 11
     encode_weakness_one_hot(p.card.get_weakness(), obs); // Weakness 9
     
-    // Flags 6
+    // Flags 8
     obs.push(if p.card.is_ex() { 1.0 } else { 0.0 });
     obs.push(if p.card.is_mega() { 1.0 } else { 0.0 });
     obs.push(if matches!(p.card, Card::Pokemon(_)) { 1.0 } else { 0.0 });
     obs.push(p.card.is_tool() as i32 as f32);
     obs.push(if matches!(p.card, Card::Trainer(_)) { 1.0 } else { 0.0 });
     obs.push(p.card.is_item() as i32 as f32);
+    obs.push(p.card.is_stadium() as i32 as f32);
+    obs.push(p.card.is_fossil() as i32 as f32);
 
     // Meta 8
     let ready = if p.played_this_turn { 0.0 } else { 1.0 };
@@ -281,11 +299,16 @@ fn encode_played_card(p: &PlayedCard, state: &State, loc: usize, allied: f32, sl
     for i in 0..4 { obs.push(if slot == Some(i) { 1.0 } else { 0.0 }); }
     obs.push(allied);
 
-    // Supporter 64
-    if let (Card::Trainer(_), Some(f)) = (&p.card, features) {
-        obs.extend_from_slice(&f.supporter.embedding);
-        merge_refs(&mut type_refs, &f.supporter.type_refs);
-        merge_refs(&mut mech_refs, &f.supporter.mech_refs);
+    // Supporter embedding 128 — skip for fossils (identical text, no information)
+    let is_fossil = p.card.is_fossil();
+    if !is_fossil {
+        if let (Card::Trainer(_), Some(f)) = (&p.card, features) {
+            obs.extend_from_slice(&f.supporter.embedding);
+            merge_refs(&mut type_refs, &f.supporter.type_refs);
+            merge_refs(&mut mech_refs, &f.supporter.mech_refs);
+        } else {
+            obs.extend_from_slice(&EMPTY_EMBEDDING);
+        }
     } else {
         obs.extend_from_slice(&EMPTY_EMBEDDING);
     }
@@ -298,7 +321,7 @@ fn encode_played_card(p: &PlayedCard, state: &State, loc: usize, allied: f32, sl
 fn encode_static_card(c: &Card, loc: usize, allied: f32, slot: Option<usize>, obs: &mut Vec<f32>) {
     let card_id = c.get_id();
     let mut type_refs = [0.0; 9];
-    let mut mech_refs = [0.0; 9];
+    let mut mech_refs = [0.0; 11];
     
     match c {
         Card::Pokemon(pk) => {
@@ -312,6 +335,8 @@ fn encode_static_card(c: &Card, loc: usize, allied: f32, slot: Option<usize>, ob
             obs.push(0.0); // is_tool
             obs.push(0.0); // is_trainer
             obs.push(0.0); // is_item
+            obs.push(0.0); // is_stadium
+            obs.push(0.0); // is_fossil
             
             // Meta 8
             encode_meta(&card_id, 0.0, obs);
@@ -344,6 +369,29 @@ fn encode_static_card(c: &Card, loc: usize, allied: f32, slot: Option<usize>, ob
                 obs.extend_from_slice(&EMPTY_EMBEDDING);
             }
         },
+        Card::Trainer(t) if t.trainer_card_type == crate::models::TrainerType::Fossil => {
+            // Fossils are special Pokemon: Colorless type, Fighting weakness,
+            // fixed 40 HP, no attacks, but meaningful evolution line metadata
+            obs.push(40.0); // HP always 40
+            encode_type_one_hot(Some(EnergyType::Colorless), obs);
+            encode_weakness_one_hot(Some(EnergyType::Fighting), obs);
+            
+            obs.push(0.0); // ex
+            obs.push(0.0); // mega
+            obs.push(0.0); // pokemon
+            obs.push(0.0); // tool
+            obs.push(1.0); // trainer
+            obs.push(0.0); // item
+            obs.push(0.0); // stadium
+            obs.push(1.0); // fossil
+            
+            // Meta 8 — fossils have meaningful line_size and is_final_stage
+            encode_meta(&card_id, 0.0, obs);
+            obs.push(0.0); // retreat
+            obs.extend_from_slice(&[0.0; 4]); // no status
+            obs.extend_from_slice(&[0.0; 276]); // no attacks
+            obs.extend_from_slice(&EMPTY_EMBEDDING); // no talent
+        },
         Card::Trainer(_) => {
             obs.push(0.0); // hp
             encode_type_one_hot(None, obs);
@@ -355,6 +403,8 @@ fn encode_static_card(c: &Card, loc: usize, allied: f32, slot: Option<usize>, ob
             obs.push(c.is_tool() as i32 as f32);
             obs.push(1.0); // trainer
             obs.push(c.is_item() as i32 as f32);
+            obs.push(c.is_stadium() as i32 as f32);
+            obs.push(0.0); // fossil
             
             // Meta 8 + Retreat 1
             encode_meta(&card_id, 0.0, obs);
@@ -370,11 +420,16 @@ fn encode_static_card(c: &Card, loc: usize, allied: f32, slot: Option<usize>, ob
     for i in 0..4 { obs.push(if slot == Some(i) { 1.0 } else { 0.0 }); }
     obs.push(allied);
 
-    // Supporter 64
-    if let (Card::Trainer(_), Some(f)) = (c, CARD_FEATURES_MAP.get(&card_id)) {
-        obs.extend_from_slice(&f.supporter.embedding);
-        merge_refs(&mut type_refs, &f.supporter.type_refs);
-        merge_refs(&mut mech_refs, &f.supporter.mech_refs);
+    // Supporter embedding 128 — skip for fossils (identical text, no information)
+    let is_fossil_card = c.is_fossil();
+    if !is_fossil_card {
+        if let (Card::Trainer(_), Some(f)) = (c, CARD_FEATURES_MAP.get(&card_id)) {
+            obs.extend_from_slice(&f.supporter.embedding);
+            merge_refs(&mut type_refs, &f.supporter.type_refs);
+            merge_refs(&mut mech_refs, &f.supporter.mech_refs);
+        } else {
+            obs.extend_from_slice(&EMPTY_EMBEDDING);
+        }
     } else {
         obs.extend_from_slice(&EMPTY_EMBEDDING);
     }
@@ -386,8 +441,8 @@ fn encode_static_card(c: &Card, loc: usize, allied: f32, slot: Option<usize>, ob
 
 // --- Utils ---
 
-fn merge_refs(target: &mut [f32; 9], source: &[f32]) {
-    for i in 0..9 {
+fn merge_refs<const N: usize>(target: &mut [f32; N], source: &[f32]) {
+    for i in 0..N.min(source.len()) {
         if source[i] > 0.5 {
             target[i] = 1.0;
         }
@@ -456,6 +511,7 @@ fn deck_energy_types() -> [EnergyType; 8] {
 trait CardExt {
     fn is_tool(&self) -> bool;
     fn is_item(&self) -> bool;
+    fn is_stadium(&self) -> bool;
     fn get_weakness(&self) -> Option<EnergyType>;
 }
 
@@ -469,6 +525,12 @@ impl CardExt for Card {
     fn is_item(&self) -> bool {
         match self {
             Card::Trainer(t) => t.trainer_card_type == crate::models::TrainerType::Item,
+            _ => false,
+        }
+    }
+    fn is_stadium(&self) -> bool {
+        match self {
+            Card::Trainer(t) => t.trainer_card_type == crate::models::TrainerType::Stadium,
             _ => false,
         }
     }
@@ -491,7 +553,6 @@ mod tests {
     #[test]
     fn test_observation_size() {
         let state = State::default();
-        let obs = get_observation_tensor(&state, 0);
-        assert_eq!(obs.len(), OBSERVATION_SIZE);
+        assert_eq!(get_observation_tensor(&state, 0).len(), OBSERVATION_SIZE);
     }
 }

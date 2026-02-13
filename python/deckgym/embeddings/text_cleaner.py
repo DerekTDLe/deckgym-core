@@ -85,14 +85,14 @@ class TextCleaner:
             text: Original card effect text
             
         Returns:
-            9-dimensional binary vector of mechanic references
+            Binary vector of mechanic references (dimension = len(MECH_MAP))
         """
         if not text:
-            return [0.0] * 9
+            return [0.0] * len(MECH_MAP)
         
         text_lower = text.lower()
-        refs = [0.0] * 9
-        keys = ["poison", "paralyze", "sleep", "burn", "confuse", "active", "bench", "your", "opponent"]
+        keys = list(MECH_MAP.keys())
+        refs = [0.0] * len(keys)
         
         for i, key in enumerate(keys):
             for keyword in MECH_MAP[key]:
