@@ -12,7 +12,10 @@ checkpoints/
 models/arena/
 eval_reports/*.json
 logs/
+
+# Raw data
 src/rl/generated/embeddings.json
 src/rl/generated/card_metadata.json
 src/rl/generated/names.json
 python/deckgym/embeddings/data
+src/rl/generated/card_features.json
