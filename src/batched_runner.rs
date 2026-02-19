@@ -20,7 +20,10 @@ use crate::{
     deck::Deck,
     generate_possible_actions,
     players::{create_players, Player, PlayerCode},
-    rl::{ACTION_SPACE_SIZE, OBSERVATION_SIZE},
+    rl::{
+        get_action_mask, get_indexed_actions, get_observation_tensor, ACTION_SPACE_SIZE,
+        OBSERVATION_SIZE,
+    },
     simulate::create_progress_bar,
     state::{GameOutcome, State},
 };

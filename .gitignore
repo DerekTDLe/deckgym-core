@@ -19,3 +19,5 @@ src/rl/generated/card_metadata.json
 src/rl/generated/names.json
 python/deckgym/embeddings/data
 src/rl/generated/card_features.json
+ultimate-archetypes.json
+ultimate-archetypes-clean.json
